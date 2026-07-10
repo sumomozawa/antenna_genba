@@ -1,0 +1,2025 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0d47a1">
+<!-- ホーム画面に追加でアプリ風フルスクリーン（iPhone Safari / Android Chrome） -->
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="現場入力">
+<title>現場入力 — 戸別調書（スマホ）</title>
+<!--
+  ============================================================================
+  現場入力.html  —  スマホ（Android・縦画面）特化の戸別調書入力アプリ
+  ----------------------------------------------------------------------------
+  ・原本 index.html の collectState() と完全互換の「管理番号.json」を出力
+  ・写真はカメラ原本(dataURI・再圧縮なし=無劣化)を chosho_photos に格納
+  ・選択肢/既定値は index.html から 2026-07-07 に抽出（下の FIELD 定義）。
+    ※ index.html 側の選択肢を変えたら、この FIELD 定義も同期すること。
+  ・図面は描かず、「配線チェックリスト(線色)」＋「赤文字メモ」で
+    wire_overrides / text_annotations を作る（PCの index.html で図面に反映）。
+  ============================================================================
+-->
+<style>
+  :root{
+    --bg:#eef1f5; --card:#fff; --line:#d4dae2; --ink:#1a2430; --sub:#5b6673;
+    --accent:#0d47a1; --accent2:#1565c0; --red:#d32f2f; --green:#2e7d32;
+    --warn:#e65100; --radius:12px;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  html,body{margin:0; padding:0;}
+  body{
+    font-family:-apple-system,"Segoe UI",Roboto,"Noto Sans JP","Hiragino Kaku Gothic ProN",Meiryo,sans-serif;
+    background:var(--bg); color:var(--ink); font-size:16px; line-height:1.5;
+    padding-bottom:88px; -webkit-text-size-adjust:100%;
+  }
+  /* ---- 上部バー ---- */
+  header{
+    position:sticky; top:0; z-index:50; background:var(--accent); color:#fff;
+    padding:calc(env(safe-area-inset-top) + 8px) 10px 8px; display:flex; align-items:center; gap:6px;
+    box-shadow:0 2px 6px rgba(0,0,0,.2);
+  }
+  header .ttl{font-weight:700; font-size:14px; flex:1; min-width:44px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; line-height:1.2;}
+  header .mgmt{font-size:11.5px; opacity:.9; display:block; font-weight:400; overflow:hidden; text-overflow:ellipsis;}
+  header button{
+    background:#fff; color:var(--accent); border:0; border-radius:9px; font-weight:700;
+    padding:7px 8px; font-size:12.5px; min-height:38px; flex:none; white-space:nowrap;
+  }
+  header button.ghost{background:rgba(255,255,255,.16); color:#fff;}
+  /* ---- セクション（アコーディオン）---- */
+  .sec{background:var(--card); margin:10px 8px; border:1px solid var(--line); border-radius:var(--radius); overflow:hidden;}
+  .sec>.head{
+    display:flex; align-items:center; gap:8px; padding:14px 14px; cursor:pointer; user-select:none;
+    font-weight:700; font-size:16px; background:linear-gradient(#fff,#f6f8fb);
+  }
+  .sec>.head .ico{font-size:19px;}
+  .sec>.head .chev{margin-left:auto; transition:transform .18s; color:var(--sub); font-size:13px;}
+  .sec>.head .badge{font-size:11px; color:var(--sub); font-weight:600; background:#eef2f7; padding:2px 8px; border-radius:20px;}
+  .sec.open>.head .chev{transform:rotate(90deg);}
+  .sec>.body{display:none; padding:6px 14px 16px; border-top:1px solid var(--line);}
+  .sec.open>.body{display:block;}
+  /* ---- フィールド ---- */
+  .fld{margin:12px 0;}
+  .fld>label{display:block; font-size:13.5px; color:var(--sub); font-weight:600; margin-bottom:5px;}
+  .fld .hint{font-size:11.5px; color:var(--sub); font-weight:400; margin-top:4px;}
+  select,input[type=text],input[type=number],input[type=date],input[type=tel],textarea{
+    width:100%; font-size:16px; padding:12px 12px; border:1.5px solid var(--line);
+    border-radius:10px; background:#fff; color:var(--ink); appearance:none;
+    -webkit-appearance:none; min-height:48px;
+  }
+  select{
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8'><path d='M1 1l5 5 5-5' stroke='%235b6673' stroke-width='2' fill='none'/></svg>");
+    background-repeat:no-repeat; background-position:right 14px center; padding-right:36px;
+  }
+  textarea{min-height:70px; resize:vertical;}
+  input:focus,select:focus,textarea:focus{outline:none; border-color:var(--accent2); box-shadow:0 0 0 3px rgba(21,101,192,.15);}
+  .fld.req>label::after{content:" ✽"; color:var(--red);}
+  /* 住所＋地図ボタン */
+  .addr-row{display:flex; gap:8px; align-items:stretch;}
+  .addr-row input{flex:1; min-width:0;}
+  .map-btn{flex:0 0 auto; display:flex; align-items:center; justify-content:center; gap:2px;
+    min-height:48px; padding:0 14px; border-radius:10px; background:var(--green); color:#fff;
+    font-weight:700; font-size:14px; text-decoration:none; white-space:nowrap;}
+  .map-btn.disabled{opacity:.4; pointer-events:none;}
+  /* セグメント（はい/いいえ等の2〜3択を大ボタン化）*/
+  .seg{display:flex; gap:6px; flex-wrap:wrap;}
+  .seg button{
+    flex:1 1 auto; min-width:70px; min-height:48px; border:1.5px solid var(--line); background:#fff;
+    color:var(--ink); border-radius:10px; font-size:14.5px; font-weight:600; padding:8px 6px;
+  }
+  .seg button.on{background:var(--accent); color:#fff; border-color:var(--accent);}
+  .seg button.on.red{background:var(--red); border-color:var(--red);}
+  .row2{display:grid; grid-template-columns:1fr 1fr; gap:10px;}
+  .row3{display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px;}
+  .subhdr{font-size:12.5px; font-weight:700; color:var(--accent); margin:16px 0 4px; border-bottom:1px dashed var(--line); padding-bottom:4px;}
+  /* ---- TV行 ---- */
+  .tvrow{border:1px solid var(--line); border-radius:10px; padding:10px; margin:10px 0; background:#fafbfd;}
+  .tvrow .tvhd{font-weight:700; font-size:13px; color:var(--accent); margin-bottom:6px; display:flex; align-items:center; gap:8px;}
+  .tvrow .bd{margin-left:auto; font-size:13px; font-weight:600; display:flex; align-items:center; gap:5px; color:var(--ink);}
+  .tvrow .bd input{width:22px; height:22px;}
+  /* ---- 電波測定表 ---- */
+  .meas-loc{font-size:13px; font-weight:700; color:var(--accent); margin:14px 0 4px; border-bottom:1px dashed var(--line); padding-bottom:4px; display:flex; align-items:center; justify-content:space-between; gap:8px;}
+  .meas-row{display:grid; grid-template-columns:1.5fr 1fr 1fr 1.3fr; gap:5px; align-items:center; margin:5px 0;}
+  .meas-row .ch{font-size:12px; color:var(--sub); font-weight:600; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .meas-row.meas-head{font-size:11px; color:var(--sub); font-weight:700;}
+  .meas-row.meas-head span{text-align:center;}
+  .meas-row input{min-height:42px; padding:8px 3px; font-size:16px; text-align:center; border:1.5px solid var(--line); border-radius:8px; width:100%;}
+  /* ---- 配線チェックリスト ---- */
+  .wire{display:flex; align-items:center; gap:8px; padding:9px 4px; border-bottom:1px solid #eef1f5;}
+  .wire .nm{flex:1; font-size:14px;}
+  .wire .tg{display:flex; gap:4px;}
+  .wire .tg button{min-width:58px; min-height:40px; border:1.5px solid var(--line); background:#fff; border-radius:8px; font-size:13px; font-weight:700;}
+  .wire .tg button.new{color:var(--red);} .wire .tg button.exist{color:#333;}
+  .wire .tg button.on.new{background:var(--red); color:#fff; border-color:var(--red);}
+  .wire .tg button.on.exist{background:#37474f; color:#fff; border-color:#37474f;}
+  /* ---- 写真 ---- */
+  .photos{display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:6px;}
+  .photo{border:1px solid var(--line); border-radius:10px; overflow:hidden; background:#fff; position:relative;}
+  .photo img{width:100%; height:150px; object-fit:cover; display:block; background:#222;}
+  .photo .lbl{font-size:12px; padding:7px 8px; display:flex; align-items:center; gap:6px;}
+  .photo .lbl input{border:0; padding:6px; font-size:16px; min-height:38px; background:#f4f6f9; border-radius:6px; width:100%;}
+  .photo .del{position:absolute; top:6px; right:6px; background:rgba(0,0,0,.6); color:#fff; border:0; border-radius:20px; width:30px; height:30px; font-size:16px;}
+  .photo .idx{position:absolute; top:6px; left:6px; background:rgba(13,71,161,.85); color:#fff; font-size:11px; font-weight:700; padding:2px 7px; border-radius:20px;}
+  .addphoto{display:flex; gap:10px; margin:12px 0;}
+  .addphoto label{flex:1; text-align:center; background:var(--green); color:#fff; font-weight:700; padding:15px; border-radius:12px; font-size:15px;}
+  /* ---- 赤文字メモ ---- */
+  .note{display:flex; gap:8px; align-items:center; margin:8px 0;}
+  .note input{flex:1; color:var(--red); font-weight:600;}
+  .note button{background:#f4f6f9; border:1px solid var(--line); border-radius:8px; width:44px; min-height:44px; font-size:16px;}
+  /* ---- 下部バー ---- */
+  .footbar{
+    position:fixed; left:0; right:0; bottom:0; z-index:60; display:flex; gap:8px;
+    padding:10px 10px calc(env(safe-area-inset-bottom) + 10px); background:rgba(255,255,255,.96);
+    border-top:1px solid var(--line); backdrop-filter:blur(6px);
+  }
+  .footbar button{flex:1; min-height:52px; border:0; border-radius:12px; font-weight:700; font-size:15px;}
+  .footbar .save{background:var(--accent); color:#fff; flex:2;}
+  .footbar .list{background:#eef2f7; color:var(--accent);}
+  .footbar .neww{background:#eef2f7; color:var(--ink);}
+  .savedhint{position:fixed; bottom:78px; left:50%; transform:translateX(-50%); background:#263238; color:#fff; font-size:13px; padding:8px 16px; border-radius:20px; opacity:0; transition:opacity .25s; z-index:70; pointer-events:none;}
+  .savedhint.show{opacity:1;}
+  /* ---- モーダル（下書き一覧）---- */
+  .modal{position:fixed; inset:0; z-index:100; background:rgba(0,0,0,.5); display:none; align-items:flex-end;}
+  .modal.open{display:flex;}
+  .modal .sheet{background:#fff; width:100%; max-height:85vh; border-radius:16px 16px 0 0; overflow:auto; padding:16px;}
+  .modal h3{margin:4px 0 12px;}
+  .draft{display:flex; align-items:center; gap:10px; padding:12px 4px; border-bottom:1px solid var(--line);}
+  .draft .d-main{flex:1; min-width:0;}
+  .draft .d-no{font-weight:700;}
+  .draft .d-sub{font-size:12px; color:var(--sub);}
+  .draft .d-open{background:var(--accent); color:#fff; border:0; border-radius:8px; padding:8px 12px; font-weight:700; flex:none;}
+  .draft .d-check{width:24px; height:24px; flex:none;}
+  /* 複数選択削除のアクションバー */
+  .draft-actions{display:flex; align-items:center; justify-content:space-between; gap:10px; padding:6px 2px 12px; position:sticky; top:0; background:#fff; z-index:2;}
+  .d-selall{display:flex; align-items:center; gap:7px; font-size:14px; font-weight:600; color:var(--ink);}
+  .d-selall input{width:22px; height:22px;}
+  .d-delsel{background:var(--red); color:#fff; border:0; border-radius:9px; padding:10px 14px; font-weight:700; font-size:14px;}
+  .d-delsel:disabled{background:#e0e4ea; color:#9aa3ad;}
+  .closebtn{width:100%; margin-top:12px; padding:14px; border:0; border-radius:12px; background:#eef2f7; font-weight:700; font-size:15px;}
+  .tinybtn{background:#eef2f7; border:1px solid var(--line); border-radius:8px; padding:8px 12px; font-size:13px; font-weight:600; color:var(--accent);}
+  .info{font-size:12px; color:var(--sub); background:#f6f8fb; border:1px solid var(--line); border-radius:8px; padding:8px 10px; margin:8px 0;}
+  /* アプリ内ダイアログ（iOSのホーム画面アプリでは confirm/alert が無効なため自前UIで代替）*/
+  #ui-dialog{align-items:center; justify-content:center; padding:24px;}
+  #ui-dialog .dlg{background:#fff; width:100%; max-width:360px; border-radius:14px; padding:20px; box-shadow:0 12px 40px rgba(0,0,0,.35);}
+  .dlg-msg{font-size:15px; line-height:1.6; white-space:pre-wrap; margin-bottom:16px; color:var(--ink);}
+  .dlg-btns{display:flex; gap:10px;}
+  .dlg-btns button{flex:1; min-height:50px; border:0; border-radius:10px; font-size:16px; font-weight:700;}
+  .dlg-cancel{background:#eef2f7; color:var(--ink);}
+  .dlg-ok{background:var(--accent); color:#fff;}
+
+  /* ==ANTENNA-GUIDE-CORE START (編集元はindex.html。ENDまでを現場入力.htmlへ逐語コピー) == */
+  .apw-root{font-family:var(--font-voice,system-ui,'Segoe UI',sans-serif);color:var(--text-primary,#111);}
+  .apw-root *{box-sizing:border-box;}
+  .apw-head{margin-bottom:8px;}
+  .apw-head strong{font-size:16px;}
+  .apw-chips{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px;}
+  .apw-chips button{font:inherit;font-size:13px;padding:4px 12px;border:1px solid var(--border,#ccc);border-radius:999px;background:transparent;color:var(--text-primary,#111);cursor:pointer;}
+  .apw-chips button.on{background:#e60012;border-color:#e60012;color:#fff;}
+  .apw-chips button:disabled{opacity:.4;cursor:not-allowed;}
+  .apw-note{font-size:12px;color:var(--text-secondary,#888);margin-bottom:12px;min-height:16px;}
+  .apw-body{display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start;}
+  .apw-canvas{position:relative;flex:1 1 300px;min-width:260px;max-width:400px;}
+  .apw-canvas svg{width:100%;height:auto;display:block;}
+  .apw-side{flex:1 1 250px;min-width:230px;}
+  .apw-hint{font-size:13px;line-height:1.7;color:var(--text-secondary,#777);margin:0 0 12px;}
+  .apw-bom{width:100%;border-collapse:collapse;font-size:14px;}
+  .apw-bom th,.apw-bom td{border-bottom:1px solid var(--border,#e2e2e2);padding:6px 8px;text-align:left;}
+  .apw-bom th{font-size:12px;color:var(--text-secondary,#888);font-weight:600;}
+  .apw-bom td.q,.apw-bom th.q{text-align:right;width:56px;}
+  .apw-empty{color:var(--text-secondary,#999);text-align:center;font-size:13px;padding:14px 0;}
+  .apw-total{margin-top:10px;font-size:14px;}
+  .apw-total b{font-size:18px;color:#e60012;}
+  .apw-btns{display:flex;gap:8px;flex-wrap:wrap;margin-top:14px;}
+  .apw-btns button{font:inherit;font-size:13px;padding:6px 12px;border:1px solid var(--border,#ccc);border-radius:8px;background:transparent;color:var(--text-primary,#111);cursor:pointer;}
+  .apw-btns button:hover{background:rgba(127,127,127,0.12);}
+  .apw-hit{cursor:pointer;}
+  .apw-menu{position:absolute;z-index:20;background:var(--bg-elevated,#fff);border:1px solid var(--border,#ccc);border-radius:8px;box-shadow:0 6px 20px rgba(0,0,0,.22);padding:4px;min-width:132px;font-size:13px;display:flex;flex-direction:column;}
+  .apw-menu button{font:inherit;text-align:left;padding:6px 10px;border:none;background:transparent;border-radius:5px;cursor:pointer;color:var(--text-primary,#111);white-space:nowrap;}
+  .apw-menu button:hover{background:rgba(230,0,18,0.12);}
+  .apw-menu button.cur{color:#e60012;font-weight:600;}
+  .apw-menu hr{border:none;border-top:1px solid var(--border,#e2e2e2);margin:4px 2px;}
+  .apw-menu button.apw-menu-remove{color:var(--text-secondary,#888);}
+  .apw-menu button.apw-menu-remove:hover{background:rgba(127,127,127,0.15);}
+  @media (prefers-color-scheme:dark){.apw-menu{background:#2c2c2c;}}
+  :root[data-theme="dark"] .apw-menu{background:#2c2c2c;}
+  :root[data-theme="light"] .apw-menu{background:#fff;}
+  /* ==ANTENNA-GUIDE-CORE END== */
+</style>
+</head>
+<body>
+<header>
+  <div class="ttl">📡 現場入力
+    <span class="mgmt" id="hdr-mgmt">管理番号 未入力</span>
+  </div>
+  <button id="btn-new-top">＋新規</button>
+  <button class="ghost" id="btn-list">📋履歴・読込</button>
+  <button id="btn-save-top">💾保存</button>
+</header>
+
+<div id="app"></div>
+
+<div class="footbar">
+  <button class="neww" id="btn-new">＋新規</button>
+  <button class="list" id="btn-list2">📋履歴・読込</button>
+  <button class="save" id="btn-save">💾保存</button>
+</div>
+<div class="savedhint" id="savedhint">保存しました</div>
+
+<!-- 下書き一覧モーダル -->
+<div class="modal" id="draft-modal">
+  <div class="sheet">
+    <h3>📋 履歴・読込</h3>
+    <div class="info">現場で入力した内容は自動的にこの端末へ保存され、下に一覧表示されます（<b>💾</b>＝JSON書出済 ／ <b>✏️</b>＝書出後に変更あり＝再書出推奨 ／ 無印＝未書出）。<b>PCや他の端末で保存した「管理番号.json」を読み込んで続きを編集</b>したい時は、下のボタンから開けます。</div>
+    <button id="btn-import" style="width:100%; padding:15px; border:0; border-radius:11px; background:#455a64; color:#fff; font-weight:700; font-size:15px; margin-bottom:12px;">📂 保存済みJSONを開いて続きを編集</button>
+    <input type="file" id="import-file" accept=".json,application/json,*/*" style="display:none;">
+    <div id="draft-list"></div>
+    <button class="closebtn" id="draft-close">閉じる</button>
+  </div>
+</div>
+
+<!-- アプリ内ダイアログ（confirm/alertの代替・iOSホーム画面アプリ対応）-->
+<div class="modal" id="ui-dialog">
+  <div class="dlg">
+    <div class="dlg-msg" id="ui-dialog-msg"></div>
+    <div class="dlg-btns">
+      <button class="dlg-cancel" id="ui-dialog-cancel">キャンセル</button>
+      <button class="dlg-ok" id="ui-dialog-ok">OK</button>
+    </div>
+  </div>
+</div>
+
+<!-- 写真キャプチャ用の隠しinput（Android SAF対策で都度生成せず固定利用）-->
+<input type="file" id="cam-input" accept="image/*" capture="environment" multiple style="display:none;">
+<input type="file" id="pick-input" accept="image/*" multiple style="display:none;">
+<!-- 電波測定 CSV取込（LCV4A）用の隠しinput（固定利用・都度生成しない）-->
+<input type="file" id="csv-input" accept=".csv,text/csv,*/*" style="display:none;">
+
+<script>
+"use strict";
+/* ============================================================================
+   1) index.html から抽出した選択肢・既定値（2026-07-07 時点）
+   ============================================================================ */
+const OPT = {
+  work_type:[["new","新設（UHF）"],["replace","アンテナ更新"],["catv_to_uhf","CATV→UHF切替"]],
+  is_catv:[["no","いいえ"],["yes","はい（既設CATV）"]],
+  high_work:[["no","なし"],["yes","あり（高所作業車）"]],
+  snow_guard:[["no","なし"],["yes","あり"]],
+  indoor_adj:[["yes","あり"],["no","なし"]],
+  antenna_main:[["antenna_u206","U206（20素子）"],["antenna_u146","U146（14素子）"],["antenna_ls56","LS56"]],
+  antenna_46:[["","主と同型"],["antenna_u206","U206（20素子）"],["antenna_u146","U146（14素子）"],["antenna_ls56","LS56"]],
+  antenna_50:[["","主と同型"],["antenna_u206","U206（20素子）"],["antenna_u146","U146（14素子）"],["antenna_ls56","LS56"]],
+  ch46:[["no","1本（主のみ 八戸+二戸）"],["yes","2本（主 + 46CH専用三沢局）"],["triple","3本（14-24/46/50 個別）"]],
+  bs_cs:[["no","なし"],["yes","あり"]],
+  bs_antenna_state:[["new","新規"],["existing","既存利用"],["replace","交換（新規）"]],
+  bsmix_type:[["mixer","衛星ミキサー MXHWD"],["bc_amp","BC増幅器 BCBW35SS（混合+増幅）"]],
+  bsmix_state:[["new","新規"],["existing","既存利用"],["replace","交換（新規）"]],
+  mount_type:[["side_base_hafu","サイドベース（破風固定）"],["side_base_wall","サイドベース（壁面固定）"],["side_base_double","サイドベース縦並び（連結3.64m）"],["roof_base","ルーフベース"],["support_post","支持柱"]],
+  side_base_1:[["side_sb22s","SB22S（標準）"],["side_sb3220","SB3220"],["side_sb3230","SB3230"],["side_sb32k51","SB32K51"],["side_sb30s","SB30S"]],
+  side_base_2:[["none","なし"],["side_sb22s","SB22S"],["side_sb3220","SB3220"],["side_sb3230","SB3230"],["side_sb32k51","SB32K51"],["side_sb30s","SB30S"]],
+  side_base_3:[["none","なし"],["side_sb22s","SB22S"],["side_sb3220","SB3220"],["side_sb3230","SB3230"],["side_sb32k51","SB32K51"],["side_sb30s","SB30S"]],
+  mast:[["","なし"],["mast_m320z","M320Z（3.2m）"],["mast_m182z","M182Z（1.8m）"],["mast_m182z32","M182Z32（1.82m Φ31.8）"],["mast_m160z","M160Z（1.6m）"],["mast_m130z","M130Z（1.3m）"]],
+  mast_2:[["","なし"],["mast_m320z","M320Z（3.2m）"],["mast_m182z","M182Z（1.8m）"],["mast_m182z32","M182Z32（1.82m Φ31.8）"],["mast_m160z","M160Z（1.6m）"],["mast_m130z","M130Z（1.3m）"]],
+  mast_3:[["","なし"],["mast_m320z","M320Z（3.2m）"],["mast_m182z","M182Z（1.8m）"],["mast_m182z32","M182Z32（1.82m Φ31.8）"],["mast_m160z","M160Z（1.6m）"],["mast_m130z","M130Z（1.3m）"]],
+  connector_type:[["mj25s","MJ25S（φ25用）"],["mj32sp","MJ32S-P（φ31.8用）"]],
+  connector_qty:[["0","なし"],["1","1個"],["2","2個"],["3","3個"],["4","4個"]],
+  amplifier:[["amp_3u43","3U 3UB43-A04（3入力）"],["amp_1u45","1U UB45SS"],["amp_1ubc45","1UBC UBCBW45SS（UHF+BS対応）"]],
+  line_booster:[["no","なし"],["yes","UB18L"]],
+  hpf:[["no","なし"],["hpf_dtf","DTF-UPWS-FP-a"],["hpf_std","HPF（標準）"]],
+  outer_splitter:[["sp_2cw","2分配器WP SP2CW"],["sp_2cdw","2分配器WP SP2CDW（全通電）"],["sp_3cw","3分配器WP SP3CW"]],
+  indoor_split:[["unknown","既設分配（数不明・既存流用）"],["2","2分配（新規）"],["3","3分配（新規）"],["4","4分配（新規）"],["5","5分配（新規）"],["6","6分配（新規）"],["8","8分配（新規）"]],
+  split_all_pass:[["no","通常"],["yes","全通電"]],
+  power_pos:[["tv_back","TV背面"],["outside","外部（屋外コンセント・ボックス内）"],["near_splitter","分配器直下"],["other","その他"]],
+  indoor_wire:[["existing","既存を流用"],["new","新規に張替"]],
+  outer_wire:[["existing","既存を流用"],["new","新規に張替"]],
+  tv_count:[["1","1"],["2","2"],["3","3"],["4","4"],["5","5"],["6","6"],["8","8"]],
+  remove_safety:[["yes","あり（台は残置）"],["no","なし"]],
+  remove_drop:[["yes","あり"],["no","なし"]],
+  dummy_attached:[["yes","取付確認済"],["no","未取付（要確認）"]],
+  use_fa:[["yes","使用（保安器台に取付）"],["no","使用しない"]],
+  ext_power_conn:[["splitter_2","2分配器使用（メイン）"],["direct","電源部IN/OUT直結"]],
+  att_main:[["no","なし"],["att_w3","ATTW3 (-3dB)"],["att_w6","ATTW6 (-6dB)"],["att_w10","ATTW10 (-10dB)"]],
+  att_46:[["no","なし"],["att_w3","ATTW3 (-3dB)"],["att_w6","ATTW6 (-6dB)"],["att_w10","ATTW10 (-10dB)"]],
+  att_50:[["no","なし"],["att_w3","ATTW3 (-3dB)"],["att_w6","ATTW6 (-6dB)"],["att_w10","ATTW10 (-10dB)"]],
+  box_consent:[["no","なし"],["yes","WK1512K取付"]],
+  ofmu_qty:[["0","なし"],["1","1個"],["2","2個"],["3","3個"],["4","4個"]],
+  chosho_status:[["provisional","仮受付（電話メモ・清書待ち）"],["in_progress","未完了"],["completed","完了"]],
+  // TV各室
+  room:["居間","リビング","ダイニング","キッチン","寝室","主寝室","洋室1","洋室2","洋室3","洋室4","和室","和室1","和室2","子供部屋","書斎","客間","倉庫","納戸","廊下","その他"],
+  tv_sp:[["no","分配なし"],["new","分配(新規)"],["existing","分配(既存)"]],
+  tv_term:[["","壁端子：既存流用"],["tu_dwk10","DWK10（送）"],["tu_dwk10d","DWK10D（送）"],["tu_dwk8r","DWK8R（末端）"],["tu_dwm8r","DWM8R（末端）"],["tu_dwmt","DWMT"],["tu_dwmtd","DWMTD"]],
+  // 石綿
+  asb_date_source:[["kenchiku_kakunin","建築確認済証"],["registration","登記事項証明"],["other_doc","その他書類"],["hearing","聞取り"]],
+  asb_level:[["level3","レベル3"],["level2","レベル2"],["level1","レベル1"]],
+  asb_material:[["siding","窯業系サイディング"],["mortar","モルタル"],["als","ALC"],["other","その他"]],
+  asb_applicability:[["auto","自動判定"],["force_yes","含有あり(みなし含む)"],["force_no","含有なし"]],
+};
+const DEFAULT_ROOMS = ["居間","洋室1","洋室2","寝室","洋室3","洋室4","和室","その他"];
+const DEFAULT_MEASUREMENTS = {
+  channels:["14-2ch","18-6ch","20-3ch","22-1ch","24-5ch","46-11ch","50-8ch"],
+  antenna:[{db:47.8,mer:32,ber:0},{db:47.3,mer:32,ber:0},{db:43.7,mer:32,ber:0},{db:43,mer:32,ber:0},{db:40.8,mer:32,ber:0},{db:36.8,mer:32,ber:0},{db:38,mer:32,ber:0}],
+  amplifier:[{db:92.8,mer:32,ber:0},{db:92.3,mer:32,ber:0},{db:88.7,mer:32,ber:0},{db:88,mer:32,ber:0},{db:85.8,mer:32,ber:0},{db:81.8,mer:32,ber:0},{db:83,mer:32,ber:0}],
+  terminal:[{db:72.8,mer:32,ber:0},{db:72.3,mer:32,ber:0},{db:68.7,mer:30.8,ber:0},{db:68,mer:32,ber:0},{db:65.8,mer:30.5,ber:0},{db:61.8,mer:32,ber:0},{db:63,mer:32,ber:0}]
+};
+// フォーム既定値（新規戸別＝index.html の初期値と一致）
+const DEFAULTS = {
+  work_type:"catv_to_uhf",is_catv:"no",high_work:"yes",snow_guard:"no",indoor_adj:"yes",
+  antenna_main:"antenna_u206",antenna_46:"",antenna_50:"",ch46:"yes",bs_cs:"no",
+  bs_antenna_state:"new",bsmix_type:"mixer",bsmix_state:"new",mount_type:"side_base_hafu",
+  side_base_1:"side_sb22s",side_base_2:"none",side_base_3:"none",mast:"",mast_2:"",mast_3:"",
+  connector_type:"mj25s",connector_qty:"0",turnbuckle_qty:"4",amplifier:"amp_3u43",
+  line_booster:"no",hpf:"no",outer_splitter:"sp_2cw",indoor_split:"unknown",split_all_pass:"no",
+  power_pos:"tv_back",indoor_wire:"existing",outer_wire:"existing",tv_count:"4",
+  remove_safety:"yes",remove_drop:"yes",cable_drop_len:"20",dummy_attached:"yes",use_fa:"yes",meas_show:"yes",
+  cable_new_len:"0",cable_main_len:"5",cable_ch46_len:"5",cable_ch50_len:"5",cable_amp_next_len:"10",
+  cable_indoor_new:"2",cable_vvf_len:"5",cable_s5cfb_power:"5",ext_power_conn:"splitter_2",
+  att_main:"no",att_46:"no",att_50:"no",box_consent:"no",ofmu_qty:"0",wire_sus16_len:"0",
+  chosho_mgmt_no:"",chosho_date:"",chosho_cust_name:"",chosho_cust_addr:"",chosho_cust_tel:"",
+  chosho_status:"provisional",tax_mode:"excl",misc_fee:"include",
+  outsource_fee_on:false,outsource_fee_amount:0,outsource_fee_auto:false,
+};
+
+/* ============================================================================
+   2) モデル（現在編集中の戸別データ）
+   ============================================================================ */
+let M = null;                // メインの状態
+let _tmpSeq = 0;             // 一時下書きID採番（同一msでの衝突回避）
+let _csvTargetCat = "antenna"; // CSV取込ボタンで押された測定箇所（antenna/amplifier/terminal）
+const LS_LAST   = "field_input_last_v1"; // 最後に開いた下書きキー（本体はIndexedDB）
+let agWidget = null;         // アンテナ取付ガイド ウィジェットのインスタンス（render()毎に再生成）
+
+function freshModel(){
+  const m = Object.assign({}, DEFAULTS);
+  m.tv_rooms=[]; m.tv_bd=[]; m.tv_sp=[]; m.tv_term=[];
+  m.wire_overrides={}; m.qty_overrides={}; m.node_offsets={}; m.meas_transforms={}; m.node_existing_overrides={};
+  m.text_annotations=[];
+  m.measurements=JSON.parse(JSON.stringify(DEFAULT_MEASUREMENTS));
+  // 測定値（アンテナ出力/増幅器出力/宅内末端）は既定を空白に（現場で実測値を入力する運用）。CH名は残す。
+  ["antenna","amplifier","terminal"].forEach(k=>{
+    m.measurements[k] = m.measurements[k].map(()=>({db:"",mer:"",ber:""}));
+  });
+  m.chosho_photos=[];
+  m.asbestos={construction_date:"",registration_date:"",date_unknown:false,date_source:"kenchiku_kakunin",
+    level:"level3",material:"siding",material_other:"",applicability_mode:"auto",
+    contractor_name:"",contractor_addr:"",contractor_tel:"",supervisor_name:"",investigator_name:"",investigator_license:""};
+  m.antenna_guide={ver:1,pattern:null,parts:{}};
+  // 調書日を今日に
+  m.chosho_date = todayStr();
+  m._draftId = "tmp:"+Date.now()+"_"+(_tmpSeq++); // 一時ID（管理番号入力前の下書きキー。削除判定のズレ防止で必ず付与）
+  syncTvArrays(m);
+  return m;
+}
+function todayStr(){
+  const d=new Date(); const p=n=>String(n).padStart(2,"0");
+  return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate());
+}
+// tv_count に合わせて各室配列を伸縮（既定部屋名で埋める）
+function syncTvArrays(m){
+  const n=parseInt(m.tv_count,10)||1;
+  const rooms=[],bd=[],sp=[],term=[];
+  for(let i=0;i<n;i++){
+    rooms.push((m.tv_rooms&&m.tv_rooms[i])||DEFAULT_ROOMS[i]||"その他");
+    bd.push(!!(m.tv_bd&&m.tv_bd[i]));
+    sp.push((m.tv_sp&&m.tv_sp[i])||"no");
+    term.push((m.tv_term&&m.tv_term[i])||"");
+  }
+  m.tv_rooms=rooms; m.tv_bd=bd; m.tv_sp=sp; m.tv_term=term;
+}
+
+/* ==ANTENNA-GUIDE-CORE START (編集元はindex.html。ENDまでを現場入力.htmlへ逐語コピー) == */
+(function(global){
+  "use strict";
+
+  var RED = '#e60012';
+  var ANT = ['U146','U206','LS206','LS56'];
+  var MST = ['M182Z32','M182Z25'];
+  var SB_LIST = ['SB22S','SB3220','SB3230','SB32K51'];
+
+  // ---- v2 drawing helpers (プロトタイプから無改変で流用) ----
+  function dia(p){
+    if(p.indexOf('Z25')>-1) return 25;
+    if(p.indexOf('Z32')>-1) return 32;
+    return 22;
+  }
+  function jointType(a,b){var d1=dia(a),d2=dia(b);if(d1===32&&d2===32)return 'MJ32S-P';if(d1===25&&d2===25)return 'MJ25S';return 'MJ3225';}
+  function yagi(cx,cy,st,dash){var d=dash?'stroke-dasharray="6 5"':'';return '<g transform="translate('+cx+','+cy+')" stroke="'+st+'" stroke-width="3" fill="none" stroke-linecap="round" '+d+'>'
+    +'<line x1="-142" y1="0" x2="52" y2="0"/><line x1="-138" y1="26" x2="-102" y2="-26"/><line x1="-104" y1="22" x2="-74" y2="-22"/><line x1="-74" y1="22" x2="-44" y2="-22"/><line x1="-44" y1="22" x2="-14" y2="-22"/><line x1="-15" y1="22" x2="15" y2="-22"/><line x1="16" y1="22" x2="46" y2="-22"/></g>';}
+  function mount(cx,cy,st,dash){var d=dash?'stroke-dasharray="6 5"':'';return '<circle cx="'+cx+'" cy="'+cy+'" r="22" fill="none" stroke="'+st+'" stroke-width="3" '+d+'/>';}
+  function jrect(cx,cy,st){return '<rect x="'+(cx-7)+'" y="'+(cy-22)+'" width="14" height="44" fill="none" stroke="'+st+'" stroke-width="2.5"/>';}
+  function mastSeg(x,y1,y2,st,dash){var d=dash?'stroke-dasharray="6 5"':'';return '<line x1="'+x+'" y1="'+y1+'" x2="'+x+'" y2="'+y2+'" stroke="'+st+'" stroke-width="3" stroke-linecap="round" '+d+'/>';}
+  function plus(b,c){return '<g><circle cx="'+b.x+'" cy="'+b.y+'" r="12" fill="rgba(127,127,127,0.12)" stroke="'+c+'" stroke-width="1.5"/><path d="M'+(b.x-6)+' '+b.y+' H'+(b.x+6)+' M'+b.x+' '+(b.y-6)+' V'+(b.y+6)+'" stroke="'+c+'" stroke-width="2"/></g>';}
+  function txt(l,c,str,it){return '<text x="'+l.x+'" y="'+l.y+'" text-anchor="'+(l.a||'start')+'" fill="'+c+'" font-size="20" '+(it?'font-style="italic"':'')+'>'+str+'</text>';}
+
+  // ---- 屋根馬用の追加描画ヘルパー ----
+  // ルーフベース：棟にまたがるA形＋脚元の短い横線2本
+  function roofBase(cx,cy,st,dash){
+    var d=dash?'stroke-dasharray="6 5"':'';
+    var lx=cx-30, ly=cy+12, ax=cx, ay=cy-16, rx=cx+30, ry=cy+14;
+    return '<g stroke="'+st+'" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round" '+d+'>'
+      +'<path d="M'+lx+' '+ly+' L'+ax+' '+ay+' L'+rx+' '+ry+'"/>'
+      +'<line x1="'+(lx-8)+'" y1="'+ly+'" x2="'+(lx+8)+'" y2="'+ly+'"/>'
+      +'<line x1="'+(rx-8)+'" y1="'+ry+'" x2="'+(rx+8)+'" y2="'+ry+'"/>'
+      +'</g>';
+  }
+  // 支線止め金具：マスト上の短い横棒＋両端の小円
+  function rsgClamp(cx,cy,st,dash){
+    var d=dash?'stroke-dasharray="6 5"':'';
+    return '<g stroke="'+st+'" stroke-width="2.5" fill="none" stroke-linecap="round" '+d+'>'
+      +'<line x1="'+(cx-11)+'" y1="'+cy+'" x2="'+(cx+11)+'" y2="'+cy+'"/>'
+      +'<circle cx="'+(cx-11)+'" cy="'+cy+'" r="3"/>'
+      +'<circle cx="'+(cx+11)+'" cy="'+cy+'" r="3"/>'
+      +'</g>';
+  }
+  // アンテナ支線：固定の起点(210,190)から屋根面4点への斜線4本
+  var YANEUMA_APEX={x:210,y:160};
+  var YANEUMA_WIRE_ENDS=[[90,281],[140,262],[280,265],[330,286]];
+  function guyWires(st,dash){
+    var d=dash?'stroke-dasharray="6 5"':'';
+    var out='<g stroke="'+st+'" stroke-width="2" fill="none" stroke-linecap="round" '+d+'>';
+    YANEUMA_WIRE_ENDS.forEach(function(p){ out+='<line x1="'+YANEUMA_APEX.x+'" y1="'+YANEUMA_APEX.y+'" x2="'+p[0]+'" y2="'+p[1]+'"/>'; });
+    return out+'</g>';
+  }
+  // ターンバックル：各支線の中間に小さな角丸リング4個
+  function turnbuckles(st,dash){
+    var d=dash?'stroke-dasharray="6 5"':'';
+    var out='<g stroke="'+st+'" stroke-width="2" fill="none" '+d+'>';
+    YANEUMA_WIRE_ENDS.forEach(function(p){
+      var mx=(YANEUMA_APEX.x+p[0])/2, my=(YANEUMA_APEX.y+p[1])/2;
+      out+='<rect x="'+(mx-4)+'" y="'+(my-8)+'" width="8" height="16" rx="3"/>';
+    });
+    return out+'</g>';
+  }
+
+  // ---- bracket -> mast rule (auto) ----
+  function mastOptionsForBracket(brk){
+    if(brk==='RALA') return ['M182Z32','M182Z25'];
+    if(brk==='SB22S') return ['M130Z','M160Z','M182Z'];
+    if(brk==='SB3220'||brk==='SB3230'||brk==='SB32K51') return ['M182Z32'];
+    return ['M182Z32'];
+  }
+
+  // ---- static structure fragments ----
+  var POLE_STRUCT='<g stroke="var(--text-primary,#111)" stroke-width="3" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M155 255 L195 255"/><line x1="155" y1="255" x2="155" y2="640"/><line x1="195" y1="255" x2="195" y2="640"/></g>';
+  var ROOF_545='<g stroke="var(--text-primary,#111)" stroke-width="3.5" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M40 300 L210 236 L378 306"/><path d="M52 332 L210 268 L366 336"/><path d="M40 300 L52 332"/><path d="M378 306 L366 336"/><path d="M105 310 L105 545"/><path d="M330 320 L330 545"/></g>';
+  var ROOF_600='<g stroke="var(--text-primary,#111)" stroke-width="3.5" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M40 300 L210 236 L378 306"/><path d="M52 332 L210 268 L366 336"/><path d="M40 300 L52 332"/><path d="M378 306 L366 336"/><path d="M105 310 L105 600"/><path d="M330 320 L330 600"/></g>';
+
+  // ---- pattern configs (data-driven scenes) ----
+  var PATTERN_CONFIGS=[
+    {
+      id:'pole', label:'柱', viewBox:'0 0 400 650', structure:POLE_STRUCT,
+      extraLabels:[{x:92,y:577,a:'end',text:'柱'}],
+      note:'マストの径に応じて接続金具（MJ32S-P／MJ25S／MJ3225）が自動で決まります。架台はRALA固定です。',
+      joint:{upKey:'mastUp', lowKey:'mastLow', cx:235, cy:270},
+      parts:[
+        {key:'mastUp', kind:'mast', x:235, y1:100, y2:270, optionsMode:'fixed', optionsFixed:MST, def:'M182Z32', badge:{x:235,y:160}},
+        {key:'mastLow', kind:'mast', x:235, y1:270, y2:455, optionsMode:'fixed', optionsFixed:MST, def:'M182Z32', badge:{x:235,y:290}},
+        {key:'brkTop', kind:'brk', cx:215, cy:345, optionsMode:'fixed', optionsFixed:['RALA'], def:'RALA'},
+        {key:'brkBot', kind:'brk', cx:215, cy:415, optionsMode:'fixed', optionsFixed:['RALA'], def:'RALA'},
+        {key:'antBot', kind:'ant', cx:235, cy:205, optionsMode:'fixed', optionsFixed:ANT, def:'U206'},
+        {key:'antTop', kind:'ant', cx:235, cy:115, optionsMode:'fixed', optionsFixed:ANT, def:'U206'}
+      ]
+    },
+    {
+      id:'hafu', label:'破風', viewBox:'0 0 400 560', structure:ROOF_545,
+      extraLabels:[],
+      note:'架台はSB22S／SB3220／SB3230／SB32K51から選択できます。マストは選んだ架台に応じて自動的に絞り込まれます。',
+      joint:null,
+      parts:[
+        {key:'mastA', kind:'mast', x:150, y1:115, y2:264, optionsMode:'fromBracket', companionKey:'brkA', def:'M182Z32', badge:{x:150,y:205}},
+        {key:'brkA', kind:'brk', cx:150, cy:258, optionsMode:'fixed', optionsFixed:SB_LIST, def:'SB3220'},
+        {key:'antA', kind:'ant', cx:150, cy:115, optionsMode:'fixed', optionsFixed:ANT, def:'U206'},
+        {key:'mastB', kind:'mast', x:335, y1:180, y2:300, optionsMode:'fromBracket', companionKey:'brkB', def:'M182Z32', badge:{x:335,y:200}},
+        {key:'brkB', kind:'brk', cx:335, cy:290, optionsMode:'fixed', optionsFixed:SB_LIST, def:'SB3220'},
+        {key:'antB', kind:'ant', cx:335, cy:180, optionsMode:'fixed', optionsFixed:ANT, def:'U206'}
+      ]
+    },
+    {
+      id:'gaiheki', label:'外壁', viewBox:'0 0 400 560', structure:ROOF_545,
+      extraLabels:[{x:10,y:300,a:'start',text:'破風'},{x:150,y:530,a:'start',text:'外壁'}],
+      note:'外壁面に架台を取付ける想定です。架台はSB系から選択、マストは架台に連動して絞り込まれます。',
+      joint:null,
+      parts:[
+        {key:'mastA', kind:'mast', x:150, y1:130, y2:470, optionsMode:'fromBracket', companionKey:'brkA', def:'M182Z32', badge:{x:150,y:300}},
+        {key:'brkA', kind:'brk', cx:150, cy:470, optionsMode:'fixed', optionsFixed:SB_LIST, def:'SB32K51'},
+        {key:'antA', kind:'ant', cx:150, cy:130, optionsMode:'fixed', optionsFixed:ANT, def:'U206'},
+        {key:'mastB', kind:'mast', x:335, y1:185, y2:478, optionsMode:'fromBracket', companionKey:'brkB', def:'M182Z32', badge:{x:335,y:300}},
+        {key:'brkB', kind:'brk', cx:335, cy:478, optionsMode:'fixed', optionsFixed:SB_LIST, def:'SB32K51'},
+        {key:'antB', kind:'ant', cx:335, cy:185, optionsMode:'fixed', optionsFixed:ANT, def:'U206'}
+      ]
+    },
+    {
+      id:'tatenarabi', label:'縦並び', viewBox:'0 0 400 620', structure:ROOF_600,
+      extraLabels:[{x:10,y:300,a:'start',text:'破風'},{x:110,y:560,a:'start',text:'外壁'}],
+      note:'1本の柱に2段のアンテナを設置します。マストはM182Z32固定、接続金具は常にMJ32S-Pです。',
+      joint:{upKey:'mastUp', lowKey:'mastLow', cx:170, cy:215},
+      parts:[
+        {key:'mastUp', kind:'mast', x:170, y1:95, y2:215, optionsMode:'fixed', optionsFixed:['M182Z32'], def:'M182Z32', badge:{x:170,y:130}},
+        {key:'mastLow', kind:'mast', x:170, y1:215, y2:455, optionsMode:'fixed', optionsFixed:['M182Z32'], def:'M182Z32', badge:{x:170,y:340}},
+        {key:'brkTop', kind:'brk', cx:170, cy:255, optionsMode:'fixed', optionsFixed:SB_LIST, def:'SB3220'},
+        {key:'brkBot', kind:'brk', cx:170, cy:430, optionsMode:'fixed', optionsFixed:SB_LIST, def:'SB32K51'},
+        {key:'antBot', kind:'ant', cx:170, cy:180, optionsMode:'fixed', optionsFixed:ANT, def:'U206'},
+        {key:'antTop', kind:'ant', cx:170, cy:80, optionsMode:'fixed', optionsFixed:ANT, def:'U206'}
+      ]
+    },
+    {
+      id:'yaneuma', label:'屋根馬', viewBox:'0 -45 400 665', structure:ROOF_600,
+      extraLabels:[{x:10,y:300,a:'start',text:'屋根'}],
+      note:'支線4本（計40m）とターンバックルで固定します。マストはM182Z32×2固定、接続金具は自動でMJ32S-Pになります。',
+      joint:{upKey:'mastUp', lowKey:'mastLow', cx:210, cy:195},
+      parts:[
+        {key:'wires', kind:'wires', optionsMode:'fixed', optionsFixed:['GW1.6S'], def:'GW1.6S', bomQty:40, unit:'m', badge:{x:100,y:270}},
+        {key:'mastUp', kind:'mast', x:210, y1:15, y2:195, optionsMode:'fixed', optionsFixed:['M182Z32'], def:'M182Z32', badge:{x:210,y:75}},
+        {key:'mastLow', kind:'mast', x:210, y1:195, y2:248, optionsMode:'fixed', optionsFixed:['M182Z32'], def:'M182Z32', badge:{x:210,y:215}},
+        {key:'base', kind:'base', cx:210, cy:250, optionsMode:'fixed', optionsFixed:['RB39S'], def:'RB39S'},
+        {key:'rsg', kind:'rsg', cx:210, cy:160, optionsMode:'fixed', optionsFixed:['RSG32'], def:'RSG32'},
+        {key:'tb', kind:'tb', optionsMode:'fixed', optionsFixed:['GT70-P'], def:'GT70-P', bomQty:1, unit:'組', badge:{x:150,y:235}},
+        {key:'antBot', kind:'ant', cx:210, cy:120, optionsMode:'fixed', optionsFixed:ANT, def:'U206'},
+        {key:'antTop', kind:'ant', cx:210, cy:30, optionsMode:'fixed', optionsFixed:ANT, def:'U206'}
+      ]
+    }
+  ];
+
+  var KIND_ORDER={wires:0, mast:1, base:2, brk:2, rsg:3, tb:4, ant:5};
+  var KIND_LABEL={ant:'アンテナ', mast:'マスト', brk:'取付架台', base:'ルーフベース', rsg:'支線止め金具', wires:'アンテナ支線', tb:'ターンバックル'};
+  var ROW_ORDER={'アンテナ':0,'マスト':1,'取付架台':2,'接続金具':3,'ルーフベース':4,'支線止め金具':5,'アンテナ支線':6,'ターンバックル':7};
+
+  function findPatternConfig(id){
+    for(var i=0;i<PATTERN_CONFIGS.length;i++){ if(PATTERN_CONFIGS[i].id===id) return PATTERN_CONFIGS[i]; }
+    return null;
+  }
+  function findPart(cfg,key){
+    for(var i=0;i<cfg.parts.length;i++){ if(cfg.parts[i].key===key) return cfg.parts[i]; }
+    return null;
+  }
+  function getOptions(scene,part){
+    if(part.optionsMode==='fromBracket'){
+      return mastOptionsForBracket(scene.state[part.companionKey].product);
+    }
+    return part.optionsFixed;
+  }
+  function reconcileScene(scene){
+    scene.config.parts.forEach(function(part){
+      if(part.kind!=='mast') return;
+      var opts=getOptions(scene,part);
+      var st=scene.state[part.key];
+      if(opts.indexOf(st.product)===-1) st.product=opts[0];
+    });
+  }
+  function getJointInfo(scene){
+    var j=scene.config.joint;
+    if(!j) return null;
+    var up=scene.state[j.upKey], low=scene.state[j.lowKey];
+    if(!up.placed||!low.placed) return null;
+    return {cx:j.cx, cy:j.cy, product:jointType(up.product, low.product)};
+  }
+  // rows: BOM表示行（型番ごとに集計、qty+unitで表示）。installCount: 「合計数量」用に
+  // 設置された部品点数を数える（wiresは1式、tbは1組として各1点、bomQtyの倍数にはしない）。
+  function computeBom(scene){
+    var rows=[], map={};
+    var installCount=0;
+    function add(kind,product,bomQty,unit){
+      installCount++;
+      var k=kind+'|'+product;
+      if(!map[k]){ map[k]={kind:kind, product:product, qty:0, unit:unit||''}; rows.push(map[k]); }
+      map[k].qty+=(bomQty||1);
+    }
+    scene.config.parts.forEach(function(part){
+      var st=scene.state[part.key];
+      if(st.placed) add(KIND_LABEL[part.kind], st.product, part.bomQty, part.unit);
+    });
+    var joint=getJointInfo(scene);
+    if(joint) add('接続金具', joint.product);
+    rows.sort(function(a,b){ return (ROW_ORDER[a.kind]-ROW_ORDER[b.kind]) || a.product.localeCompare(b.product); });
+    return {rows:rows, installCount:installCount};
+  }
+
+  // ---- geometry helpers for label/badge placement ----
+  // viewBox文字列("minX minY 幅 高さ")から幅を取り出す（取得できなければ400を既定に）
+  function viewBoxWidth(vb){
+    var t=String(vb||'').trim().split(/\s+/);
+    var w=parseFloat(t[2]);
+    return isFinite(w) ? w : 400;
+  }
+  // ラベル位置：part中心が viewBox幅の右半分にあるkind(brk/mast/base/rsg)は、
+  // 右にはみ出さないよう左側(anchor:end)へ反転して表示する（下にも少しずらす＝「下左」）。
+  // アンテナ(anchor:middle)は概算文字幅から実際にはみ出す場合のみ左右へ寄せる。
+  // wires/tb はパターン内で常に中央寄り固定のため従来通り(badgeの右脇=start)。
+  function getLabelPos(part, vbWidth){
+    var w = vbWidth || 400;
+    var half = w/2;
+    if(part.kind==='ant'){
+      // 概算：ガイドのアンテナ型番は最大5文字(LS206等)。半分の余白を安全マージンとして確保
+      var margin = 2.5*20*0.6;
+      if(part.cx + margin > w) return {x:Math.max(half, w-4), y:part.cy-32, a:'end'};
+      if(part.cx - margin < 0) return {x:4, y:part.cy-32, a:'middle'};
+      return {x:part.cx, y:part.cy-32, a:'middle'};
+    }
+    if(part.kind==='brk'){
+      if(part.cx<=half) return {x:part.cx+30, y:part.cy+6, a:'start'};
+      return {x:part.cx-30, y:part.cy+16, a:'end'};
+    }
+    if(part.kind==='base'){
+      if(part.cx<=half) return {x:part.cx+34, y:part.cy+6, a:'start'};
+      return {x:part.cx-34, y:part.cy+16, a:'end'};
+    }
+    if(part.kind==='rsg'){
+      if(part.cx<=half) return {x:part.cx+22, y:part.cy+5, a:'start'};
+      return {x:part.cx-22, y:part.cy+15, a:'end'};
+    }
+    if(part.kind==='mast'){
+      if(part.badge.x<=half) return {x:part.badge.x+18, y:part.badge.y+5, a:'start'};
+      return {x:part.badge.x-18, y:part.badge.y+15, a:'end'};
+    }
+    // wires / tb は事前計算済みの badge の脇に表示（現状の座標で幅内に収まる）
+    return {x:part.badge.x+18, y:part.badge.y+5, a:'start'};
+  }
+  function getBadgePos(part){
+    if(part.kind==='ant') return {x:part.cx-70, y:part.cy};
+    if(part.kind==='brk') return {x:part.cx, y:part.cy};
+    if(part.kind==='base') return {x:part.cx, y:part.cy-14};
+    if(part.kind==='rsg') return {x:part.cx, y:part.cy};
+    return part.badge; // mast / wires / tb
+  }
+  function hitRect(key,x,y,w,h){
+    return '<rect class="apw-hit" data-key="'+key+'" x="'+x+'" y="'+y+'" width="'+w+'" height="'+h+'" fill="rgba(0,0,0,0.001)"/>';
+  }
+
+  function renderPart(scene,part){
+    var st=scene.state[part.key];
+    var lineColor=st.placed?RED:'var(--border,#c9c9c9)';
+    var textColor=st.placed?RED:'var(--text-secondary,#8a8a8a)';
+    var shape='', hit='';
+    if(part.kind==='ant'){
+      shape=yagi(part.cx, part.cy, lineColor, !st.placed);
+      hit=hitRect(part.key, part.cx-145, part.cy-24, 205, 48);
+    } else if(part.kind==='mast'){
+      shape=mastSeg(part.x, part.y1, part.y2, lineColor, !st.placed);
+      hit=hitRect(part.key, part.x-12, part.y1, 24, part.y2-part.y1);
+    } else if(part.kind==='brk'){
+      shape=mount(part.cx, part.cy, lineColor, !st.placed);
+      hit=hitRect(part.key, part.cx-24, part.cy-22, 48, 44);
+    } else if(part.kind==='base'){
+      shape=roofBase(part.cx, part.cy, lineColor, !st.placed);
+      hit=hitRect(part.key, part.cx-30, part.cy-30, 60, 36);
+    } else if(part.kind==='rsg'){
+      shape=rsgClamp(part.cx, part.cy, lineColor, !st.placed);
+      hit=hitRect(part.key, part.cx-16, part.cy-16, 32, 32);
+    } else if(part.kind==='wires'){
+      shape=guyWires(lineColor, !st.placed);
+      hit=hitRect(part.key, 60, 160, 290, 140);
+    } else if(part.kind==='tb'){
+      shape=turnbuckles(lineColor, !st.placed);
+      hit=hitRect(part.key, 125, 210, 65, 35)+hitRect(part.key, 235, 210, 65, 35);
+    }
+    var labelPos=getLabelPos(part, viewBoxWidth(scene.config.viewBox));
+    var labelText=st.placed?st.product:KIND_LABEL[part.kind];
+    var labelHtml=txt(labelPos, textColor, labelText, !st.placed);
+    var badgeHtml=st.placed?'':plus(getBadgePos(part), 'var(--border,#c9c9c9)');
+    return '<g pointer-events="none">'+shape+labelHtml+badgeHtml+'</g>'+hit;
+  }
+  // 印刷・BOM計上用：placed の部品のみ実線・ラベルのみで描画（ゴースト線・＋バッジ・ヒット矩形は含めない）
+  function renderPartStatic(part, st, vbWidth){
+    var shape='';
+    if(part.kind==='ant') shape=yagi(part.cx, part.cy, RED, false);
+    else if(part.kind==='mast') shape=mastSeg(part.x, part.y1, part.y2, RED, false);
+    else if(part.kind==='brk') shape=mount(part.cx, part.cy, RED, false);
+    else if(part.kind==='base') shape=roofBase(part.cx, part.cy, RED, false);
+    else if(part.kind==='rsg') shape=rsgClamp(part.cx, part.cy, RED, false);
+    else if(part.kind==='wires') shape=guyWires(RED, false);
+    else if(part.kind==='tb') shape=turnbuckles(RED, false);
+    var labelPos=getLabelPos(part, vbWidth);
+    var labelHtml=txt(labelPos, RED, st.product, false);
+    return '<g pointer-events="none">'+shape+labelHtml+'</g>';
+  }
+
+  // ---- 状態モデルのヘルパー（公開APIの土台） ----
+  // savedParts（{key:{placed,product}}）から、cfg.parts の並びで各キーの状態を作る。
+  // 保存値が無い/不正なキーは未設置＋既定型番で補う。
+  function buildSceneState(cfg, savedParts){
+    var s={};
+    cfg.parts.forEach(function(part){
+      var sp = savedParts && savedParts[part.key];
+      if(sp && typeof sp==='object'){
+        s[part.key] = { placed: !!sp.placed, product: (typeof sp.product==='string' && sp.product) ? sp.product : part.def };
+      } else {
+        s[part.key] = { placed:false, product: part.def };
+      }
+    });
+    return s;
+  }
+  // 外部保存データ（JSON等）の形不正を既定値へ正規化する。{ver:1, pattern:<id|null>, parts:{...}}
+  function normalizeAntennaGuide(g){
+    var out = {ver:1, pattern:null, parts:{}};
+    if(g && typeof g==='object'){
+      if(typeof g.pattern==='string' && findPatternConfig(g.pattern)) out.pattern=g.pattern;
+      if(g.parts && typeof g.parts==='object'){
+        Object.keys(g.parts).forEach(function(k){
+          var p=g.parts[k];
+          if(p && typeof p==='object'){
+            out.parts[k] = { placed: !!p.placed, product: (typeof p.product==='string') ? p.product : undefined };
+          }
+        });
+      }
+    }
+    return out;
+  }
+  // パターンが選択され、かつ部品が1つ以上設置されていれば true（積算計上の要否判定用）
+  function antennaGuideActive(g){
+    var norm = normalizeAntennaGuide(g);
+    if(!norm.pattern) return false;
+    return Object.keys(norm.parts).some(function(k){ return norm.parts[k] && norm.parts[k].placed; });
+  }
+
+  // ---- ファクトリ本体 ----
+  // createAntennaGuide(hostEl, opts) -> {setState(s), getState(), destroy()}
+  // opts.state: {ver:1, pattern:<id|null>, parts:{...}}（省略時/pattern:null時は先頭パターン・全部品未設置）
+  // opts.onChange(serializedState): 設置/型番変更/取り外し/パターン切替/すべて取付/リセットのたびに呼ばれる
+  function createAntennaGuide(hostEl, opts){
+    opts = opts || {};
+    var onChange = (typeof opts.onChange==='function') ? opts.onChange : function(){};
+
+    hostEl.innerHTML =
+      '<div class="apw-root">'
+      + '<div class="apw-head"><strong>アンテナ取付ガイド</strong></div>'
+      + '<div class="apw-chips"></div>'
+      + '<div class="apw-note"></div>'
+      + '<div class="apw-body">'
+      +   '<div class="apw-canvas"><svg class="apw-svg" viewBox="0 0 400 650" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="アンテナ取付ガイド"></svg></div>'
+      +   '<div class="apw-side">'
+      +     '<p class="apw-hint">点線のガイド枠をクリック→部品が付いて数量+1。付いた部品をもう一度クリック→メニューから型番を選び直せます。マストの径を変えると接続金具は自動で決まります。</p>'
+      +     '<table class="apw-bom"><thead><tr><th>区分</th><th>型番</th><th class="q">数量</th></tr></thead><tbody class="apw-bom-body"></tbody></table>'
+      +     '<div class="apw-total">合計数量：<b class="apw-total-num">0</b></div>'
+      +     '<div class="apw-btns"><button type="button" data-act="all">すべて取付</button><button type="button" data-act="reset">リセット</button></div>'
+      +   '</div>'
+      + '</div>'
+      + '</div>';
+
+    var svg=hostEl.querySelector('.apw-svg');
+    var chipsEl=hostEl.querySelector('.apw-chips');
+    var noteEl=hostEl.querySelector('.apw-note');
+    var bomEl=hostEl.querySelector('.apw-bom-body');
+    var totalEl=hostEl.querySelector('.apw-total-num');
+    var canvasEl=hostEl.querySelector('.apw-canvas');
+    var btnsEl=hostEl.querySelector('.apw-btns');
+
+    var currentId, scene, currentMenu=null;
+
+    function initFromState(rawState){
+      var norm = normalizeAntennaGuide(rawState);
+      var cfg = findPatternConfig(norm.pattern) || PATTERN_CONFIGS[0];
+      currentId = cfg.id;
+      scene = { config: cfg, state: buildSceneState(cfg, norm.parts) };
+      reconcileScene(scene);
+    }
+    function serialize(){
+      return { ver:1, pattern: currentId, parts: JSON.parse(JSON.stringify(scene.state)) };
+    }
+    function commit(){
+      renderScene();
+      onChange(serialize());
+    }
+
+    function renderChips(){
+      chipsEl.innerHTML='';
+      PATTERN_CONFIGS.forEach(function(cfg){
+        var b=document.createElement('button');
+        b.type='button';
+        b.textContent=cfg.label;
+        if(cfg.id===currentId) b.className='on';
+        b.addEventListener('click', function(){
+          if(currentId===cfg.id) return;
+          // パターン切替：他パターンの編集は破棄し、新パターンは全部品未設置から開始（採用1パターンのみ運用）
+          currentId=cfg.id;
+          scene = { config: cfg, state: buildSceneState(cfg, null) };
+          reconcileScene(scene);
+          closeMenu();
+          commit();
+        });
+        chipsEl.appendChild(b);
+      });
+    }
+
+    function renderBom(){
+      var res=computeBom(scene);
+      var rows=res.rows;
+      if(rows.length===0){
+        bomEl.innerHTML='<tr><td colspan="3" class="apw-empty">まだ部品が設置されていません</td></tr>';
+      } else {
+        bomEl.innerHTML=rows.map(function(r){
+          return '<tr><td>'+r.kind+'</td><td>'+r.product+'</td><td class="q">'+r.qty+r.unit+'</td></tr>';
+        }).join('');
+      }
+      totalEl.textContent=res.installCount;
+    }
+
+    function renderScene(){
+      var cfg=scene.config;
+      svg.setAttribute('viewBox', cfg.viewBox);
+      var deco=cfg.structure;
+      cfg.extraLabels.forEach(function(l){
+        deco+=txt(l, 'var(--text-secondary,#8a8a8a)', l.text);
+      });
+      var html='<g pointer-events="none">'+deco+'</g>';
+      var sorted=cfg.parts.slice().sort(function(a,b){ return KIND_ORDER[a.kind]-KIND_ORDER[b.kind]; });
+      sorted.forEach(function(part){ html+=renderPart(scene, part); });
+      var joint=getJointInfo(scene);
+      if(joint){
+        html+='<g pointer-events="none">'+jrect(joint.cx, joint.cy, RED)+txt({x:joint.cx+16, y:joint.cy+5, a:'start'}, RED, joint.product)+'</g>';
+      }
+      svg.innerHTML=html;
+      renderBom();
+      noteEl.textContent=cfg.note;
+      renderChips();
+    }
+
+    // ---- dropdown menu ----
+    function closeMenu(){
+      if(currentMenu){ currentMenu.remove(); currentMenu=null; }
+    }
+    function positionMenu(menu, hitEl){
+      var canvasRect=canvasEl.getBoundingClientRect();
+      var hitRectBox=hitEl.getBoundingClientRect();
+      var left=(hitRectBox.left-canvasRect.left)+hitRectBox.width/2-66;
+      var top=(hitRectBox.top-canvasRect.top)+hitRectBox.height+6;
+      if(left<4) left=4;
+      var maxLeft=canvasEl.clientWidth-136;
+      if(left>maxLeft) left=Math.max(4, maxLeft);
+      var maxTop=canvasEl.clientHeight-8;
+      if(top>maxTop) top=Math.max(4, (hitRectBox.top-canvasRect.top)-8);
+      menu.style.left=left+'px';
+      menu.style.top=top+'px';
+    }
+    function openMenu(part, hitEl){
+      closeMenu();
+      var st=scene.state[part.key];
+      var options=getOptions(scene, part);
+      var menu=document.createElement('div');
+      menu.className='apw-menu';
+      options.forEach(function(opt){
+        var b=document.createElement('button');
+        b.type='button';
+        b.textContent=opt;
+        if(opt===st.product) b.className='cur';
+        b.addEventListener('click', function(ev){
+          ev.stopPropagation();
+          st.product=opt;
+          reconcileScene(scene);
+          closeMenu();
+          commit();
+        });
+        menu.appendChild(b);
+      });
+      menu.appendChild(document.createElement('hr'));
+      var rm=document.createElement('button');
+      rm.type='button';
+      rm.className='apw-menu-remove';
+      rm.textContent='取り外す';
+      rm.addEventListener('click', function(ev){
+        ev.stopPropagation();
+        st.placed=false;
+        st.product=part.def;
+        reconcileScene(scene);
+        closeMenu();
+        commit();
+      });
+      menu.appendChild(rm);
+      canvasEl.appendChild(menu);
+      positionMenu(menu, hitEl);
+      currentMenu=menu;
+    }
+
+    // ---- interaction wiring ----
+    function onSvgClick(e){
+      var el=e.target;
+      if(!el.classList || !el.classList.contains('apw-hit')) return;
+      e.stopPropagation();
+      var key=el.getAttribute('data-key');
+      var part=findPart(scene.config, key);
+      if(!part) return;
+      var st=scene.state[key];
+      if(!st.placed){
+        st.placed=true;
+        reconcileScene(scene);
+        closeMenu();
+        commit();
+      } else {
+        openMenu(part, el);
+      }
+    }
+    svg.addEventListener('click', onSvgClick);
+
+    function onDocClick(e){
+      if(!currentMenu) return;
+      if(currentMenu.contains(e.target)) return;
+      closeMenu();
+    }
+    document.addEventListener('click', onDocClick);
+
+    function onBtnsClick(e){
+      var btn=e.target.closest('button[data-act]');
+      if(!btn) return;
+      if(btn.getAttribute('data-act')==='all'){
+        scene.config.parts.forEach(function(part){ scene.state[part.key].placed=true; });
+        reconcileScene(scene);
+      } else if(btn.getAttribute('data-act')==='reset'){
+        scene.state=buildSceneState(scene.config, null);
+      }
+      closeMenu();
+      commit();
+    }
+    btnsEl.addEventListener('click', onBtnsClick);
+
+    initFromState(opts.state);
+    renderScene();
+
+    return {
+      // 外部からの状態差し替え（読込・戸別切替時）。onChangeは発火しない
+      setState: function(s){
+        initFromState(s);
+        closeMenu();
+        renderScene();
+      },
+      getState: function(){
+        return serialize();
+      },
+      destroy: function(){
+        document.removeEventListener('click', onDocClick);
+        closeMenu();
+        hostEl.innerHTML='';
+      }
+    };
+  }
+
+  // ---- 第2段階（BOM計上・印刷）で使う純粋関数 ----
+  // renderAntennaGuideSVG(state) -> 完成図のSVG文字列（placedの部品のみ・実線・ラベルのみ。印刷/静的表示用）
+  function renderAntennaGuideSVG(state){
+    var norm = normalizeAntennaGuide(state);
+    var cfg = findPatternConfig(norm.pattern) || PATTERN_CONFIGS[0];
+    var sc = { config: cfg, state: buildSceneState(cfg, norm.parts) };
+    var deco=cfg.structure;
+    cfg.extraLabels.forEach(function(l){ deco+=txt(l, 'var(--text-secondary,#8a8a8a)', l.text); });
+    var vbWidth = viewBoxWidth(cfg.viewBox);
+    var html='<g pointer-events="none">'+deco+'</g>';
+    cfg.parts.forEach(function(part){
+      var st=sc.state[part.key];
+      if(st.placed) html+=renderPartStatic(part, st, vbWidth);
+    });
+    var joint=getJointInfo(sc);
+    if(joint){
+      html+='<g pointer-events="none">'+jrect(joint.cx, joint.cy, RED)+txt({x:joint.cx+16, y:joint.cy+5, a:'start'}, RED, joint.product)+'</g>';
+    }
+    return '<svg viewBox="'+cfg.viewBox+'" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="アンテナ取付ガイド">'+html+'</svg>';
+  }
+  // renderAntennaGuideBomRows(state) -> computeBom相当のrows配列 [{kind,product,qty,unit}]（接続金具の自動行含む）
+  function renderAntennaGuideBomRows(state){
+    var norm = normalizeAntennaGuide(state);
+    var cfg = findPatternConfig(norm.pattern) || PATTERN_CONFIGS[0];
+    var sc = { config: cfg, state: buildSceneState(cfg, norm.parts) };
+    return computeBom(sc).rows;
+  }
+
+  global.createAntennaGuide = createAntennaGuide;
+  global.normalizeAntennaGuide = normalizeAntennaGuide;
+  global.antennaGuideActive = antennaGuideActive;
+  global.renderAntennaGuideSVG = renderAntennaGuideSVG;
+  global.renderAntennaGuideBomRows = renderAntennaGuideBomRows;
+})(window);
+/* ==ANTENNA-GUIDE-CORE END== */
+
+/* ============================================================================
+   3) 画面フォーム定義（宣言的） — セクション→フィールド
+   ============================================================================ */
+// type: seg(2-3択ボタン) / select / num / text / date / tel
+// show: (m)=>bool  条件表示
+const SECTIONS = [
+  { id:"chosho", ico:"📋", title:"調書・顧客", open:true, fields:[
+    {id:"chosho_mgmt_no", type:"text", label:"管理番号", req:true, hint:"ファイル名・写真フォルダ名になります（例 245001）"},
+    {id:"chosho_date", type:"date", label:"調書日"},
+    {id:"chosho_cust_name", type:"text", label:"顧客名"},
+    {id:"chosho_cust_addr", type:"text", label:"住所", mapLink:true, hint:"「🗺️地図」で住所をGoogleマップ（地図アプリ）で開けます"},
+    {id:"chosho_cust_tel", type:"tel", label:"電話番号"},
+    {id:"chosho_status", type:"select", label:"ステータス"},
+  ]},
+  { id:"basic", ico:"🏗️", title:"基本工事", fields:[
+    {id:"work_type", type:"seg", label:"工事種別"},
+    {id:"is_catv", type:"seg", label:"既設がCATVか"},
+    {id:"high_work", type:"seg", label:"高所作業車"},
+    {id:"snow_guard", type:"seg", label:"雪害対策"},
+    {id:"indoor_adj", type:"seg", label:"宅内調整"},
+  ]},
+  { id:"guide", ico:"🗼", title:"アンテナ取付ガイド", open:true, fields:[{custom:"guide"}] },
+  { id:"antenna", ico:"📡", title:"アンテナ", fields:[
+    {id:"antenna_main", type:"select", label:"主アンテナ"},
+    {id:"ch46", type:"select", label:"UHFアンテナ本数"},
+    {id:"antenna_46", type:"select", label:"46CH用アンテナ", show:m=>m.ch46!=="no"},
+    {id:"antenna_50", type:"select", label:"50CH用アンテナ", show:m=>m.ch46==="triple"},
+    {id:"bs_cs", type:"seg", label:"BS/CS"},
+    {id:"bs_antenna_state", type:"select", label:"BSアンテナ", show:m=>m.bs_cs==="yes"},
+    {id:"bsmix_type", type:"select", label:"BS混合方式", show:m=>m.bs_cs==="yes"},
+    {id:"bsmix_state", type:"select", label:"BS混合器", show:m=>m.bs_cs==="yes"},
+  ]},
+  { id:"mount", ico:"🔩", title:"取付金具・マスト", fields:[
+    {id:"mount_type", type:"select", label:"取付方式"},
+    {id:"side_base_1", type:"select", label:"サイドベース①", show:isSideBase},
+    {id:"side_base_2", type:"select", label:"サイドベース②", show:isSideBase},
+    {id:"side_base_3", type:"select", label:"サイドベース③", show:isSideBase},
+    {id:"mast", type:"select", label:"マスト①"},
+    {id:"mast_2", type:"select", label:"マスト②"},
+    {id:"mast_3", type:"select", label:"マスト③"},
+    {id:"connector_type", type:"select", label:"接続コネクタ種"},
+    {id:"connector_qty", type:"select", label:"コネクタ数"},
+  ]},
+  { id:"hikikomi", ico:"🔗", title:"引込・補強", fields:[
+    {id:"ofmu_qty", type:"select", label:"引込ブラケット"},
+    {id:"wire_sus16_len", type:"num", label:"ステンレスワイヤー1.6(m)"},
+  ]},
+  { id:"amp", ico:"📶", title:"増幅・分配", fields:[
+    {id:"amplifier", type:"select", label:"増幅器"},
+    {id:"line_booster", type:"seg", label:"ラインブースター"},
+    {id:"hpf", type:"select", label:"HPF"},
+    {id:"outer_splitter", type:"select", label:"外部分配器"},
+    {id:"indoor_split", type:"select", label:"宅内分配"},
+    {id:"split_all_pass", type:"seg", label:"分配 全通電", show:m=>m.indoor_split!=="unknown"},
+    {id:"att_main", type:"select", label:"ATT（主）"},
+    {id:"att_46", type:"select", label:"ATT（46CH）", show:m=>m.ch46!=="no"},
+    {id:"att_50", type:"select", label:"ATT（50CH）", show:m=>m.ch46==="triple"},
+  ]},
+  { id:"power", ico:"🔌", title:"電源・配線", fields:[
+    {id:"power_pos", type:"select", label:"電源部位置"},
+    {id:"ext_power_conn", type:"select", label:"外部電源 接続", show:m=>m.power_pos==="outside"},
+    {id:"box_consent", type:"seg", label:"BOX内コンセント"},
+    {id:"outer_wire", type:"seg", label:"外部配線（屋外ケーブル）", hint:"FA（接続部）から家の中に入って分配器までの配線を、新規=張替（図面は赤・積算に計上）／既存を流用（黒・計上なし）で選択。アンテナ〜増幅器〜FAは常に新規（赤）。基本は既存利用。"},
+    {id:"indoor_wire", type:"seg", label:"宅内配線（家の中）", hint:"分配器から各部屋への配線を、新規=張替（赤・積算に計上）／既存を流用（黒・計上なし）で選択。基本は既存利用。新規分の長さは下の「宅内 新規分」で指定。"},
+    {id:"use_fa", type:"seg", label:"FA中継"},
+    {id:"dummy_attached", type:"seg", label:"ダミー抵抗"},
+    {sub:"ケーブル長（m）"},
+    {id:"cable_main_len", type:"num", label:"主系統 ア→増幅"},
+    {id:"cable_ch46_len", type:"num", label:"46CH ア→増幅", show:m=>m.ch46!=="no"},
+    {id:"cable_ch50_len", type:"num", label:"50CH ア→増幅", show:m=>m.ch46==="triple"},
+    {id:"cable_amp_next_len", type:"num", label:"増幅→次段"},
+    {id:"cable_indoor_new", type:"num", label:"宅内 新規分"},
+    {id:"cable_vvf_len", type:"num", label:"VVF電源線", show:m=>m.power_pos==="outside"||m.power_pos==="near_splitter"},
+    {id:"cable_s5cfb_power", type:"num", label:"S5CFB電源+信号", show:m=>m.power_pos==="outside"},
+  ]},
+  { id:"tv", ico:"📺", title:"TV各室", fields:[
+    {id:"tv_count", type:"select", label:"テレビ台数"},
+    {custom:"tvrows"},
+  ]},
+  { id:"remove", ico:"🗑️", title:"撤去", fields:[
+    {id:"remove_safety", type:"seg", label:"保安器 撤去"},
+    {id:"remove_drop", type:"seg", label:"引込線 撤去"},
+    {id:"cable_drop_len", type:"num", label:"引込線長（m）", show:m=>m.remove_drop==="yes"},
+  ]},
+  { id:"meas", ico:"📡", title:"電波測定（dB/MER/BER）", fields:[
+    {custom:"meas"},
+  ]},
+  { id:"wires", ico:"🎨", title:"配線色・赤文字メモ", fields:[
+    {custom:"wires"},
+  ]},
+  { id:"photos", ico:"📷", title:"写真（無劣化）", fields:[
+    {custom:"photos"},
+  ]},
+  // 「その他・見積設定」（税・諸経費・石綿）は現場入力では不要のため非表示。
+  // 値は buildState が M の既定値から出力し続けるので互換性(78キー)は維持。設定はPCの index.html 側で行う。
+];
+function isSideBase(m){ return m.mount_type==="side_base_hafu"||m.mount_type==="side_base_wall"||m.mount_type==="side_base_double"; }
+
+/* ============================================================================
+   4) レンダリング
+   ============================================================================ */
+const app = document.getElementById("app");
+const openState = {}; // section open/close 記憶
+function resetOpenState(){ for(const k in openState) delete openState[k]; } // 戸別切替時にアコーディオン開閉を既定へ戻す
+
+function render(){
+  const _sy = window.scrollY || 0;   // 再描画でスクロール位置が飛ばないよう保持
+  updateHeader();
+  let html="";
+  for(const sec of SECTIONS){
+    const isOpen = (openState[sec.id]!==undefined) ? openState[sec.id] : !!sec.open;
+    html += `<div class="sec${isOpen?" open":""}" data-sec="${sec.id}">`;
+    html += `<div class="head" data-toggle="${sec.id}"><span class="ico">${sec.ico}</span><span>${sec.title}</span>${secBadge(sec)}<span class="chev">▶</span></div>`;
+    html += `<div class="body">`;
+    for(const f of sec.fields) html += renderField(f);
+    html += `</div></div>`;
+  }
+  app.innerHTML = html;
+  bindEvents();
+  mountAntennaGuide();
+  window.scrollTo(0, _sy);
+}
+// アンテナ取付ガイド ウィジェットをホストへマウント（render()毎に再生成。旧インスタンスは破棄してリスナーの積み重なりを防ぐ）
+function mountAntennaGuide(){
+  const host = document.getElementById("apw-host-field");
+  if(!host) return;
+  if(agWidget && typeof agWidget.destroy === "function"){ try{ agWidget.destroy(); }catch(_){} }
+  agWidget = createAntennaGuide(host, {
+    state: M.antenna_guide,
+    onChange: g => {
+      M.antenna_guide = g;
+      autoReflectGuideToModel(g); // ガイド操作のたびに既存欄(アンテナ/取付金具)へ自動反映
+      saveDraft();
+      render(); // mount_type変更で side_base_* 欄の表示/非表示が変わるため全体再描画が必要
+    }
+  });
+}
+
+/* ============================================================
+   アンテナ取付ガイド → 既存入力欄への自動反映（ガイドを操作するたびに発火）
+   （現場入力.html固有・コアブロック外。index.html の reflectGuideToFields と
+   同じ方針だが、ボタンではなく onChange から自動で・確認なしに書き込む。
+   ガイドを一切操作していない物件では呼ばれないため、既存の手入力欄は今まで通り。）
+   ・antMainKey=主アンテナ(上/左)・ant2ndKey=2本目(下/右)。antenna_main←主、antenna_46←2本目
+     （モデルのみ。ch46/antenna_50は本数をフォームが決める既存方針のため触らない）。
+   ・LS206 / MJ3225 は現場入力.html の OPT 選択肢に無い（index.html側でのみ追加済み）ため、
+     該当する場合はその欄への書き込みをスキップする（マッピング表に無い＝undefinedで自然にスキップ、
+     かつ setField 側でも OPT の選択肢存在チェックを行い二重に安全策とする）。
+   ・mast_3・side_base_3・turnbuckle_qty(屋根馬以外)・ch46・antenna_50はガイドが表現しないスロットのため触らない。
+   ============================================================ */
+const AG_PATTERN_META = {
+  pole:       { mountType:"support_post",     masts:["mastUp","mastLow"], sideBase:[],                  joint:["mastUp","mastLow"], antMainKey:"antTop", ant2ndKey:"antBot" },
+  hafu:       { mountType:"side_base_hafu",   masts:["mastA","mastB"],    sideBase:["brkA","brkB"],     joint:null,                 antMainKey:"antA",   ant2ndKey:"antB"  },
+  gaiheki:    { mountType:"side_base_wall",   masts:["mastA","mastB"],    sideBase:["brkA","brkB"],     joint:null,                 antMainKey:"antA",   ant2ndKey:"antB"  },
+  tatenarabi: { mountType:"side_base_double", masts:[],                  sideBase:["brkTop","brkBot"], joint:["mastUp","mastLow"], antMainKey:"antTop", ant2ndKey:"antBot" },
+  yaneuma:    { mountType:"roof_base",        masts:["mastUp","mastLow"], sideBase:[],                  joint:["mastUp","mastLow"], antMainKey:"antTop", ant2ndKey:"antBot" }
+};
+const AG_MAST_PARTS_ID = { "M182Z32":"mast_m182z32", "M182Z25":"mast_m182z", "M182Z":"mast_m182z", "M160Z":"mast_m160z", "M130Z":"mast_m130z" };
+const AG_BRACKET_FIELD_ID = { "SB22S":"side_sb22s", "SB3220":"side_sb3220", "SB3230":"side_sb3230", "SB32K51":"side_sb32k51" };
+const AG_JOINT_CONNECTOR_ID = { "MJ32S-P":"mj32sp", "MJ25S":"mj25s" }; // MJ3225は現場入力.htmlの選択肢に無いため対象外
+const AG_ANTENNA_PART_ID = { "U146":"antenna_u146", "U206":"antenna_u206", "LS56":"antenna_ls56" }; // LS206は現場入力.htmlの選択肢に無いため対象外
+function autoReflectGuideToModel(guide){
+  const norm = normalizeAntennaGuide(guide);
+  const meta = norm.pattern ? AG_PATTERN_META[norm.pattern] : null;
+  if(!meta) return;
+  const parts = norm.parts || {};
+  const setField = (id, val) => {
+    if(val===undefined || val===null || val==="") return;
+    const opts = OPT[id];
+    if(opts && !opts.some(o=>o[0]===val)) return; // 選択肢に無い値は書き込まない（安全策）
+    M[id] = val;
+  };
+
+  setField("mount_type", meta.mountType);
+
+  const mastFieldIds = ["mast","mast_2"]; // mast_3はガイドが表現しないため触らない
+  meta.masts.forEach((key,i) => { const p=parts[key]; if(p && p.placed) setField(mastFieldIds[i], AG_MAST_PARTS_ID[p.product]); });
+
+  const sbFieldIds = ["side_base_1","side_base_2"]; // side_base_3はガイドが表現しないため触らない
+  meta.sideBase.forEach((key,i) => { const p=parts[key]; if(p && p.placed) setField(sbFieldIds[i], AG_BRACKET_FIELD_ID[p.product]); });
+
+  if(meta.joint){
+    const up=parts[meta.joint[0]], low=parts[meta.joint[1]];
+    if(up && up.placed && low && low.placed){
+      const jr=(renderAntennaGuideBomRows(norm)||[]).find(r=>r.kind==="接続金具");
+      if(jr && AG_JOINT_CONNECTOR_ID[jr.product]){
+        setField("connector_type", AG_JOINT_CONNECTOR_ID[jr.product]);
+        setField("connector_qty", String(jr.qty||1));
+      }
+    }
+  }
+
+  // 主アンテナ(上/左) → antenna_main。2本目(下/右) → antenna_46（モデルのみ）。
+  // アンテナ本数(ch46)もガイドが駆動：設置数(最大2本)に応じてyes/noを設定する。tripleは絶対に設定しない
+  // （3本目はガイドが表現しないスロットのため、triple構成を使う工事はガイド確定後に手動で設定する運用。
+  //   antenna_50・ch50関連・mast_3・side_base_3はここでも一切触らない）。
+  {
+    const pMain = parts[meta.antMainKey];
+    const pSecond = parts[meta.ant2ndKey];
+    const mainPlaced = !!(pMain && pMain.placed);
+    const secondPlaced = !!(pSecond && pSecond.placed);
+    const n = (mainPlaced ? 1 : 0) + (secondPlaced ? 1 : 0);
+    if(mainPlaced) setField("antenna_main", AG_ANTENNA_PART_ID[pMain.product]);
+    if(n >= 2){
+      setField("ch46", "yes");
+      setField("antenna_46", AG_ANTENNA_PART_ID[pSecond.product]);
+    } else if(n === 1){
+      setField("ch46", "no");
+      M.antenna_46 = ""; // setFieldは空文字をスキップするため直接クリア
+    }
+    // n===0（主アンテナ未設置）の場合は ch46/antenna_46 とも触らない
+  }
+
+  // 屋根馬のみ：ターンバックル(GT70-P、1組=4本相当)設置時は既定値(4)を反映。
+  // wire_sus16_len（ステンレスワイヤー1.6＝引込/支線兼用の手入力欄）は
+  // アンテナ取付ガイドとは無関係の独立項目のため一切触らない。屋根馬の支線40mは
+  // index.html側でappendGuideBomRows経由の「取付ガイド」由来の行として別途計上される。
+  if(norm.pattern === "yaneuma"){
+    const tb = parts.tb;
+    if(tb && tb.placed) setField("turnbuckle_qty", "4");
+  }
+}
+function secBadge(sec){
+  if(sec.id==="photos"){ return `<span class="badge">${M.chosho_photos.length}枚</span>`; }
+  if(sec.id==="tv"){ return `<span class="badge">${M.tv_count}台</span>`; }
+  if(sec.id==="chosho" && M.chosho_mgmt_no){ return `<span class="badge">${esc(M.chosho_mgmt_no)}</span>`; }
+  return "";
+}
+function renderField(f){
+  if(f.sub) return `<div class="subhdr">${f.sub}</div>`;
+  if(f.custom==="tvrows") return `<div id="tvrows">${renderTvRows()}</div>`;
+  if(f.custom==="wires") return renderWires();
+  if(f.custom==="photos") return renderPhotos();
+  if(f.custom==="meas") return renderMeas();
+  if(f.custom==="guide") return '<div id="apw-host-field"></div>';
+  if(f.show && !f.show(M)) return "";
+  const val = f.asb ? M.asbestos[f.asb] : M[f.id];
+  let inner="";
+  if(f.type==="seg" || f.type==="segbool"){
+    const opts = f.type==="segbool" ? [[true,"はい"],[false,"いいえ"]] : (f.opts||OPT[f.id]);
+    inner = `<div class="seg" data-seg="${f.id}"${f.asb?` data-asb="${f.asb}"`:""}>` +
+      opts.map(([v,l])=>`<button data-v="${v}" class="${String(v)===String(val)?"on":""}">${esc(l)}</button>`).join("") + `</div>`;
+  } else if(f.type==="select"){
+    const opts=f.opts||OPT[f.id]||[];
+    inner = `<select data-fld="${f.id}"${f.asb?` data-asb="${f.asb}"`:""}>` +
+      opts.map(([v,l])=>`<option value="${esc(v)}"${String(v)===String(val)?" selected":""}>${esc(l)}</option>`).join("") + `</select>`;
+  } else {
+    const t = f.type==="num"?"number":(f.type==="date"?"date":(f.type==="tel"?"tel":"text"));
+    const step = f.type==="num"?` step="0.5" min="0" inputmode="decimal"`:"";
+    const inputHtml = `<input type="${t}"${step} data-fld="${f.id}"${f.asb?` data-asb="${f.asb}"`:""} value="${esc(val==null?"":val)}">`;
+    if(f.mapLink){
+      const has = !!String(val==null?"":val).trim();
+      inner = `<div class="addr-row">${inputHtml}`
+        + `<a class="map-btn${has?"":" disabled"}" id="addr-map-link" href="${has?esc(mapUrl(val)):"#"}" target="_blank" rel="noopener">🗺️地図</a></div>`;
+    } else {
+      inner = inputHtml;
+    }
+  }
+  return `<div class="fld${f.req?" req":""}"><label>${esc(f.label)}</label>${inner}${f.hint?`<div class="hint">${esc(f.hint)}</div>`:""}</div>`;
+}
+
+// ---- TV各室 ----
+function renderTvRows(){
+  syncTvArrays(M);
+  const n=parseInt(M.tv_count,10)||1;
+  let h="";
+  for(let i=0;i<n;i++){
+    h+=`<div class="tvrow" data-tv="${i}">
+      <div class="tvhd">TV${i+1}
+        <label class="bd"><input type="checkbox" data-bd="${i}" ${M.tv_bd[i]?"checked":""}>BD/録画</label>
+      </div>
+      <div class="fld" style="margin:6px 0"><label>部屋</label>
+        <select data-room="${i}">${OPT.room.map(r=>`<option${r===M.tv_rooms[i]?" selected":""}>${esc(r)}</option>`).join("")}</select></div>
+      <div class="row2">
+        <div class="fld" style="margin:0"><label>壁端子後 分配</label>
+          <select data-sp="${i}">${OPT.tv_sp.map(([v,l])=>`<option value="${v}"${v===M.tv_sp[i]?" selected":""}>${esc(l)}</option>`).join("")}</select></div>
+        <div class="fld" style="margin:0"><label>壁端子 交換</label>
+          <select data-term="${i}">${OPT.tv_term.map(([v,l])=>`<option value="${v}"${v===M.tv_term[i]?" selected":""}>${esc(l)}</option>`).join("")}</select></div>
+      </div>
+    </div>`;
+  }
+  return h;
+}
+
+// ---- 配線チェックリスト ----
+// index.html の配線キーに直接書き込む。override値は絶対値(true=既存/黒, false=新規/赤)。
+// 既定色から変えた時だけ wire_overrides に記録（未記録なら図面側の自然既定色）。
+// index.html の系統図と同じ4分岐で「実際に存在する配線」だけを列挙する。
+//  増幅器から先の経路（電源構成で変化）:
+//   ① 外部電源(2分配器)      : 増幅器→2分配器WP→壁→分配器            (amp_to_wpsp / wpsp_to_wall / wall_to_sp)
+//   ② 外部電源(IN/OUT直結)    : 増幅器→電源部BOX→壁→分配器           (amp_to_pwbox / pwbox_to_wall / wall_to_sp)
+//   ③ CATV＋FA使用(電源が屋外でない): 増幅器→FA→壁抜け→宅内分配器     (out_to_fa / fa_indoor)
+//   ④ 通常                    : 増幅器→壁→分配器                     (out_to_wall / wall_to_sp)
+function wireEntries(){
+  const m=M;
+  const outerExist = m.outer_wire==="existing";
+  const spSideExist = (m.indoor_split==="unknown") ? true : (m.indoor_wire==="existing");
+  const isOutside = m.power_pos==="outside";
+  const direct = m.ext_power_conn==="direct";
+  const usesFA = (m.is_catv==="yes") && (m.use_fa==="yes") && !isOutside; // 原本: is_catv && faNode
+  const list=[];
+  // アンテナ→増幅器
+  list.push({key:"main_trunk_0", label:"主系統 アンテナ→増幅器", def:false});
+  if(m.ch46!=="no") list.push({key:"ch46_amp", label:"46CH アンテナ→増幅器", def:false});
+  if(m.ch46==="triple") list.push({key:"ch50_amp", label:"50CH アンテナ→増幅器", def:false});
+  if(m.bs_cs==="yes") list.push({key:"bs_mixer", label:"BS→混合器", def:false});
+  // 引込線（撤去しない場合のみ図示）
+  if(m.remove_drop==="no") list.push({key:"drop_line", label:"引込線", def:true});
+  // 増幅器→（FA/2分配器WP/電源部BOX/壁）→ 宅内分配器
+  if(isOutside && !direct){
+    list.push({key:"amp_to_wpsp",  label:"増幅器→2分配器WP", def:false});
+    list.push({key:"wpsp_to_wall", label:"2分配器WP→壁（外壁貫通）", def:outerExist});
+    list.push({key:"wall_to_sp",   label:"壁→宅内分配器", def:false});
+  } else if(isOutside && direct){
+    list.push({key:"amp_to_pwbox", label:"増幅器→電源部BOX", def:false});
+    list.push({key:"pwbox_to_wall",label:"電源部→壁（外壁貫通）", def:outerExist});
+    list.push({key:"wall_to_sp",   label:"壁→宅内分配器", def:false});
+  } else if(usesFA){
+    list.push({key:"out_to_fa",  label:"増幅器→FA（保安器台）", def:false}); // 既定=新規(赤)
+    list.push({key:"fa_indoor",  label:"FA→壁抜け→宅内分配器", def:true});   // 既定=既存(黒)
+  } else {
+    list.push({key:"out_to_wall",label:"増幅器→壁（外壁貫通）", def:outerExist});
+    list.push({key:"wall_to_sp", label:"壁→宅内分配器", def:false});
+  }
+  // 電源部を宅内（分配器直下）に新設する場合の 電源部→分配器（新規5C 2m）＝既定は新規(赤)
+  if(m.power_pos==="near_splitter"){
+    list.push({key:"sp_pw_to_sp", label:"電源部→分配器（新規5C 2m）", def:false});
+  }
+  // 分配器→各部屋
+  const n=parseInt(m.tv_count,10)||1;
+  for(let i=0;i<n;i++){
+    const rm=(m.tv_rooms&&m.tv_rooms[i])||("TV"+(i+1));
+    list.push({key:"indoor_room_"+i, label:"宅内配線 "+rm, def:spSideExist});
+  }
+  return list;
+}
+function renderWires(){
+  const entries=wireEntries();
+  let h=`<div class="info">各配線を <b style="color:var(--red)">新規(赤)</b> / <b>既存(黒)</b> で指定できます。変更しない配線は自動（選択に従う）のまま。PCで開くと系統図に同じ色で反映されます。</div>`;
+  h+=`<div id="wirelist">`;
+  for(const e of entries){
+    const ov = M.wire_overrides[e.key];
+    const cur = (ov!==undefined) ? ov : e.def; // true=既存, false=新規
+    const changed = (ov!==undefined);
+    h+=`<div class="wire">
+      <div class="nm">${esc(e.label)}${changed?"":' <span style="font-size:11px;color:var(--sub)">(自動)</span>'}</div>
+      <div class="tg" data-wk="${esc(e.key)}">
+        <button class="new ${cur===false?"on":""}" data-wv="new">新規</button>
+        <button class="exist ${cur===true?"on":""}" data-wv="exist">既存</button>
+      </div>
+    </div>`;
+  }
+  h+=`</div>`;
+  // 赤文字メモ
+  h+=`<div class="subhdr">赤文字メモ（系統図に載る手書き注記）</div>`;
+  h+=`<div class="info">現場で気づいた事を赤文字で残せます。PCの系統図の左上に表示され、ドラッグで位置調整できます。</div>`;
+  h+=`<div id="notelist">`;
+  (M.text_annotations||[]).forEach((a,i)=>{
+    h+=`<div class="note"><input type="text" data-note="${i}" value="${esc(a.text)}" placeholder="注記を入力"><button data-notedel="${i}">🗑</button></div>`;
+  });
+  h+=`</div><button class="tinybtn" id="addnote" style="width:100%;margin-top:6px;">＋ 赤文字メモを追加</button>`;
+  return h;
+}
+
+// ---- 電波測定（アンテナ出力／増幅器出力／宅内末端 × 7ch × dB/MER/BER）----
+// index.html の measurements と同一構造。値は数値、BERは 1.20E-5 表記で入力（内部は数値）。
+function berToStr(v){
+  if(v===""||v==null) return "";
+  const n=(typeof v==="number")?v:parseFloat(v);
+  if(isNaN(n)) return String(v);
+  if(n===0) return "0";
+  return n.toExponential(2).replace("e","E"); // 1.2e-5 → 1.20E-5
+}
+function strToBer(s){ s=String(s==null?"":s).trim(); if(s==="") return 0; const n=parseFloat(s); return isNaN(n)?0:n; }
+function numOrEmpty(s){ s=String(s==null?"":s).trim(); if(s==="") return ""; const n=parseFloat(s); return isNaN(n)?s:n; }
+function renderMeas(){
+  const ms=M.measurements||DEFAULT_MEASUREMENTS;
+  const chs=ms.channels||DEFAULT_MEASUREMENTS.channels;
+  const locs=[["antenna","① アンテナ出力"],["amplifier","② 増幅器出力"],["terminal","③ 宅内末端"]];
+  let h=`<div class="info">現場で測定した <b>dB</b>（レベル）/ <b>MER</b> / <b>BER</b> を各測定箇所×チャンネルで入力。既定値が入っているので実測値に直してください。BERは <b>1.20E-5</b> のように入力（誤りなしは 0）。測定した値は見積・系統図の電波測定表に掲載されます。</div>`;
+  for(const [key,label] of locs){
+    const rows=ms[key]||[];
+    h+=`<div class="meas-loc">${label}<button type="button" class="tinybtn" data-csv-import="${key}">📥CSV取込</button></div>`;
+    h+=`<div class="meas-row meas-head"><span class="ch">CH</span><span>dB</span><span>MER</span><span>BER</span></div>`;
+    for(let i=0;i<chs.length;i++){
+      const o=rows[i]||{db:"",mer:"",ber:""};
+      h+=`<div class="meas-row">
+        <span class="ch" title="${esc(chs[i])}">${esc(chs[i])}</span>
+        <input type="number" inputmode="decimal" step="0.1" data-meas="${key}" data-mi="${i}" data-mk="db"  value="${esc(o.db)}">
+        <input type="number" inputmode="decimal" step="0.1" data-meas="${key}" data-mi="${i}" data-mk="mer" value="${esc(o.mer)}">
+        <input type="text"   inputmode="decimal"           data-meas="${key}" data-mi="${i}" data-mk="ber" value="${esc(berToStr(o.ber))}" placeholder="0">
+      </div>`;
+    }
+  }
+  return h;
+}
+
+// ---- 写真 ----
+function renderPhotos(){
+  let h=`<div class="info">スマホのカメラで撮影した<b>原本（無劣化）</b>をそのまま保存します。PC側の index.html で「管理番号フォルダへ書き出し」できます。</div>`;
+  h+=`<div class="addphoto">
+    <label id="cam-btn">📷 撮影</label>
+    <label id="pick-btn" style="background:#455a64;">🖼 選択</label>
+  </div>`;
+  if(!M.chosho_photos.length){ h+=`<div class="info" style="text-align:center;">まだ写真がありません</div>`; }
+  h+=`<div class="photos">`;
+  M.chosho_photos.forEach((p,i)=>{
+    h+=`<div class="photo">
+      <span class="idx">${i+1}</span>
+      <button class="del" data-photodel="${i}">✕</button>
+      <img src="${esc(p.dataUri||"")}" alt="">
+      <div class="lbl"><input type="text" data-photolbl="${i}" value="${esc(p.label||"")}" placeholder="ラベル(例:施工前)"></div>
+    </div>`;
+  });
+  h+=`</div>`;
+  return h;
+}
+
+/* ============================================================================
+   5) イベント結合
+   ============================================================================ */
+// root を渡すと「その範囲だけ」再バインド（部分再描画で他欄のリスナーを重複させない）。既定は全体(app)。
+function bindEvents(root){
+  root = root || app;
+  // アコーディオン開閉
+  root.querySelectorAll("[data-toggle]").forEach(el=>{
+    el.addEventListener("click",()=>{
+      const id=el.getAttribute("data-toggle");
+      const sec=el.closest(".sec");
+      const now=sec.classList.toggle("open");
+      openState[id]=now;
+    });
+  });
+  // ドロップダウン(change)＝再描画 / テキスト等(input)＝再描画しない
+  root.querySelectorAll("[data-fld]").forEach(el=>{
+    const isSelect = el.tagName==="SELECT";
+    const ev = isSelect ? "change" : "input";
+    el.addEventListener(ev,()=>{
+      const id=el.getAttribute("data-fld");
+      const asb=el.getAttribute("data-asb");
+      if(asb){ M.asbestos[asb]=el.value; } else { M[id]=el.value; }
+      if(isSelect) onChoiceChange(id); else onTextInput(id);
+    });
+  });
+  // セグメントボタン（はい/いいえ等）＝クリックで再描画し選択状態を反映
+  root.querySelectorAll("[data-seg]").forEach(seg=>{
+    seg.querySelectorAll("button").forEach(b=>{
+      b.addEventListener("click",()=>{
+        const id=seg.getAttribute("data-seg");
+        const asb=seg.getAttribute("data-asb");
+        let v=b.getAttribute("data-v");
+        if(v==="true") v=true; else if(v==="false") v=false;
+        if(asb){ M.asbestos[asb]=v; } else { M[id]=v; }
+        onChoiceChange(id);
+      });
+    });
+  });
+  // TV行
+  root.querySelectorAll("[data-room]").forEach(el=>el.addEventListener("change",()=>{ M.tv_rooms[+el.getAttribute("data-room")]=el.value; saveDraft(); refreshWires(); }));
+  root.querySelectorAll("[data-bd]").forEach(el=>el.addEventListener("change",()=>{ M.tv_bd[+el.getAttribute("data-bd")]=el.checked; saveDraft(); }));
+  root.querySelectorAll("[data-sp]").forEach(el=>el.addEventListener("change",()=>{ M.tv_sp[+el.getAttribute("data-sp")]=el.value; saveDraft(); }));
+  root.querySelectorAll("[data-term]").forEach(el=>el.addEventListener("change",()=>{ M.tv_term[+el.getAttribute("data-term")]=el.value; saveDraft(); }));
+  // 配線トグル
+  root.querySelectorAll("[data-wk]").forEach(tg=>{
+    tg.querySelectorAll("button").forEach(b=>{
+      b.addEventListener("click",()=>{
+        const key=tg.getAttribute("data-wk");
+        const wantExist = b.getAttribute("data-wv")==="exist"; // true=既存
+        const entry = wireEntries().find(e=>e.key===key);
+        const def = entry?entry.def:false;
+        // 既定と同じに戻したら override 削除、違えば絶対値で記録
+        if(wantExist===def) delete M.wire_overrides[key];
+        else M.wire_overrides[key]=wantExist;
+        saveDraft(); refreshWires();
+      });
+    });
+  });
+  // 赤文字メモ
+  const addNote=root.querySelector("#addnote");
+  if(addNote) addNote.addEventListener("click",()=>{
+    const idx=M.text_annotations.length;
+    M.text_annotations.push({id:"anno_"+Date.now()+"_"+idx, x:30, y:40+idx*28, text:"", color:"#d32f2f", size:18});
+    saveDraft(); refreshWires();
+  });
+  root.querySelectorAll("[data-note]").forEach(el=>el.addEventListener("input",()=>{ M.text_annotations[+el.getAttribute("data-note")].text=el.value; saveDraftQuiet(); }));
+  root.querySelectorAll("[data-notedel]").forEach(el=>el.addEventListener("click",()=>{ M.text_annotations.splice(+el.getAttribute("data-notedel"),1); saveDraft(); refreshWires(); }));
+  // 写真
+  const camBtn=root.querySelector("#cam-btn"); if(camBtn) camBtn.addEventListener("click",()=>document.getElementById("cam-input").click());
+  const pickBtn=root.querySelector("#pick-btn"); if(pickBtn) pickBtn.addEventListener("click",()=>document.getElementById("pick-input").click());
+  root.querySelectorAll("[data-photodel]").forEach(el=>el.addEventListener("click",()=>{ M.chosho_photos.splice(+el.getAttribute("data-photodel"),1); saveDraft(); refreshPhotos(); }));
+  root.querySelectorAll("[data-photolbl]").forEach(el=>el.addEventListener("input",()=>{ M.chosho_photos[+el.getAttribute("data-photolbl")].label=el.value; saveDraftQuiet(); }));
+  // 電波測定の各値（再描画しない＝入力・フォーカスを妨げない）
+  root.querySelectorAll("[data-meas]").forEach(el=>el.addEventListener("input",()=>{
+    const cat=el.getAttribute("data-meas"), i=+el.getAttribute("data-mi"), k=el.getAttribute("data-mk");
+    if(!M.measurements[cat]) return;
+    if(!M.measurements[cat][i]) M.measurements[cat][i]={db:"",mer:"",ber:0};
+    M.measurements[cat][i][k] = (k==="ber") ? strToBer(el.value) : numOrEmpty(el.value);
+    saveDraftQuiet();
+  }));
+  // 電波測定 CSV取込（LCV4A）ボタン
+  root.querySelectorAll("[data-csv-import]").forEach(btn=>btn.addEventListener("click",()=>{
+    _csvTargetCat = btn.getAttribute("data-csv-import");
+    const inp=document.getElementById("csv-input");
+    inp.value=""; inp.click();
+  }));
+}
+
+// テキスト/数値/日付/電話などの input：再描画しない（IME・日本語変換・フォーカス保護）
+function onTextInput(id){
+  saveDraft();
+  updateHeader();
+  if(id==="chosho_cust_addr") updateMapLink(); // 住所入力に追従して地図リンクを更新
+}
+// 住所→Googleマップ（各OSの地図アプリ）URL
+function mapUrl(addr){
+  const q = String(addr==null?"":addr).replace(/[\t\r\n]+/g," ").trim();
+  return "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(q);
+}
+function updateMapLink(){
+  const a = document.getElementById("addr-map-link");
+  if(!a) return;
+  const has = !!String(M.chosho_cust_addr==null?"":M.chosho_cust_addr).trim();
+  if(has){ a.href = mapUrl(M.chosho_cust_addr); a.classList.remove("disabled"); }
+  else { a.href = "#"; a.classList.add("disabled"); }
+}
+// 選択系（ドロップダウンの change／セグメントボタンのクリック）：全体再描画で
+// 「選択中」表示・条件表示（例：外壁材=その他で別欄が出る等）を確実に反映。IME懸念なし。
+function onChoiceChange(id){
+  if(id==="tv_count") syncTvArrays(M);
+  saveDraft();
+  updateHeader();
+  render();
+}
+// 部分再描画は「その欄の中だけ」再バインド（bindEvents(root)）＝他欄のリスナー重複を防ぐ
+function refreshTvRows(){ const el=document.getElementById("tvrows"); if(el){ el.innerHTML=renderTvRows(); bindEvents(el); } }
+function refreshWires(){ const sec=[...app.querySelectorAll('.sec')].find(s=>s.getAttribute("data-sec")==="wires"); if(sec){ const body=sec.querySelector(".body"); if(body){ body.innerHTML=renderWires(); bindEvents(body); } } }
+function refreshMeas(){ const sec=[...app.querySelectorAll('.sec')].find(s=>s.getAttribute("data-sec")==="meas"); if(sec){ const body=sec.querySelector(".body"); if(body){ body.innerHTML=renderMeas(); bindEvents(body); } } }
+function refreshPhotos(){
+  const sec=[...app.querySelectorAll('.sec')].find(s=>s.getAttribute("data-sec")==="photos");
+  if(sec){ const body=sec.querySelector(".body"); if(body){ body.innerHTML=renderPhotos(); bindEvents(body); } }
+  const b=[...app.querySelectorAll('.sec')].find(s=>s.getAttribute("data-sec")==="photos")?.querySelector(".badge");
+  if(b) b.textContent=M.chosho_photos.length+"枚";
+}
+function updateHeader(){
+  const el=document.getElementById("hdr-mgmt");
+  el.textContent = M.chosho_mgmt_no ? ("管理番号 "+M.chosho_mgmt_no) : "管理番号 未入力";
+}
+
+/* ============================================================================
+   5.5) 電波測定 CSV取込（LCV4A）
+   測定表1ブロック目・UHF行のみを対象に、フォームのCH構成(measurements.channels)へ
+   dB/MER/BERを流し込む。CH構成そのものは変更しない（未対応CHは通知のみ）。
+   ============================================================================ */
+function _han(s){ return String(s==null?"":s)
+  .replace(/[０-９．＋]/g,ch=>String.fromCharCode(ch.charCodeAt(0)-0xFEE0))
+  .replace(/[−–—－]/g,"-"); }
+function parseMeasNum(s){ s=_han(s).trim();
+  if(s===""||/^-+$/.test(s)||s==="---") return ""; const n=parseFloat(s); return isNaN(n)?"":n; }
+function parseMeasBer(s){ s=_han(s).trim();
+  if(s===""||/^-+$/.test(s)||s==="---") return ""; const n=parseFloat(s); return isNaN(n)?"":n; }
+function readFileAsArrayBuffer(file){ return new Promise((res,rej)=>{
+  const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=()=>rej(r.error);
+  r.readAsArrayBuffer(file); }); }
+function decodeCsvBytes(buf){
+  const bytes=new Uint8Array(buf);
+  for(const enc of ["shift_jis","utf-8"]){
+    try{ const t=new TextDecoder(enc,{fatal:false}).decode(bytes);
+         if(/チャンネル/.test(t)) return t; }catch(_){}
+  }
+  return new TextDecoder("shift_jis",{fatal:false}).decode(bytes);
+}
+function parseLcv4aCsv(text){
+  const lines=text.split(/\r\n|\r|\n/);
+  let H=-1, head=null;
+  for(let i=0;i<lines.length;i++){
+    const c=lines[i].split(",").map(s=>s.trim());
+    if(c.some(x=>/チャンネル/.test(x)) && c.some(x=>/LEVEL|dBuV/i.test(x))){ H=i; head=c; break; }
+  }
+  if(H<0) throw new Error("測定表のヘッダーが見つかりません（LCV4AのCSVですか？）");
+  const find=pred=>{ for(let j=0;j<head.length;j++) if(pred(head[j])) return j; return -1; };
+  const chCol   = find(x=>/チャンネル/.test(x));
+  const bandCol = find(x=>/バンド/.test(x));
+  const levelCol= find(x=>/LEVEL|dBuV/i.test(x) && !/下限|上限/.test(x));
+  const merCol  = find(x=> x==="MER");
+  const berCol  = find(x=> x==="BER");
+  if(chCol<0||levelCol<0) throw new Error("チャンネル列またはLEVEL列が見つかりません");
+  const rows=[];
+  for(let i=H+1;i<lines.length;i++){
+    const raw=lines[i];
+    if(raw.trim()==="") break;
+    const c=raw.split(",").map(s=>s.trim());
+    if((c[0]||"").startsWith("#")) break;
+    const ch=parseInt(_han(c[chCol]||""),10);
+    if(!Number.isFinite(ch)) continue;
+    rows.push({ band: bandCol>=0?(c[bandCol]||""):"", ch,
+      db: parseMeasNum(c[levelCol]||""),
+      mer: merCol>=0 ? parseMeasNum(c[merCol]||"") : "",
+      ber: berCol>=0 ? parseMeasBer(c[berCol]||"") : "" });
+  }
+  return { rows, hasMer:merCol>=0, hasBer:berCol>=0 };
+}
+async function handleMeasCsv(file, cat){
+  const labelMap={antenna:"① アンテナ出力",amplifier:"② 増幅器出力",terminal:"③ 宅内末端"};
+  const model=M; // 読込開始時の戸別を固定（読込中に別戸別へ切替わっても混入/喪失させない）
+  let parsed;
+  try{ const buf=await readFileAsArrayBuffer(file); parsed=parseLcv4aCsv(decodeCsvBytes(buf)); }
+  catch(err){ await uiAlert("CSVを読み込めませんでした：\n"+err.message); return; }
+  const uhf=parsed.rows.filter(r=>/UHF/i.test(r.band) || r.band==="");
+  if(!uhf.length){ await uiAlert("CSVにUHFの測定行が見つかりませんでした。"); return; }
+  const ms=model.measurements, chs=ms.channels||[];
+  const idxByCh=new Map();
+  chs.forEach((c,i)=>{ const n=parseInt(c,10); if(Number.isFinite(n)&&!idxByCh.has(n)) idxByCh.set(n,i); });
+  const target=ms[cat], applyList=[], unmatched=[], seen=new Set();
+  for(const r of uhf){ if(seen.has(r.ch)) continue; seen.add(r.ch);
+    if(idxByCh.has(r.ch)) applyList.push({i:idxByCh.get(r.ch), r}); else unmatched.push(r.ch); }
+  if(!applyList.length){ await uiAlert("CSVのCHがフォームのCH構成と一致しませんでした。\nCSV: "
+    +[...seen].join(",")+"\nフォーム: "+chs.map(c=>parseInt(c,10)).join(",")); return; }
+  const nonEmpty=v=>v!==""&&v!=null;
+  const willOverwrite=applyList.some(({i})=>{ const o=target[i]||{}; return nonEmpty(o.db)||nonEmpty(o.mer)||nonEmpty(o.ber); });
+  if(willOverwrite && !(await uiConfirm(labelMap[cat]+"には既に測定値があります。CSVの値で上書きしますか？"))) return;
+  for(const {i,r} of applyList){ const cur=target[i]||{};
+    target[i]={ db:r.db, mer: parsed.hasMer?r.mer:(cur.mer??""), ber: parsed.hasBer?r.ber:(cur.ber??"") }; }
+  if(M===model){ saveDraft(); refreshMeas(); } // まだ同じ戸別を編集中
+  else { await persistModel(model); }           // 別戸別へ切替済み→読込元を直接確定保存（混入/喪失防止）
+  toast(labelMap[cat]+"に "+applyList.length+"CH取込（未対応CH: "
+    +(unmatched.length?unmatched.join(","):"なし")+"）");
+}
+document.getElementById("csv-input").addEventListener("change",async e=>{
+  const f=e.target.files[0]; e.target.value="";
+  if(!f) return;
+  await handleMeasCsv(f, _csvTargetCat);
+});
+
+/* ============================================================================
+   6) 写真取り込み（無劣化）
+   ============================================================================ */
+function readImageAsDataURI(file){
+  return new Promise((resolve,reject)=>{
+    const r=new FileReader();
+    r.onload=()=>resolve(r.result);   // 原本バイトをそのままdataURI化（再圧縮なし）
+    r.onerror=()=>reject(r.error);
+    r.readAsDataURL(file);
+  });
+}
+async function handlePhotoFiles(files){
+  const model=M; // 読込開始時の戸別を固定（読込中に別戸別へ切替わっても混入/喪失させない）
+  const all=Array.from(files||[]);
+  // MIMEが空でもファイル名の拡張子で画像判定（Android/SAF等でtypeが空になる端末対策）
+  const arr=all.filter(f=>f && (/^image\//i.test(f.type||"") || /\.(jpe?g|png|heic|heif|webp|gif|bmp|tiff?)$/i.test(f.name||"")));
+  if(!arr.length){
+    if(all.length) toast("画像として認識できませんでした（別の写真でお試しください）");
+    return;
+  }
+  let fail=0;
+  for(let i=0;i<arr.length;i++){
+    try{
+      const dataUri=await readImageAsDataURI(arr[i]);
+      // ラベルは実際の格納枚数で採番（失敗があっても連番がズレない）。push先は固定した model。
+      model.chosho_photos.push({label:suggestLabel(model.chosho_photos.length), dataUri});
+    }catch(e){ console.error("photo read failed",e); fail++; }
+  }
+  if(M===model){ saveDraft(); refreshPhotos(); }      // まだ同じ戸別を編集中
+  else { await persistModel(model); }                  // 別戸別へ切替済み→読込元を直接確定保存（混入/喪失防止）
+  if(fail) toast(fail+"枚は読み込めませんでした（別の写真でお試しください）");
+}
+function suggestLabel(n){
+  const seq=["施工前","施工前②","施工中","施工完了","施工完了②","現地","表札","その他"];
+  return seq[n]||("写真"+(n+1));
+}
+document.getElementById("cam-input").addEventListener("change",e=>{ handlePhotoFiles(e.target.files); e.target.value=""; });
+document.getElementById("pick-input").addEventListener("change",e=>{ handlePhotoFiles(e.target.files); e.target.value=""; });
+
+/* ============================================================================
+   7) 互換JSONの生成
+   ============================================================================ */
+// collectState() と同じ形・キーのオブジェクトを作る
+function buildState(){
+  syncTvArrays(M);
+  const STR_FIELDS = ["work_type","is_catv","high_work","snow_guard","indoor_adj",
+    "antenna_main","antenna_46","antenna_50","ch46","bs_cs","bs_antenna_state","bsmix_type","bsmix_state",
+    "mount_type","side_base_1","side_base_2","side_base_3","mast","mast_2","mast_3",
+    "connector_type","connector_qty","turnbuckle_qty","amplifier","line_booster","hpf","outer_splitter",
+    "indoor_split","split_all_pass","power_pos","indoor_wire","outer_wire","tv_count",
+    "remove_safety","remove_drop","cable_drop_len","dummy_attached","use_fa","meas_show",
+    "cable_new_len","cable_main_len","cable_ch46_len","cable_ch50_len","cable_amp_next_len",
+    "cable_indoor_new","cable_vvf_len","cable_s5cfb_power","ext_power_conn",
+    "att_main","att_46","att_50","box_consent","ofmu_qty","wire_sus16_len",
+    "chosho_mgmt_no","chosho_date","chosho_cust_name","chosho_cust_addr","chosho_cust_tel","chosho_status"];
+  const s={};
+  STR_FIELDS.forEach(k=>{ s[k]=String(M[k]==null?"":M[k]); });
+  s.tax_mode=M.tax_mode||"excl";
+  s.misc_fee=M.misc_fee||"include";
+  s.outsource_fee_on=!!M.outsource_fee_on;
+  s.outsource_fee_amount=Math.max(0,parseFloat(M.outsource_fee_amount)||0);
+  s.outsource_fee_auto=!!M.outsource_fee_auto;
+  s.tv_rooms=M.tv_rooms.slice();
+  s.tv_bd=M.tv_bd.map(Boolean);
+  s.tv_sp=M.tv_sp.slice();
+  s.tv_term=M.tv_term.slice();
+  s.wire_overrides=Object.assign({},M.wire_overrides);
+  s.qty_overrides=Object.assign({},M.qty_overrides);
+  s.node_offsets=Object.assign({},M.node_offsets);
+  s.meas_transforms=Object.assign({},M.meas_transforms);
+  s.node_existing_overrides=Object.assign({},M.node_existing_overrides);
+  s.text_annotations=(M.text_annotations||[]).map(a=>({id:a.id,x:+a.x||0,y:+a.y||0,text:String(a.text||""),color:a.color||"#d32f2f",size:a.size||18})).filter(a=>a.text);
+  s.measurements=JSON.parse(JSON.stringify(M.measurements||DEFAULT_MEASUREMENTS));
+  s.chosho_photos=(M.chosho_photos||[]).map(p=>({label:String(p.label||""),dataUri:p.dataUri||null}));
+  s.asbestos=Object.assign({},M.asbestos);
+  s.antenna_guide=JSON.parse(JSON.stringify(M.antenna_guide||{ver:1,pattern:null,parts:{}}));
+  return s;
+}
+
+/* ============================================================================
+   8) 保存・読込
+   ============================================================================ */
+function sanitizeFilename(s){ return String(s||"").replace(/[\\\/:*?"<>|]/g,"_").trim(); }
+function currentFileName(){
+  const no=sanitizeFilename(M.chosho_mgmt_no)||"戸別";
+  return no+".json";   // 戸別ファイル名は「管理番号.json」に統一
+}
+async function saveJson(){
+  if(!M.chosho_mgmt_no){
+    if(!(await uiConfirm("管理番号が未入力です。このまま保存しますか？（ファイル名が「戸別」になります）"))) return;
+  }
+  const state=buildState();
+  const json=JSON.stringify(state);
+  const blob=new Blob([json],{type:"application/json"});
+  const fname=currentFileName();
+  await persistDraft();  // 下書きは保存（ただし💾＝JSON書出済フラグは“実際に書き出せた時だけ”後で付ける）
+  // ① File System Access（Android Chrome対応）
+  if(window.showSaveFilePicker){
+    try{
+      const handle=await window.showSaveFilePicker({
+        suggestedName:fname,
+        types:[{description:"戸別JSON",accept:{"application/json":[".json"]}}]
+      });
+      const w=await handle.createWritable();
+      await w.write(blob); await w.close();
+      await markDraftSaved();   // ← 書込成功後にだけ💾
+      toast("保存しました："+fname);
+      return;
+    }catch(e){ if(e && e.name==="AbortError") return; /* 失敗時は下へフォールバック */ }
+  }
+  // ② Web Share（ファイル共有→Dropbox/ドライブ等）
+  if(navigator.canShare){
+    try{
+      const file=new File([blob],fname,{type:"application/json"});
+      if(navigator.canShare({files:[file]})){
+        // iOSはtitle/textを渡すと別テキストファイルが作られるためfilesのみ共有
+        await navigator.share({files:[file]});
+        await markDraftSaved();
+        toast("共有しました："+fname);
+        return;
+      }
+    }catch(e){ if(e && e.name==="AbortError") return; }
+  }
+  // ③ ダウンロード
+  const url=URL.createObjectURL(blob);
+  const a=document.createElement("a"); a.href=url; a.download=fname; document.body.appendChild(a); a.click();
+  setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); },4000); // 大量写真でDLダイアログが遅延しても失敗しないよう余裕を持つ
+  await markDraftSaved();
+  toast("ダウンロードしました："+fname);
+}
+
+// 既存JSONを読み込んでフォームへ（plainのみ。暗号化(.enc/.hyb)はPCで）
+async function loadStateInto(s){
+  clearTimeout(_persistTimer); await persistDraft(); // 取込前に現在編集中を確定保存（直近入力喪失を防ぐ）
+  const m=freshModel();
+  // 文字列/基本フィールド
+  for(const k in DEFAULTS){ if(s[k]!==undefined && k!=="outsource_fee_on"&&k!=="outsource_fee_amount"&&k!=="outsource_fee_auto") m[k]=s[k]; }
+  if(s.tax_mode) m.tax_mode=s.tax_mode;
+  if(s.misc_fee) m.misc_fee=s.misc_fee;
+  m.outsource_fee_on=!!s.outsource_fee_on;
+  m.outsource_fee_amount=+s.outsource_fee_amount||0;
+  m.outsource_fee_auto=!!s.outsource_fee_auto;
+  if(Array.isArray(s.tv_rooms)) m.tv_rooms=s.tv_rooms.slice();
+  if(Array.isArray(s.tv_bd)) m.tv_bd=s.tv_bd.map(Boolean);
+  if(Array.isArray(s.tv_sp)) m.tv_sp=s.tv_sp.map(v=>v===true?"new":(v===false?"no":v));
+  if(Array.isArray(s.tv_term)) m.tv_term=s.tv_term.slice();
+  if(s.wire_overrides&&typeof s.wire_overrides==="object") m.wire_overrides=Object.assign({},s.wire_overrides);
+  if(s.qty_overrides) m.qty_overrides=Object.assign({},s.qty_overrides);
+  if(s.node_offsets) m.node_offsets=Object.assign({},s.node_offsets);
+  if(s.meas_transforms) m.meas_transforms=Object.assign({},s.meas_transforms);
+  if(s.node_existing_overrides) m.node_existing_overrides=Object.assign({},s.node_existing_overrides);
+  if(Array.isArray(s.text_annotations)) m.text_annotations=s.text_annotations.map(a=>({id:a.id||("anno_"+Math.random().toString(36).slice(2)),x:+a.x||0,y:+a.y||0,text:String(a.text||""),color:a.color||"#d32f2f",size:a.size||18}));
+  if(s.measurements&&Array.isArray(s.measurements.channels)) m.measurements=JSON.parse(JSON.stringify(s.measurements));
+  if(Array.isArray(s.chosho_photos)) m.chosho_photos=s.chosho_photos
+      .map(p=>({label:String((p&&p.label)||""),dataUri:(p&&p.dataUri)||null}))
+      .filter(p=>p.dataUri && /^data:image\//i.test(p.dataUri)); // data:image/ 形式のみ許可（細工JSONの属性インジェクション防止）
+  if(s.asbestos&&typeof s.asbestos==="object") m.asbestos=Object.assign(m.asbestos,s.asbestos);
+  m.antenna_guide=normalizeAntennaGuide(s.antenna_guide);
+  syncTvArrays(m);
+  m.meas_show="yes"; // 電波測定表は常に掲載扱い（UIトグル廃止・取込JSONの"no"を上書き）
+  M=m;
+  // 保存データがガイドと食い違っている場合（例: 旧ch46="triple"のままガイドは2本等）の是正。
+  // ガイドが有効な物件は、取込直後にガイド基準で再反映して整合を取る（未設定の物件は触らない）。
+  if(antennaGuideActive(M.antenna_guide)) autoReflectGuideToModel(M.antenna_guide);
+  resetOpenState(); render(); saveDraft();
+}
+document.getElementById("import-file").addEventListener("change",e=>{
+  const f=e.target.files[0]; e.target.value="";
+  if(!f) return;
+  const r=new FileReader();
+  r.onload=async()=>{
+    try{
+      const data=JSON.parse(r.result);
+      // 暗号化判定
+      if(data && (data.format==="hybrid" || (data.alg==="AES-GCM-256"&&data.ct))){
+        await uiAlert("このファイルは暗号化されています。PCの index.html で開いてください。");
+        return;
+      }
+      if(!(data.work_type||data.chosho_mgmt_no||data.chosho_cust_name)){
+        if(!(await uiConfirm("戸別JSONとして認識できませんでした。読み込みますか？"))) return;
+      }
+      await loadStateInto(data);
+      closeDraftModal();
+      toast("読込みました");
+    }catch(err){ await uiAlert("読込みに失敗しました："+err.message); }
+  };
+  r.readAsText(f);
+});
+
+/* ============================================================================
+   9) 下書き（この端末に自動保存）
+   ============================================================================ */
+// 写真を含む大きな下書きを確実に保存するため IndexedDB を使用（localStorageは約5MBで溢れるため）
+const IDB_NAME="field_input_db_v1", IDB_STORE="drafts";
+function idb(){ return new Promise((res,rej)=>{ const r=indexedDB.open(IDB_NAME,1); r.onupgradeneeded=()=>{ if(!r.result.objectStoreNames.contains(IDB_STORE)) r.result.createObjectStore(IDB_STORE,{keyPath:"key"}); }; r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
+async function idbPut(rec){ const db=await idb(); return new Promise((res,rej)=>{ const tx=db.transaction(IDB_STORE,"readwrite"); tx.objectStore(IDB_STORE).put(rec); tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error); }); }
+async function idbGet(key){ const db=await idb(); return new Promise((res,rej)=>{ const tx=db.transaction(IDB_STORE,"readonly"); const rq=tx.objectStore(IDB_STORE).get(key); rq.onsuccess=()=>res(rq.result||null); rq.onerror=()=>rej(rq.error); }); }
+async function idbGetAll(){ const db=await idb(); return new Promise((res,rej)=>{ const tx=db.transaction(IDB_STORE,"readonly"); const rq=tx.objectStore(IDB_STORE).getAll(); rq.onsuccess=()=>res(rq.result||[]); rq.onerror=()=>rej(rq.error); }); }
+async function idbDel(key){ const db=await idb(); return new Promise((res,rej)=>{ const tx=db.transaction(IDB_STORE,"readwrite"); tx.objectStore(IDB_STORE).delete(key); tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error); }); }
+
+let _persistTimer=null;
+function draftKey(){ return M.chosho_mgmt_no ? ("no:"+M.chosho_mgmt_no) : (M._draftId||(M._draftId="tmp:"+Date.now())); }
+function saveDraft(){ updateHeader(); schedulePersist(); }
+function saveDraftQuiet(){ schedulePersist(); }
+function schedulePersist(){ clearTimeout(_persistTimer); _persistTimer=setTimeout(()=>{ persistDraft(); }, 400); }
+// レコードに中身があるか（別の実データ下書きかの判定用）
+function _recHasContent(rec){
+  return !!(rec && rec.model && (rec.model.chosho_cust_name || rec.fileSavedAt
+    || (rec.model.chosho_photos && rec.model.chosho_photos.length)));
+}
+async function persistDraft(){
+  try{
+    const wantKey=draftKey();
+    const prev=await idbGet(wantKey);
+    // 管理番号衝突ガード：このキーの下書きを今まさに編集しているのでなく（別番号から移動 or 新規で既存番号入力）、
+    // かつ既存が中身のある“別の下書き”なら、無警告で上書きしない（データ喪失防止）。現在の入力は退避キーへ保存。
+    const editingThisKey = (M._lastDraftKey === wantKey);
+    let key = wantKey;
+    if(!editingThisKey && _recHasContent(prev)){
+      key = (M._draftId && M._draftId !== wantKey) ? M._draftId : (M._draftId = "tmp:" + Date.now());
+      if(persistDraft._collisionKey !== wantKey){
+        persistDraft._collisionKey = wantKey;
+        toast("⚠ 管理番号「"+(M.chosho_mgmt_no||"")+"」の下書きが既にあります。番号を変えるか、一覧で既存を開いてください");
+      }
+    } else {
+      persistDraft._collisionKey = null;
+    }
+    // 前回このモデルを保存したキーから変わっていたら旧レコードを削除（tmp:/no:旧番号 の孤児化を防ぐ）
+    if(M._lastDraftKey && M._lastDraftKey !== key){ try{ await idbDel(M._lastDraftKey); }catch(_){} }
+    M._lastDraftKey = key;
+    const cur = (key===wantKey) ? prev : await idbGet(key);
+    const rec={ key, model:M, savedAt:Date.now(), fileSavedAt:(cur&&cur.fileSavedAt)||0,
+      mgmt:M.chosho_mgmt_no||"", cust:M.chosho_cust_name||"", photos:(M.chosho_photos||[]).length };
+    await idbPut(rec);
+    localStorage.setItem(LS_LAST, key);
+    persistDraft._warned=false;
+  }catch(e){
+    console.warn("draft persist failed",e);
+    // 容量不足等で自動保存が失敗した時は無音で失わせず、1度だけ警告（JSON保存を促す）
+    if(!persistDraft._warned){ persistDraft._warned=true; toast("⚠ 自動保存に失敗（空き容量不足かも）。💾保存でJSONを残してください"); }
+  }
+}
+// 指定モデルを（現在編集中でなくても）そのキーで直接保存。写真読込完了が別戸別切替後に走った時などに使用。
+async function persistModel(m){
+  try{
+    if(!m) return;
+    const key = m.chosho_mgmt_no ? ("no:"+m.chosho_mgmt_no) : (m._draftId || (m._draftId="tmp:"+Date.now()));
+    const prev=await idbGet(key);
+    await idbPut({ key, model:m, savedAt:Date.now(), fileSavedAt:(prev&&prev.fileSavedAt)||0,
+      mgmt:m.chosho_mgmt_no||"", cust:m.chosho_cust_name||"", photos:(m.chosho_photos||[]).length });
+  }catch(e){ console.warn("persistModel failed",e); }
+}
+async function markDraftSaved(){
+  try{
+    const key = M._lastDraftKey || (M.chosho_mgmt_no ? ("no:"+M.chosho_mgmt_no) : (M._draftId||""));
+    const rec=await idbGet(key);
+    if(rec){ rec.fileSavedAt=Date.now(); await idbPut(rec); }
+  }catch(e){ console.warn("markDraftSaved failed",e); }
+}
+
+async function openDraftModal(){
+  document.getElementById("draft-modal").classList.add("open");
+  const list=document.getElementById("draft-list");
+  list.innerHTML=`<div class="info" style="text-align:center">読み込み中…</div>`;
+  let recs=[];
+  try{ recs=await idbGetAll(); }catch(e){ list.innerHTML=`<div class="info">下書きの読込に失敗しました</div>`; return; }
+  recs.sort((a,b)=>(b.savedAt||0)-(a.savedAt||0));
+  if(!recs.length){ list.innerHTML=`<div class="info" style="text-align:center">下書きはまだありません</div>`; return; }
+  list.innerHTML =
+    `<div class="draft-actions">
+       <label class="d-selall"><input type="checkbox" id="d-selectall"> 全選択</label>
+       <button class="d-delsel" id="d-delsel" disabled>🗑 選択を削除</button>
+     </div>` +
+    recs.map(d=>{
+      const t=new Date(d.savedAt||0);
+      const ts=`${t.getMonth()+1}/${t.getDate()} ${String(t.getHours()).padStart(2,"0")}:${String(t.getMinutes()).padStart(2,"0")}`;
+      // 💾=JSON書出済で以後未編集 ／ ✏️=書出後に変更あり(再書出推奨) ／ 無印=未書出
+      const badge = (d.fileSavedAt && d.fileSavedAt >= (d.savedAt||0)) ? "💾 " : (d.fileSavedAt ? "✏️ " : "");
+      return `<div class="draft">
+        <input type="checkbox" class="d-check" data-draftcheck="${esc(d.key)}">
+        <div class="d-main" data-draftopen="${esc(d.key)}">
+          <div class="d-no">${badge}${esc(d.mgmt||"（番号なし）")}${d.cust?(" ／ "+esc(d.cust)):""}</div>
+          <div class="d-sub">更新 ${ts}・写真${d.photos||0}枚</div>
+        </div>
+        <button class="d-open" data-draftopen="${esc(d.key)}">開く</button>
+      </div>`;
+    }).join("");
+  // 行/開くボタンをタップで再開
+  list.querySelectorAll("[data-draftopen]").forEach(b=>b.addEventListener("click",async()=>{
+    const k=b.getAttribute("data-draftopen");
+    clearTimeout(_persistTimer); await persistDraft(); // 現在編集中の保留自動保存を先に確定（切替時の直近入力喪失を防ぐ）
+    const rec=await idbGet(k);
+    if(rec&&rec.model){ M=rec.model; M._lastDraftKey=k; ensureModelShape(M); resetOpenState(); render(); localStorage.setItem(LS_LAST,k); closeDraftModal(); toast("再開しました"); }
+  }));
+  // チェックボックス（複数選択）
+  const updateDelBtn=()=>{
+    const n=list.querySelectorAll(".d-check:checked").length;
+    const btn=document.getElementById("d-delsel");
+    btn.disabled = n===0;
+    btn.textContent = n>0 ? ("🗑 選択を削除（"+n+"）") : "🗑 選択を削除";
+  };
+  list.querySelectorAll(".d-check").forEach(cb=>cb.addEventListener("change",updateDelBtn));
+  document.getElementById("d-selectall").addEventListener("change",e=>{
+    list.querySelectorAll(".d-check").forEach(cb=>cb.checked=e.target.checked);
+    updateDelBtn();
+  });
+  // 選択したものをまとめて削除
+  document.getElementById("d-delsel").addEventListener("click",async()=>{
+    const keys=[...list.querySelectorAll(".d-check:checked")].map(cb=>cb.getAttribute("data-draftcheck"));
+    if(!keys.length) return;
+    if(!(await uiConfirm("選択した "+keys.length+" 件の下書きを削除しますか？"))) return;
+    // 現在編集中の戸別が含まれる場合は、保留自動保存を止め・編集内容とLS_LASTをリセット（削除後の復活防止）
+    const curKey = M.chosho_mgmt_no ? ("no:"+M.chosho_mgmt_no) : (M._draftId||"");
+    const delCur = keys.indexOf(curKey)>=0;
+    if(delCur) clearTimeout(_persistTimer);
+    for(const k of keys){ await idbDel(k); }
+    if(delCur){ M=freshModel(); localStorage.removeItem(LS_LAST); render(); }
+    toast(keys.length+"件を削除しました");
+    openDraftModal();
+  });
+}
+function closeDraftModal(){ document.getElementById("draft-modal").classList.remove("open"); }
+// 旧下書きに欠けフィールドがあっても壊れないよう補完
+function ensureModelShape(m){
+  for(const k in DEFAULTS){ if(m[k]===undefined) m[k]=DEFAULTS[k]; }
+  ["tv_rooms","tv_bd","tv_sp","tv_term"].forEach(k=>{ if(!Array.isArray(m[k])) m[k]=[]; });
+  ["wire_overrides","qty_overrides","node_offsets","meas_transforms","node_existing_overrides"].forEach(k=>{ if(!m[k]||typeof m[k]!=="object") m[k]={}; });
+  if(!Array.isArray(m.text_annotations)) m.text_annotations=[];
+  if(!Array.isArray(m.chosho_photos)) m.chosho_photos=[];
+  if(!m.measurements||!Array.isArray(m.measurements.channels)) m.measurements=JSON.parse(JSON.stringify(DEFAULT_MEASUREMENTS));
+  m.meas_show="yes"; // 電波測定表は常に掲載扱い（UIトグル廃止・旧レコードの"no"を上書き）
+  if(!m.asbestos||typeof m.asbestos!=="object") m.asbestos=freshModel().asbestos;
+  m.antenna_guide=normalizeAntennaGuide(m.antenna_guide); // 形不正（旧下書き・破損データ）は既定値へ
+  // 管理番号があるなら一時IDは不要（残留した tmp: が後で別キー保存の孤児化を招くため除去）
+  if(m.chosho_mgmt_no) delete m._draftId;
+  syncTvArrays(m);
+}
+
+/* ============================================================================
+   10) UI雑務
+   ============================================================================ */
+function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+function toast(msg){ const t=document.getElementById("savedhint"); t.textContent=msg; t.classList.add("show"); clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove("show"),1900); }
+// アプリ内ダイアログ（iOSのホーム画面アプリでは native confirm/alert が無効化されるため自前で実装）
+function uiDialog(msg, isConfirm, okLabel){
+  return new Promise(resolve=>{
+    const modal=document.getElementById("ui-dialog");
+    const okBtn=document.getElementById("ui-dialog-ok");
+    const cancelBtn=document.getElementById("ui-dialog-cancel");
+    document.getElementById("ui-dialog-msg").textContent=msg;
+    cancelBtn.style.display = isConfirm ? "" : "none";
+    okBtn.textContent = okLabel || "OK";
+    modal.classList.add("open");
+    const done=(val)=>{ modal.classList.remove("open"); okBtn.onclick=null; cancelBtn.onclick=null; modal.onclick=null; resolve(val); };
+    okBtn.onclick=()=>done(true);
+    cancelBtn.onclick=()=>done(false);
+    modal.onclick=(e)=>{ if(e.target===modal) done(false); }; // 背景タップ=キャンセル
+  });
+}
+function uiConfirm(msg){ return uiDialog(msg, true); }
+function uiAlert(msg){ return uiDialog(msg, false); }
+async function newCase(){
+  if(!(await uiConfirm("新規の戸別を作成します。現在の入力は下書きに保存されます。よろしいですか？"))) return;
+  clearTimeout(_persistTimer);            // 保留中の自動保存を止める（新規の空モデルを古いキーで保存しない）
+  await persistDraft();                   // 現在の入力を下書きに保存
+  M=freshModel();
+  localStorage.removeItem(LS_LAST);       // 次回起動で古い戸別を復元しないよう「最後に開いたキー」をクリア
+  resetOpenState();                       // アコーディオン開閉を既定へ
+  render();
+  toast("新規を作成しました");
+}
+document.getElementById("btn-save").addEventListener("click",saveJson);
+document.getElementById("btn-save-top").addEventListener("click",saveJson);
+document.getElementById("btn-new").addEventListener("click",newCase);
+document.getElementById("btn-new-top").addEventListener("click",newCase);
+document.getElementById("btn-list").addEventListener("click",openDraftModal);
+document.getElementById("btn-list2").addEventListener("click",openDraftModal);
+document.getElementById("draft-close").addEventListener("click",closeDraftModal);
+document.getElementById("btn-import").addEventListener("click",()=>document.getElementById("import-file").click());
+document.getElementById("draft-modal").addEventListener("click",e=>{ if(e.target.id==="draft-modal") closeDraftModal(); });
+
+// アプリを離れる/バックグラウンド化する直前に、保留中(400msデバウンス)の自動保存を確定させる。
+// （iOSホーム画面アプリは背面化で終了/再読込されやすく、直近入力が消えるのを防ぐ）
+function flushPersist(){ if(_persistTimer){ clearTimeout(_persistTimer); _persistTimer=null; try{ persistDraft(); }catch(_){} } }
+document.addEventListener("visibilitychange",()=>{ if(document.visibilityState==="hidden") flushPersist(); });
+window.addEventListener("pagehide", flushPersist);
+
+/* ============================================================================
+   11) 起動
+   ============================================================================ */
+(async function boot(){
+  M=freshModel(); render();  // まず即描画（IDB読込を待たせない）
+  try{
+    const lastKey=localStorage.getItem(LS_LAST);
+    if(lastKey){
+      const rec=await idbGet(lastKey);
+      if(rec && rec.model){ M=rec.model; ensureModelShape(M); render(); }
+    }
+  }catch(e){ console.warn("boot draft load failed",e); }
+})();
+</script>
+</body>
+</html>
