@@ -367,9 +367,49 @@ const LS_LAST   = "field_input_last_v1"; // 最後に開いた下書きキー（
 let agWidget = null;         // アンテナ取付ガイド ウィジェットのインスタンス（render()毎に再生成）
 let guideFilledFields = new Set(); // アンテナ取付ガイドが自動入力した M のキー（別色表示用。手動変更で解除）
 
+/* ============================================================================
+   出自スタンプ／写真ID（Phase 0）— PC(index.html)側と完全に同一実装であること。
+   ・_origin:"genba" ＝ この戸別JSONを現場入力が書き出したことを記録。
+   ・photoContentId ＝ 撮影時に一度だけ付与し、以後（PC側の圧縮・サムネ化でも）維持する
+     安定な写真ID。別解像度の同一写真をPC側で1枚に畳むための突合キー。
+   ============================================================================ */
+const GENBA_SCHEMA_VER = 1;
+function photoContentId(dataUri){
+  if(!dataUri || typeof dataUri !== "string") return "";
+  let a = 5381, b = 0;
+  for(let i = 0; i < dataUri.length; i++){
+    const c = dataUri.charCodeAt(i);
+    a = ((a << 5) + a + c) >>> 0;          // djb2
+    b = (c + (b << 6) + (b << 16) - b) >>> 0; // sdbm
+  }
+  const hex = x => ("00000000" + (x >>> 0).toString(16)).slice(-8);
+  return "p" + hex(a) + hex(b) + "_" + dataUri.length;
+}
+// buildState で明示的に扱うトップレベルキー（これ以外の未知キーは _passthrough に退避し、
+// 書出し時にそのまま復元する＝PC側の ag_placement 等を現場入力の往復で失わない）。
+const GENBA_KNOWN_KEYS = new Set([
+  "work_type","is_catv","high_work","snow_guard","indoor_adj",
+  "antenna_main","antenna_46","antenna_50","ch46","bs_cs","bs_antenna_state","bsmix_type","bsmix_state",
+  "mount_type","side_base_1","side_base_2","side_base_3","mast","mast_2","mast_3",
+  "connector_type","connector_qty","turnbuckle_qty","amplifier","line_booster","hpf","outer_splitter",
+  "indoor_split","split_all_pass","power_pos","indoor_wire","outer_wire","tv_count",
+  "remove_safety","remove_drop","cable_drop_len","dummy_attached","use_fa","meas_show",
+  "cable_new_len","cable_main_len","cable_ch46_len","cable_ch50_len","cable_amp_next_len",
+  "cable_indoor_new","cable_vvf_len","cable_s5cfb_power","ext_power_conn",
+  "att_main","att_46","att_50","box_consent","ofmu_qty","wire_sus16_len",
+  "chosho_mgmt_no","chosho_date","chosho_cust_name","chosho_cust_addr","chosho_cust_tel","chosho_status",
+  "tax_mode","misc_fee","outsource_fee_on","outsource_fee_amount","outsource_fee_auto",
+  "tv_rooms","tv_bd","tv_sp","tv_term",
+  "wire_overrides","qty_overrides","node_offsets","meas_transforms","node_existing_overrides",
+  "text_annotations","measurements","chosho_photos","asbestos","antenna_guide",
+  "_origin","_schemaVer","editedAt","_draftId","_passthrough",
+  "chosho_photos_thumb","chosho_photo_count"   // PC物件スナップショット専用メタは再emitしない
+]);
+
 function freshModel(){
   const m = Object.assign({}, DEFAULTS);
   m.tv_rooms=[]; m.tv_bd=[]; m.tv_sp=[]; m.tv_term=[];
+  m._passthrough={};   // 取込んだ戸別JSONの未知トップレベルキー（ag_placement 等）を保持
   m.wire_overrides={}; m.qty_overrides={}; m.node_offsets={}; m.meas_transforms={}; m.node_existing_overrides={};
   m.text_annotations=[];
   m.measurements=JSON.parse(JSON.stringify(DEFAULT_MEASUREMENTS));
@@ -1685,7 +1725,8 @@ async function handlePhotoFiles(files){
     try{
       const dataUri=await readImageAsDataURI(arr[i]);
       // ラベルは実際の格納枚数で採番（失敗があっても連番がズレない）。push先は固定した model。
-      model.chosho_photos.push({label:suggestLabel(model.chosho_photos.length), dataUri});
+      // id＝安定な写真ID（撮影時に付与。PC側で圧縮・サムネ化しても維持し、重複突合に使う）。
+      model.chosho_photos.push({label:suggestLabel(model.chosho_photos.length), dataUri, id:photoContentId(dataUri)});
     }catch(e){ console.error("photo read failed",e); fail++; }
   }
   if(M===model){ saveDraft(); refreshPhotos(); }      // まだ同じ戸別を編集中
@@ -1733,9 +1774,23 @@ function buildState(){
   s.node_existing_overrides=Object.assign({},M.node_existing_overrides);
   s.text_annotations=(M.text_annotations||[]).map(a=>({id:a.id,x:+a.x||0,y:+a.y||0,text:String(a.text||""),color:a.color||"#d32f2f",size:a.size||18})).filter(a=>a.text);
   s.measurements=JSON.parse(JSON.stringify(M.measurements||DEFAULT_MEASUREMENTS));
-  s.chosho_photos=(M.chosho_photos||[]).map(p=>({label:String(p.label||""),dataUri:p.dataUri||null}));
+  s.chosho_photos=(M.chosho_photos||[]).map(p=>{
+    const dataUri=p.dataUri||null;
+    const o={label:String(p.label||""),dataUri};
+    const id=p.id||(dataUri?photoContentId(dataUri):"");
+    if(id) o.id=id;   // 安定な写真ID（PC側での重複突合に使う）
+    return o;
+  });
   s.asbestos=Object.assign({},M.asbestos);
   s.antenna_guide=JSON.parse(JSON.stringify(M.antenna_guide||{ver:1,pattern:null,parts:{}}));
+  // 取込んだ戸別JSONの未知トップレベルキー（PC側の ag_placement 等）をそのまま復元（往復での欠落防止）。
+  if(M._passthrough && typeof M._passthrough==="object"){
+    for(const k in M._passthrough){ if(!(k in s)) s[k]=M._passthrough[k]; }
+  }
+  // 出自スタンプ（Phase 0）：この戸別JSONを現場入力(genba)が書き出したことを記録。
+  s._origin="genba";
+  s._schemaVer=GENBA_SCHEMA_VER;
+  s.editedAt=(function(){ try{return new Date().toISOString();}catch(_){return "";} })();
   return s;
 }
 
@@ -1814,10 +1869,19 @@ async function loadStateInto(s){
   if(Array.isArray(s.text_annotations)) m.text_annotations=s.text_annotations.map(a=>({id:a.id||("anno_"+Math.random().toString(36).slice(2)),x:+a.x||0,y:+a.y||0,text:String(a.text||""),color:a.color||"#d32f2f",size:a.size||18}));
   if(s.measurements&&Array.isArray(s.measurements.channels)) m.measurements=JSON.parse(JSON.stringify(s.measurements));
   if(Array.isArray(s.chosho_photos)) m.chosho_photos=s.chosho_photos
-      .map(p=>({label:String((p&&p.label)||""),dataUri:(p&&p.dataUri)||null}))
+      .map(p=>{
+        const dataUri=(p&&p.dataUri)||null;
+        const o={label:String((p&&p.label)||""),dataUri};
+        const id=(p&&p.id)||(dataUri?photoContentId(dataUri):"");
+        if(id) o.id=id;   // 安定な写真IDを維持（無ければ算出）
+        return o;
+      })
       .filter(p=>p.dataUri && /^data:image\//i.test(p.dataUri)); // data:image/ 形式のみ許可（細工JSONの属性インジェクション防止）
   if(s.asbestos&&typeof s.asbestos==="object") m.asbestos=Object.assign(m.asbestos,s.asbestos);
   m.antenna_guide=normalizeAntennaGuide(s.antenna_guide);
+  // 未知トップレベルキー（PC側の ag_placement 等）を退避＝書出し時にそのまま復元する（往復での欠落防止）。
+  m._passthrough={};
+  for(const k in s){ if(!GENBA_KNOWN_KEYS.has(k)) m._passthrough[k]=s[k]; }
   syncTvArrays(m);
   m.meas_show="yes"; // 電波測定表は常に掲載扱い（UIトグル廃止・取込JSONの"no"を上書き）
   M=m;
