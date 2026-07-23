@@ -158,6 +158,9 @@
   .draft .d-sub{font-size:12px; color:var(--sub);}
   .draft .d-open{background:var(--accent); color:#fff; border:0; border-radius:8px; padding:8px 12px; font-weight:700; flex:none;}
   .draft .d-check{width:24px; height:24px; flex:none;}
+  .rc-badge{display:inline-block; font-size:10px; font-weight:700; padding:0 6px; border-radius:8px; margin-right:6px; line-height:17px; vertical-align:1px; color:#fff;}
+  .rc-badge.done{background:#2e7d32;}
+  .rc-badge.prov{background:#f9a825; color:#5d4037;}
   /* 複数選択削除のアクションバー */
   .draft-actions{display:flex; align-items:center; justify-content:space-between; gap:10px; padding:6px 2px 12px; position:sticky; top:0; background:#fff; z-index:2;}
   .d-selall{display:flex; align-items:center; gap:7px; font-size:14px; font-weight:600; color:var(--ink);}
@@ -231,6 +234,7 @@
     <span class="mgmt" id="hdr-mgmt">管理番号 未入力</span>
   </div>
   <button id="btn-new-top">＋新規</button>
+  <button class="ghost" id="btn-reception">🗒台帳</button>
   <button class="ghost" id="btn-list">📋履歴・読込</button>
   <button id="btn-save-top">💾保存</button>
 </header>
@@ -239,6 +243,7 @@
 
 <div class="footbar">
   <button class="neww" id="btn-new">＋新規</button>
+  <button class="list" id="btn-reception2">🗒台帳</button>
   <button class="list" id="btn-list2">📋履歴・読込</button>
   <button class="save" id="btn-save">💾保存</button>
 </div>
@@ -253,6 +258,20 @@
     <input type="file" id="import-file" accept=".json,application/json,*/*" style="display:none;">
     <div id="draft-list"></div>
     <button class="closebtn" id="draft-close">閉じる</button>
+  </div>
+</div>
+
+<!-- 受付台帳（PCから取込）から選んで入力開始 -->
+<div class="modal" id="reception-modal">
+  <div class="sheet">
+    <h3>🗒 受付台帳から開く</h3>
+    <div class="info">PC（受付台帳）で <b>「📤 現場用に書き出し」</b> したファイルを取り込むと、下に一覧が出ます。タップすると<b>管理番号・氏名・住所が入った状態</b>で入力を開始できます（同じ管理番号の下書きがあれば続きから開きます）。</div>
+    <button id="btn-reception-import" style="width:100%; padding:15px; border:0; border-radius:11px; background:#00695c; color:#fff; font-weight:700; font-size:15px; margin-bottom:10px;">📥 受付台帳ファイルを取り込む</button>
+    <input type="file" id="reception-file" accept=".json,application/json,*/*" style="display:none;">
+    <input type="search" id="reception-search" placeholder="管理番号・氏名・住所で絞り込み" style="width:100%; box-sizing:border-box; padding:11px 12px; border:1px solid #cdd3da; border-radius:10px; font-size:15px; margin-bottom:10px;">
+    <div id="reception-meta" class="info" style="display:none;"></div>
+    <div id="reception-list"></div>
+    <button class="closebtn" id="reception-close">閉じる</button>
   </div>
 </div>
 
@@ -2105,6 +2124,106 @@ document.getElementById("btn-list2").addEventListener("click",openDraftModal);
 document.getElementById("draft-close").addEventListener("click",closeDraftModal);
 document.getElementById("btn-import").addEventListener("click",()=>document.getElementById("import-file").click());
 document.getElementById("draft-modal").addEventListener("click",e=>{ if(e.target.id==="draft-modal") closeDraftModal(); });
+
+/* ============================================================================
+   受付台帳（PCから取込）から選んで入力開始
+   ============================================================================ */
+const LS_RECEPTION = "field_reception_ledger_v1"; // PCから取り込んだ受付台帳（テキストのみ・localStorage）
+function getReceptionData(){ try{ const j=JSON.parse(localStorage.getItem(LS_RECEPTION)||"null"); return (j&&Array.isArray(j.rows))?j:null; }catch(_){ return null; } }
+function getReceptionRows(){ const d=getReceptionData(); return d?d.rows:[]; }
+function openReceptionModal(){
+  document.getElementById("reception-modal").classList.add("open");
+  const s=document.getElementById("reception-search"); if(s) s.value="";
+  renderReceptionList("");
+}
+function closeReceptionModal(){ document.getElementById("reception-modal").classList.remove("open"); }
+function renderReceptionList(q){
+  const host=document.getElementById("reception-list"); if(!host) return;
+  const data=getReceptionData(); const rows=data?data.rows:[];
+  const meta=document.getElementById("reception-meta");
+  if(meta){
+    if(data){ meta.style.display=""; const dt=data.exportedAt?String(data.exportedAt).slice(0,10):""; meta.textContent="取込済み："+rows.length+"件"+(data.project?("／物件："+data.project):"")+(dt?("／書出 "+dt):""); }
+    else { meta.style.display="none"; meta.textContent=""; }
+  }
+  if(!rows.length){ host.innerHTML=`<div class="info" style="text-align:center">受付台帳はまだ取り込まれていません。上の「📥 受付台帳ファイルを取り込む」から取り込んでください。</div>`; return; }
+  const kw=(q||"").trim().toLowerCase();
+  const filtered=kw ? rows.filter(r=>((r.mgmt_no||"")+" "+(r.name||"")+" "+(r.addr||"")+" "+(r.tel||"")).toLowerCase().includes(kw)) : rows;
+  if(!filtered.length){ host.innerHTML=`<div class="info" style="text-align:center">該当なし</div>`; return; }
+  host.innerHTML=filtered.map(r=>{
+    const idx=rows.indexOf(r);
+    const sub=[r.addr, r.date?("予定 "+r.date):"", r.contractor].filter(Boolean).map(esc).join("・");
+    const badge = r.status==="completed" ? '<span class="rc-badge done">完了</span>'
+                : r.status==="provisional" ? '<span class="rc-badge prov">仮</span>' : '';
+    return `<div class="draft"><div class="d-main" data-recopen="${idx}">
+      <div class="d-no">${badge}${esc(r.mgmt_no||"（番号なし）")}${r.name?(" ／ "+esc(r.name)):""}</div>
+      <div class="d-sub">${sub}</div></div>
+      <button class="d-open" data-recopen="${idx}">開く</button></div>`;
+  }).join("");
+  host.querySelectorAll("[data-recopen]").forEach(b=>b.addEventListener("click",()=>{
+    const i=parseInt(b.getAttribute("data-recopen"),10);
+    openFromReception(rows[i]);
+  }));
+}
+async function openFromReception(row){
+  if(!row) return;
+  const mgmt=String(row.mgmt_no||"").trim();
+  clearTimeout(_persistTimer);
+  try{ await persistDraft(); }catch(_){}          // 現在の編集を確定してから切替
+  if(mgmt){
+    const rec=await idbGet("no:"+mgmt);
+    if(rec&&rec.model){                            // 既に下書きがあれば続きから
+      M=rec.model; M._lastDraftKey="no:"+mgmt; ensureModelShape(M); resetOpenState(); render();
+      localStorage.setItem(LS_LAST,"no:"+mgmt); closeReceptionModal(); toast("下書きの続きを開きました"); return;
+    }
+  }
+  const m=freshModel();                            // 新規に台帳の値を流し込む
+  m.chosho_mgmt_no=mgmt;
+  m.chosho_cust_name=row.name||"";
+  m.chosho_cust_addr=row.addr||"";
+  m.chosho_cust_tel=row.tel||"";
+  if(row.date) m.chosho_date=row.date;
+  if(mgmt){ delete m._draftId; m._lastDraftKey="no:"+mgmt; }
+  M=m; ensureModelShape(M); resetOpenState(); render();
+  localStorage.setItem(LS_LAST, mgmt?("no:"+mgmt):(M._draftId||""));
+  saveDraft();
+  closeReceptionModal(); toast("受付台帳から開きました");
+}
+document.getElementById("reception-file").addEventListener("change",e=>{
+  const f=e.target.files[0]; e.target.value="";
+  if(!f) return;
+  const r=new FileReader();
+  r.onload=async()=>{
+    try{
+      const data=JSON.parse(r.result);
+      let rows=null, project="", exportedAt="";
+      if(data && data.type==="antenna_reception_ledger" && Array.isArray(data.rows)){ rows=data.rows; project=data.project||""; exportedAt=data.exportedAt||""; }
+      else if(Array.isArray(data)) rows=data;
+      else if(data && Array.isArray(data.rows)) rows=data.rows;
+      if(!rows){ await uiAlert("受付台帳ファイルとして認識できませんでした。PCの受付台帳で「📤 現場用に書き出し」したファイルを選んでください。"); return; }
+      const norm=rows.map(x=>({
+        mgmt_no:String(x.mgmt_no||x.chosho_mgmt_no||"").trim(),
+        name:String(x.name||x.chosho_cust_name||""),
+        addr:String(x.addr||x.chosho_cust_addr||""),
+        tel:String(x.tel||x.chosho_cust_tel||""),
+        date:String(x.date||x.chosho_date||""),
+        status:String(x.status||x.chosho_status||""),
+        contractor:String(x.contractor||""),
+        note:String(x.note||"")
+      })).filter(x=>x.mgmt_no||x.name||x.addr);
+      try{ localStorage.setItem(LS_RECEPTION, JSON.stringify({ type:"antenna_reception_ledger", importedAt:Date.now(), exportedAt, project, rows:norm })); }
+      catch(err){ await uiAlert("取り込んだ台帳の保存に失敗しました（空き容量不足かも）："+err.message); return; }
+      renderReceptionList(document.getElementById("reception-search").value||"");
+      toast("受付台帳を取り込みました（"+norm.length+"件）");
+    }catch(err){ await uiAlert("取込みに失敗しました："+err.message); }
+  };
+  r.readAsText(f);
+});
+document.getElementById("btn-reception-import").addEventListener("click",()=>document.getElementById("reception-file").click());
+document.getElementById("reception-search").addEventListener("input",e=>renderReceptionList(e.target.value));
+document.getElementById("reception-close").addEventListener("click",closeReceptionModal);
+document.getElementById("btn-reception").addEventListener("click",openReceptionModal);
+document.getElementById("btn-reception2").addEventListener("click",openReceptionModal);
+document.getElementById("reception-modal").addEventListener("click",e=>{ if(e.target.id==="reception-modal") closeReceptionModal(); });
 
 // アプリを離れる/バックグラウンド化する直前に、保留中(400msデバウンス)の自動保存を確定させる。
 // （iOSホーム画面アプリは背面化で終了/再読込されやすく、直近入力が消えるのを防ぐ）
