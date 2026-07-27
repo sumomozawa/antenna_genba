@@ -158,6 +158,9 @@
   .draft .d-sub{font-size:12px; color:var(--sub);}
   .draft .d-open{background:var(--accent); color:#fff; border:0; border-radius:8px; padding:8px 12px; font-weight:700; flex:none;}
   .draft .d-check{width:24px; height:24px; flex:none;}
+  /* バージョン表記（本文の最後・フッターバーの上。目立たせない） */
+  .app-ver{font-size:10.5px; color:#9aa3ad; text-align:center; padding:10px 12px 4px; line-height:1.7;}
+  .app-ver b{color:#7c8894; font-weight:600;}
   .rc-badge{display:inline-block; font-size:10px; font-weight:700; padding:0 6px; border-radius:8px; margin-right:6px; line-height:17px; vertical-align:1px; color:#fff;}
   .rc-badge.done{background:#2e7d32;}
   .rc-badge.prov{background:#f9a825; color:#5d4037;}
@@ -240,6 +243,7 @@
 </header>
 
 <div id="app"></div>
+<div class="app-ver" id="app-ver"></div>
 
 <div class="footbar">
   <button class="neww" id="btn-new">＋新規</button>
@@ -393,6 +397,11 @@ let guideFilledFields = new Set(); // アンテナ取付ガイドが自動入力
      安定な写真ID。別解像度の同一写真をPC側で1枚に畳むための突合キー。
    ============================================================================ */
 const GENBA_SCHEMA_VER = 1;
+/* このアプリの版（更新日ベース）。画面の隅に控えめに表示し、書き出すJSONにも入れる
+   （PC側で「現場入力アプリの版」を確認でき、メインとの食い違いに気付ける）。
+   ★更新したらこの2行を書き換える。 */
+const APP_NAME_SHORT = "現場入力";
+const APP_VERSION = "2026.07.27";
 function photoContentId(dataUri){
   if(!dataUri || typeof dataUri !== "string") return "";
   let a = 5381, b = 0;
@@ -1809,6 +1818,7 @@ function buildState(){
   // 出自スタンプ（Phase 0）：この戸別JSONを現場入力(genba)が書き出したことを記録。
   s._origin="genba";
   s._schemaVer=GENBA_SCHEMA_VER;
+  s._appVersion=APP_VERSION;   // 現場入力アプリの版（PC側の版表示に使う）
   s.editedAt=(function(){ try{return new Date().toISOString();}catch(_){return "";} })();
   return s;
 }
@@ -2131,6 +2141,15 @@ document.getElementById("draft-modal").addEventListener("click",e=>{ if(e.target
 const LS_RECEPTION = "field_reception_ledger_v1"; // PCから取り込んだ受付台帳（テキストのみ・localStorage）
 function getReceptionData(){ try{ const j=JSON.parse(localStorage.getItem(LS_RECEPTION)||"null"); return (j&&Array.isArray(j.rows))?j:null; }catch(_){ return null; } }
 function getReceptionRows(){ const d=getReceptionData(); return d?d.rows:[]; }
+/* 画面下部の版表記（このアプリ＋取り込んだ受付台帳から分かるメイン側の版）。目立たせない。 */
+function renderAppVer(){
+  const el=document.getElementById("app-ver"); if(!el) return;
+  const d=getReceptionData();
+  const mv=(d && d.mainVersion) ? String(d.mainVersion) : "";
+  el.innerHTML = esc(APP_NAME_SHORT)+' <b>v'+esc(APP_VERSION)+'</b>'
+    + (mv ? '　／　メイン <b>v'+esc(mv)+'</b><span title="取り込んだ受付台帳に記録されていた版です">（台帳より）</span>'
+          : '　／　メイン <span title="受付台帳を取り込むと、メイン側の版をここに表示します">（未取込）</span>');
+}
 function openReceptionModal(){
   document.getElementById("reception-modal").classList.add("open");
   const s=document.getElementById("reception-search"); if(s) s.value="";
@@ -2195,8 +2214,8 @@ document.getElementById("reception-file").addEventListener("change",e=>{
   r.onload=async()=>{
     try{
       const data=JSON.parse(r.result);
-      let rows=null, project="", exportedAt="";
-      if(data && data.type==="antenna_reception_ledger" && Array.isArray(data.rows)){ rows=data.rows; project=data.project||""; exportedAt=data.exportedAt||""; }
+      let rows=null, project="", exportedAt="", mainVersion="";
+      if(data && data.type==="antenna_reception_ledger" && Array.isArray(data.rows)){ rows=data.rows; project=data.project||""; exportedAt=data.exportedAt||""; mainVersion=data.appVersion||""; }
       else if(Array.isArray(data)) rows=data;
       else if(data && Array.isArray(data.rows)) rows=data.rows;
       if(!rows){ await uiAlert("受付台帳ファイルとして認識できませんでした。PCの受付台帳で「📤 現場用に書き出し」したファイルを選んでください。"); return; }
@@ -2210,9 +2229,10 @@ document.getElementById("reception-file").addEventListener("change",e=>{
         contractor:String(x.contractor||""),
         note:String(x.note||"")
       })).filter(x=>x.mgmt_no||x.name||x.addr);
-      try{ localStorage.setItem(LS_RECEPTION, JSON.stringify({ type:"antenna_reception_ledger", importedAt:Date.now(), exportedAt, project, rows:norm })); }
+      try{ localStorage.setItem(LS_RECEPTION, JSON.stringify({ type:"antenna_reception_ledger", importedAt:Date.now(), exportedAt, project, mainVersion, rows:norm })); }
       catch(err){ await uiAlert("取り込んだ台帳の保存に失敗しました（空き容量不足かも）："+err.message); return; }
       renderReceptionList(document.getElementById("reception-search").value||"");
+      renderAppVer();   // メイン側の版が分かったので併記を更新
       toast("受付台帳を取り込みました（"+norm.length+"件）");
     }catch(err){ await uiAlert("取込みに失敗しました："+err.message); }
   };
@@ -2236,6 +2256,7 @@ window.addEventListener("pagehide", flushPersist);
    ============================================================================ */
 (async function boot(){
   M=freshModel(); render();  // まず即描画（IDB読込を待たせない）
+  try{ renderAppVer(); }catch(_){}   // 画面下部の版表記
   try{
     const lastKey=localStorage.getItem(LS_LAST);
     if(lastKey){
