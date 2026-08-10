@@ -145,6 +145,11 @@
   .footbar .save{background:var(--accent); color:#fff; flex:2;}
   .footbar .list{background:#eef2f7; color:var(--accent);}
   .footbar .neww{background:#eef2f7; color:var(--ink);}
+  /* ---- 下見完了 ---- */
+  .footbar .survey{background:#eef2f7; color:var(--ink);}
+  .footbar .survey.done{background:#1b7a3d; color:#fff;}
+  header .surveytag{display:inline-block; margin-left:6px; background:#1b7a3d; color:#fff; font-size:10.5px;
+    font-weight:700; padding:1px 6px; border-radius:9px; vertical-align:middle;}
   .savedhint{position:fixed; bottom:78px; left:50%; transform:translateX(-50%); background:#263238; color:#fff; font-size:13px; padding:8px 16px; border-radius:20px; opacity:0; transition:opacity .25s; z-index:70; pointer-events:none;}
   .savedhint.show{opacity:1;}
   /* ---- モーダル（下書き一覧）---- */
@@ -252,6 +257,7 @@
   <button class="neww" id="btn-new">＋新規</button>
   <button class="list" id="btn-reception2">🗒台帳</button>
   <button class="list" id="btn-list2">📋履歴・読込</button>
+  <button class="survey" id="btn-survey">🔎下見完了</button>
   <button class="save" id="btn-save">💾保存</button>
 </div>
 <div class="savedhint" id="savedhint">保存しました</div>
@@ -375,6 +381,7 @@ const DEFAULTS = {
   line_booster:"yes",hpf:"hpf_std",outer_splitter:"sp_2cw",indoor_split:"unknown",split_all_pass:"no",
   power_pos:"tv_back",indoor_wire:"existing",outer_wire:"existing",tv_count:"4",
   remove_safety:"yes",remove_drop:"yes",cable_drop_len:"20",dummy_attached:"yes",use_fa:"yes",meas_show:"yes",
+  survey_done:false,survey_done_at:"",
   cable_new_len:"0",cable_main_len:"5",cable_ch46_len:"5",cable_ch50_len:"5",cable_amp_next_len:"10",
   cable_indoor_new:"2",cable_vvf_len:"5",cable_s5cfb_power:"5",ext_power_conn:"splitter_2",
   att_main:"no",att_46:"no",att_50:"no",box_consent:"no",ofmu_qty:"0",wire_sus16_len:"0",
@@ -429,6 +436,7 @@ const GENBA_KNOWN_KEYS = new Set([
   "cable_indoor_new","cable_vvf_len","cable_s5cfb_power","ext_power_conn",
   "att_main","att_46","att_50","box_consent","ofmu_qty","wire_sus16_len",
   "chosho_mgmt_no","chosho_date","chosho_cust_name","chosho_cust_addr","chosho_cust_tel","chosho_status",
+  "survey_done","survey_done_at",
   "tax_mode","misc_fee","outsource_fee_on","outsource_fee_amount","outsource_fee_auto",
   "tv_rooms","tv_bd","tv_sp","tv_term",
   "wire_overrides","qty_overrides","node_offsets","meas_transforms","node_existing_overrides",
@@ -1644,6 +1652,39 @@ function refreshPhotos(){
 function updateHeader(){
   const el=document.getElementById("hdr-mgmt");
   el.textContent = M.chosho_mgmt_no ? ("管理番号 "+M.chosho_mgmt_no) : "管理番号 未入力";
+  if(M.survey_done){
+    const tag=document.createElement("span");
+    tag.className="surveytag";
+    tag.textContent="下見完了";
+    el.appendChild(tag);
+  }
+  updateSurveyBtn();
+}
+/* 下見完了のボタン。押すと「この戸別の下見は終わった」という印が付き、
+   PC側（メイン）の「材料数量」で、この戸別ぶんの材料が集計に入る。 */
+function updateSurveyBtn(){
+  const b=document.getElementById("btn-survey");
+  if(!b) return;
+  b.classList.toggle("done", !!M.survey_done);
+  b.textContent = M.survey_done ? "✅下見完了" : "🔎下見完了";
+  b.title = M.survey_done
+    ? "この戸別は下見完了になっています。押すと取り消せます。"
+    : "この戸別の下見が終わったら押してください。PC側の「材料数量」で、この戸別の材料が集計に入ります。";
+}
+async function toggleSurveyDone(){
+  if(M.survey_done){
+    if(!(await uiConfirm("下見完了の印を取り消しますか？\n（PC側の材料数量の集計から外れます）"))) return;
+    M.survey_done=false; M.survey_done_at="";
+    toast("下見完了を取り消しました");
+  } else {
+    if(!M.chosho_mgmt_no){
+      if(!(await uiConfirm("管理番号が未入力です。このまま下見完了にしますか？\n（PC側で戸別を見分けにくくなります）"))) return;
+    }
+    if(!(await uiConfirm("この戸別の下見を完了にします。\n\nいまの入力内容で材料が確定し、PC側の「🧰 材料数量」の集計に入ります。\n（あとから取り消せます）"))) return;
+    M.survey_done=true; M.survey_done_at=new Date().toISOString();
+    toast("下見完了にしました");
+  }
+  saveDraft();
 }
 
 /* ============================================================================
@@ -1814,6 +1855,9 @@ function buildState(){
   });
   s.asbestos=Object.assign({},M.asbestos);
   s.antenna_guide=JSON.parse(JSON.stringify(M.antenna_guide||{ver:1,pattern:null,parts:{}}));
+  // 下見完了の印（PC側の「🧰 材料数量」がこの印を見て集計する）
+  s.survey_done=!!M.survey_done;
+  s.survey_done_at=String(M.survey_done_at||"");
   // 取込んだ戸別JSONの未知トップレベルキー（PC側の ag_placement 等）をそのまま復元（往復での欠落防止）。
   if(M._passthrough && typeof M._passthrough==="object"){
     for(const k in M._passthrough){ if(!(k in s)) s[k]=M._passthrough[k]; }
@@ -2129,6 +2173,7 @@ async function newCase(){
   toast("新規を作成しました");
 }
 document.getElementById("btn-save").addEventListener("click",saveJson);
+document.getElementById("btn-survey").addEventListener("click",toggleSurveyDone);
 document.getElementById("btn-save-top").addEventListener("click",saveJson);
 document.getElementById("btn-new").addEventListener("click",newCase);
 document.getElementById("btn-new-top").addEventListener("click",newCase);
