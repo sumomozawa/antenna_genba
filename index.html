@@ -164,6 +164,9 @@
   .rc-badge{display:inline-block; font-size:10px; font-weight:700; padding:0 6px; border-radius:8px; margin-right:6px; line-height:17px; vertical-align:1px; color:#fff;}
   .rc-badge.done{background:#2e7d32;}
   .rc-badge.prov{background:#f9a825; color:#5d4037;}
+  /* 保留：PC（受付台帳・地図の「保」マーク）と同じ橙色 */
+  .rc-badge.hold{background:#e65100;}
+  .draft.rc-hold{background:#fff4e8; border-left:4px solid #e65100; padding-left:8px;}
   /* 複数選択削除のアクションバー */
   .draft-actions{display:flex; align-items:center; justify-content:space-between; gap:10px; padding:6px 2px 12px; position:sticky; top:0; background:#fff; z-index:2;}
   .d-selall{display:flex; align-items:center; gap:7px; font-size:14px; font-weight:600; color:var(--ink);}
@@ -2161,7 +2164,12 @@ function renderReceptionList(q){
   const data=getReceptionData(); const rows=data?data.rows:[];
   const meta=document.getElementById("reception-meta");
   if(meta){
-    if(data){ meta.style.display=""; const dt=data.exportedAt?String(data.exportedAt).slice(0,10):""; meta.textContent="取込済み："+rows.length+"件"+(data.project?("／物件："+data.project):"")+(dt?("／書出 "+dt):""); }
+    if(data){
+      meta.style.display="";
+      const dt=data.exportedAt?String(data.exportedAt).slice(0,10):"";
+      const held=rows.filter(r=>r&&r.hold).length;
+      meta.textContent="取込済み："+rows.length+"件"+(held?("（保留 "+held+"）"):"")+(data.project?("／物件："+data.project):"")+(dt?("／書出 "+dt):"");
+    }
     else { meta.style.display="none"; meta.textContent=""; }
   }
   if(!rows.length){ host.innerHTML=`<div class="info" style="text-align:center">受付台帳はまだ取り込まれていません。上の「📥 受付台帳ファイルを取り込む」から取り込んでください。</div>`; return; }
@@ -2173,14 +2181,19 @@ function renderReceptionList(q){
     const sub=[r.addr, r.date?("予定 "+r.date):"", r.contractor].filter(Boolean).map(esc).join("・");
     const badge = r.status==="completed" ? '<span class="rc-badge done">完了</span>'
                 : r.status==="provisional" ? '<span class="rc-badge prov">仮</span>' : '';
-    return `<div class="draft"><div class="d-main" data-recopen="${idx}">
-      <div class="d-no">${badge}${esc(r.mgmt_no||"（番号なし）")}${r.name?(" ／ "+esc(r.name)):""}</div>
+    // 保留は状態（完了/仮）とは別枠。PCで保留にした戸別は現場でも一目で分かるようにする
+    const hold = r.hold ? '<span class="rc-badge hold">保留</span>' : '';
+    return `<div class="draft${r.hold?" rc-hold":""}"><div class="d-main" data-recopen="${idx}">
+      <div class="d-no">${hold}${badge}${esc(r.mgmt_no||"（番号なし）")}${r.name?(" ／ "+esc(r.name)):""}</div>
       <div class="d-sub">${sub}</div></div>
       <button class="d-open" data-recopen="${idx}">開く</button></div>`;
   }).join("");
-  host.querySelectorAll("[data-recopen]").forEach(b=>b.addEventListener("click",()=>{
+  host.querySelectorAll("[data-recopen]").forEach(b=>b.addEventListener("click",async()=>{
     const i=parseInt(b.getAttribute("data-recopen"),10);
-    openFromReception(rows[i]);
+    const row=rows[i];
+    // 保留の戸別はうっかり着工しないよう一度確認する（開くこと自体は止めない）
+    if(row&&row.hold&&!await uiConfirm("この戸別はPCの受付台帳で【保留】になっています。\n\n"+(row.mgmt_no||"（番号なし）")+(row.name?("　"+row.name):"")+"\n\n入力を開始しますか？")) return;
+    openFromReception(row);
   }));
 }
 async function openFromReception(row){
@@ -2227,6 +2240,7 @@ document.getElementById("reception-file").addEventListener("change",e=>{
         date:String(x.date||x.chosho_date||""),
         status:String(x.status||x.chosho_status||""),
         contractor:String(x.contractor||""),
+        hold:!!x.hold,                      // 保留（古い書き出しファイルには無いので false 扱い）
         note:String(x.note||"")
       })).filter(x=>x.mgmt_no||x.name||x.addr);
       try{ localStorage.setItem(LS_RECEPTION, JSON.stringify({ type:"antenna_reception_ledger", importedAt:Date.now(), exportedAt, project, mainVersion, rows:norm })); }
