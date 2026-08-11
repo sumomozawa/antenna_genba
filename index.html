@@ -278,7 +278,7 @@
 <div class="modal" id="reception-modal">
   <div class="sheet">
     <h3>🗒 受付台帳から開く</h3>
-    <div class="info">PC（受付台帳）で <b>「📤 現場用に書き出し」</b> したファイルを取り込むと、下に一覧が出ます。タップすると<b>管理番号・氏名・住所が入った状態</b>で入力を開始できます（同じ管理番号の下書きがあれば続きから開きます）。</div>
+    <div class="info">PC（受付台帳）で <b>「📤 受付台帳ファイル」</b> を書き出したファイルを取り込むと、下に一覧が出ます。タップすると<b>管理番号・氏名・住所が入った状態</b>で入力を開始できます（同じ管理番号の下書きがあれば続きから開きます）。</div>
     <button id="btn-reception-import" style="width:100%; padding:15px; border:0; border-radius:11px; background:#00695c; color:#fff; font-weight:700; font-size:15px; margin-bottom:10px;">📥 受付台帳ファイルを取り込む</button>
     <input type="file" id="reception-file" accept=".json,application/json,*/*" style="display:none;">
     <input type="search" id="reception-search" placeholder="管理番号・氏名・住所で絞り込み" style="width:100%; box-sizing:border-box; padding:11px 12px; border:1px solid #cdd3da; border-radius:10px; font-size:15px; margin-bottom:10px;">
@@ -1661,7 +1661,7 @@ function updateHeader(){
   updateSurveyBtn();
 }
 /* 下見完了のボタン。押すと「この戸別の下見は終わった」という印が付き、
-   PC側（メイン）の「材料数量」で、この戸別ぶんの材料が集計に入る。 */
+   PC側（メイン）の「発注材料数量」で、この戸別ぶんの材料が集計に入る。 */
 function updateSurveyBtn(){
   const b=document.getElementById("btn-survey");
   if(!b) return;
@@ -1669,18 +1669,18 @@ function updateSurveyBtn(){
   b.textContent = M.survey_done ? "✅下見完了" : "🔎下見完了";
   b.title = M.survey_done
     ? "この戸別は下見完了になっています。押すと取り消せます。"
-    : "この戸別の下見が終わったら押してください。PC側の「材料数量」で、この戸別の材料が集計に入ります。";
+    : "この戸別の下見が終わったら押してください。PC側の「発注材料数量」で、この戸別の材料が集計に入ります。";
 }
 async function toggleSurveyDone(){
   if(M.survey_done){
-    if(!(await uiConfirm("下見完了の印を取り消しますか？\n（PC側の材料数量の集計から外れます）"))) return;
+    if(!(await uiConfirm("下見完了の印を取り消しますか？\n（PC側の発注材料数量の集計から外れます）"))) return;
     M.survey_done=false; M.survey_done_at="";
     toast("下見完了を取り消しました");
   } else {
     if(!M.chosho_mgmt_no){
       if(!(await uiConfirm("管理番号が未入力です。このまま下見完了にしますか？\n（PC側で戸別を見分けにくくなります）"))) return;
     }
-    if(!(await uiConfirm("この戸別の下見を完了にします。\n\nいまの入力内容で材料が確定し、PC側の「🧰 材料数量」の集計に入ります。\n（あとから取り消せます）"))) return;
+    if(!(await uiConfirm("この戸別の下見を完了にします。\n\nいまの入力内容で材料が確定し、PC側の「🧰 発注材料数量」の集計に入ります。\n（あとから取り消せます）"))) return;
     M.survey_done=true; M.survey_done_at=new Date().toISOString();
     toast("下見完了にしました");
   }
@@ -1855,7 +1855,7 @@ function buildState(){
   });
   s.asbestos=Object.assign({},M.asbestos);
   s.antenna_guide=JSON.parse(JSON.stringify(M.antenna_guide||{ver:1,pattern:null,parts:{}}));
-  // 下見完了の印（PC側の「🧰 材料数量」がこの印を見て集計する）
+  // 下見完了の印（PC側の「🧰 発注材料数量」がこの印を見て集計する）
   s.survey_done=!!M.survey_done;
   s.survey_done_at=String(M.survey_done_at||"");
   // 取込んだ戸別JSONの未知トップレベルキー（PC側の ag_placement 等）をそのまま復元（往復での欠落防止）。
@@ -2276,7 +2276,7 @@ document.getElementById("reception-file").addEventListener("change",e=>{
       if(data && data.type==="antenna_reception_ledger" && Array.isArray(data.rows)){ rows=data.rows; project=data.project||""; exportedAt=data.exportedAt||""; mainVersion=data.appVersion||""; }
       else if(Array.isArray(data)) rows=data;
       else if(data && Array.isArray(data.rows)) rows=data.rows;
-      if(!rows){ await uiAlert("受付台帳ファイルとして認識できませんでした。PCの受付台帳で「📤 現場用に書き出し」したファイルを選んでください。"); return; }
+      if(!rows){ await uiAlert("受付台帳ファイルとして認識できませんでした。PCの受付台帳で「📤 受付台帳ファイル」を書き出したファイルを選んでください。"); return; }
       const norm=rows.map(x=>({
         mgmt_no:String(x.mgmt_no||x.chosho_mgmt_no||"").trim(),
         name:String(x.name||x.chosho_cust_name||""),
