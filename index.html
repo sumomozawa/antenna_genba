@@ -2632,30 +2632,36 @@ async function idbDel(key){ const db=await idb(); return new Promise((res,rej)=>
 
 let _persistTimer=null;
 function draftKey(){ return M.chosho_mgmt_no ? ("no:"+M.chosho_mgmt_no) : (M._draftId||(M._draftId="tmp:"+Date.now())); }
-function saveDraft(){ M._touched=true; updateHeader(); schedulePersist(); }
-function saveDraftQuiet(){ M._touched=true; schedulePersist(); }
+/* 中身を直した回数。保存したときの回数と見比べて「保存後に変更があったか」を決める。
+   時刻で見ると、中身を変えていない書き直し（戸別の切り替え等）でも変更ありになってしまう。 */
+function bumpRev(){ M._touched=true; M._rev=(M._rev|0)+1; }
+function saveDraft(){ bumpRev(); updateHeader(); schedulePersist(); }
+function saveDraftQuiet(){ bumpRev(); schedulePersist(); }
 function schedulePersist(){ clearTimeout(_persistTimer); _persistTimer=setTimeout(()=>{ persistDraft(); }, 400); saveStateDirty(); }
 /* ---- 保存の状態表示 ----
    「この端末への自動保存」と「JSONファイルの書き出し」は別もの。
    入力したのに保存されていない、書き出したあとにまた直した、が一目で分かるようにする。 */
-const _save = { savedAt:0, dirty:false, fileAt:0, fileStale:false, failed:false };
-function saveStateDirty(){ _save.dirty=true; if(_save.fileAt) _save.fileStale=true; renderSaveBar(); }
-function saveStateSaved(fileAt){
+const _save = { savedAt:0, dirty:false, fileAt:0, rev:0, fileRev:0, failed:false };
+/* 保存したあとに中身を直したか。回数で見るので、書き直しただけでは変更ありにならない。 */
+function saveStale(){ return !!_save.fileAt && (_save.rev|0) > (_save.fileRev|0); }
+function saveStateDirty(){ _save.dirty=true; _save.rev=M._rev|0; renderSaveBar(); }
+function saveStateSaved(fileAt, fileRev){
   _save.savedAt=Date.now(); _save.dirty=false; _save.failed=false;
+  _save.rev=M._rev|0;
   if(typeof fileAt==="number") _save.fileAt=fileAt;
-  if(_save.fileAt && _save.savedAt > _save.fileAt + 1500) _save.fileStale=true;
+  if(typeof fileRev==="number") _save.fileRev=fileRev;
   renderSaveBar();
 }
-function saveStateFile(){ _save.fileAt=Date.now(); _save.fileStale=false; renderSaveBar(); }
+function saveStateFile(){ _save.fileAt=Date.now(); _save.fileRev=M._rev|0; _save.rev=M._rev|0; renderSaveBar(); }
 function saveStateFailed(){ _save.failed=true; renderSaveBar(); }
 /* 別の戸別を開いたとき、その戸別の保存状況を読み直す */
 async function saveStateLoad(){
-  _save.dirty=false; _save.failed=false; _save.savedAt=0; _save.fileAt=0; _save.fileStale=false;
+  _save.dirty=false; _save.failed=false; _save.savedAt=0; _save.fileAt=0; _save.rev=M._rev|0; _save.fileRev=0;
   try{
     const key = M._lastDraftKey || draftKey();
     const rec = await idbGet(key);
     if(rec){ _save.savedAt=rec.savedAt||0; _save.fileAt=rec.fileSavedAt||0;
-             _save.fileStale = !!(_save.fileAt && _save.savedAt > _save.fileAt + 1500); }
+             _save.rev=M._rev|0; _save.fileRev=rec.fileRev|0; }
   }catch(_){}
   renderSaveBar();
 }
@@ -2673,11 +2679,11 @@ function renderSaveBar(){
   let file;
   if(!_save.fileAt && (!_save.savedAt || M._touched===false)) file="";   // まだ渡すものが無い
   else if(!_save.fileAt) file="未保存";
-  else if(_save.fileStale||_save.dirty) file="未保存（"+_hhmm(_save.fileAt)+" 保存後に変更）";
+  else if(saveStale()||_save.dirty) file="未保存（"+_hhmm(_save.fileAt)+" 保存後に変更）";
   else file="保存済 "+_hhmm(_save.fileAt);
   el.className="savebar "+cls;
   el.innerHTML='<span class="sb-dot"></span><span class="sb-main">'+esc(main)+'</span>'
-    + (file ? '<span class="sb-file'+((_save.fileStale||!_save.fileAt)?" attn":"")+'">'+esc(file)+'</span>' : "");
+    + (file ? '<span class="sb-file'+((saveStale()||!_save.fileAt)?" attn":"")+'">'+esc(file)+'</span>' : "");
 }
 // レコードに中身があるか（別の実データ下書きかの判定用）
 function _recHasContent(rec){
@@ -2711,11 +2717,12 @@ async function persistDraft(){
     const cur = (key===wantKey) ? prev : await idbGet(key);
     const rec={ key, model:M, savedAt:Date.now(), fileSavedAt:(cur&&cur.fileSavedAt)||0,
       mgmt:M.chosho_mgmt_no||"", cust:M.chosho_cust_name||"", photos:(M.chosho_photos||[]).length,
-      surveyDone:!!M.survey_done, touched:(M._touched!==false) };
+      surveyDone:!!M.survey_done, touched:(M._touched!==false),
+      rev:(M._rev|0), fileRev:(cur&&cur.fileRev)|0 };
     await idbPut(rec);
     localStorage.setItem(LS_LAST, key);
     persistDraft._warned=false;
-    saveStateSaved(rec.fileSavedAt);   // 「いつ保存したか」の表示を更新
+    saveStateSaved(rec.fileSavedAt, rec.fileRev);   // 「いつ保存したか」の表示を更新
   }catch(e){
     console.warn("draft persist failed",e);
     // 容量不足等で自動保存が失敗した時は無音で失わせず、1度だけ警告（JSON保存を促す）
@@ -2729,16 +2736,17 @@ async function persistModel(m){
     if(!m) return;
     const key = m.chosho_mgmt_no ? ("no:"+m.chosho_mgmt_no) : (m._draftId || (m._draftId="tmp:"+Date.now()));
     const prev=await idbGet(key);
+    m._touched=true; m._rev=(m._rev|0)+1;          // 写真やCSVが入った＝中身が変わった
     await idbPut({ key, model:m, savedAt:Date.now(), fileSavedAt:(prev&&prev.fileSavedAt)||0,
       mgmt:m.chosho_mgmt_no||"", cust:m.chosho_cust_name||"", photos:(m.chosho_photos||[]).length,
-      surveyDone:!!m.survey_done, touched:(m._touched!==false) });
+      surveyDone:!!m.survey_done, touched:true, rev:(m._rev|0), fileRev:(prev&&prev.fileRev)|0 });
   }catch(e){ console.warn("persistModel failed",e); }
 }
 async function markDraftSaved(){
   try{
     const key = M._lastDraftKey || (M.chosho_mgmt_no ? ("no:"+M.chosho_mgmt_no) : (M._draftId||""));
     const rec=await idbGet(key);
-    if(rec){ rec.fileSavedAt=Date.now(); await idbPut(rec); }
+    if(rec){ rec.fileSavedAt=Date.now(); rec.fileRev=(rec.rev|0); await idbPut(rec); }
   }catch(e){ console.warn("markDraftSaved failed",e); }
 }
 /* ============================================================================
@@ -2803,7 +2811,7 @@ function unsavedTargets(){
 async function markDraftSavedFor(key){
   try{
     const rec = await idbGet(key);
-    if(rec){ rec.fileSavedAt = Date.now(); await idbPut(rec); }
+    if(rec){ rec.fileSavedAt = Date.now(); rec.fileRev = (rec.rev|0); await idbPut(rec); }
     if(M._lastDraftKey === key || draftKey() === key) saveStateFile();
   }catch(e){ console.warn("markDraftSavedFor failed", e); }
 }
@@ -3021,7 +3029,9 @@ async function openDraftModal(){
     const k=b.getAttribute("data-draftopen");
     clearTimeout(_persistTimer); await persistDraft(); // 現在編集中の保留自動保存を先に確定（切替時の直近入力喪失を防ぐ）
     const rec=await idbGet(k);
-    if(rec&&rec.model){ M=rec.model; M._lastDraftKey=k; ensureModelShape(M); resetOpenState(); render(); localStorage.setItem(LS_LAST,k); closeDraftModal(); toast("再開しました"); }
+    if(rec&&rec.model){ M=rec.model; M._lastDraftKey=k; ensureModelShape(M); resetOpenState(); render();
+      await saveStateLoad();                       // その戸別の保存状況に合わせる
+      localStorage.setItem(LS_LAST,k); closeDraftModal(); toast("再開しました"); }
   }));
   // チェックボックス（複数選択）
   const updateDelBtn=()=>{
@@ -3095,7 +3105,7 @@ async function newCase(){
   localStorage.removeItem(LS_LAST);       // 次回起動で古い戸別を復元しないよう「最後に開いたキー」をクリア
   resetOpenState();                       // アコーディオン開閉を既定へ
   render(); appSwap();
-  _save.savedAt=0; _save.dirty=false; _save.fileAt=0; _save.fileStale=false; renderSaveBar();
+  _save.savedAt=0; _save.dirty=false; _save.fileAt=0; _save.rev=0; _save.fileRev=0; _save.failed=false; renderSaveBar();
   toast("新規を作成しました");
 }
 document.getElementById("btn-save").addEventListener("click",saveJson);
@@ -3147,7 +3157,8 @@ async function refreshDraftInfo(){
       const ph = (typeof rec.photos === "number") ? rec.photos
                : ((rec.model && rec.model.chosho_photos) ? rec.model.chosho_photos.length : 0);
       map[no] = { done, photos: ph, has: true, touched: (rec.touched !== false),
-                  fileAt: rec.fileSavedAt || 0, savedAt: rec.savedAt || 0 };
+                  fileAt: rec.fileSavedAt || 0, savedAt: rec.savedAt || 0,
+                  rev: rec.rev | 0, fileRev: rec.fileRev | 0 };
     });
     _draftInfo = map;
   }catch(e){ console.warn("下書き情報の読み取りに失敗", e); }
@@ -3158,12 +3169,13 @@ function draftInfoOf(no){
   if(no && no === String(M.chosho_mgmt_no||"").trim()){
     return { done: !!M.survey_done, photos: (M.chosho_photos||[]).length, has: true,
              touched: (M._touched !== false),
-             fileAt: _save.fileAt, stale: !!(_save.fileStale || _save.dirty) };
+             fileAt: _save.fileAt, stale: !!(saveStale() || _save.dirty) };
   }
   const d = _draftInfo[no];
   if(!d) return null;
+  // 古い下書き（回数を持たない）は 0>0 で false ＝「保存済み」扱い。次に直せば 1>0 で変更ありになる。
   return { done: d.done, photos: d.photos, has: true, touched: d.touched, fileAt: d.fileAt,
-           stale: !!(d.fileAt && (d.savedAt||0) > d.fileAt + 1500) };
+           stale: !!(d.fileAt && (d.rev|0) > (d.fileRev|0)) };
 }
 /* この戸別をPCに渡せているか。
    "none"=一度も保存していない ／ "stale"=保存した後にまた直した ／ "ok"=保存済み。
@@ -3269,6 +3281,7 @@ async function openFromReception(row){
       // 現場でまだ備考を書いていなければ、台帳の備考（PC側で書き足した分）を入れる
       if(!String(M.chosho_note||"").trim() && row.note) M.chosho_note = String(row.note);
       resetOpenState(); render();
+      await saveStateLoad();                       // その戸別の保存状況に合わせる（前の戸別のまま残さない）
       localStorage.setItem(LS_LAST,"no:"+mgmt); closeReceptionModal(); toast("下書きの続きを開きました"); return;
     }
   }
