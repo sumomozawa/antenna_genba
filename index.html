@@ -248,8 +248,8 @@
   }
   #map-modal .mzoom button:active{transform:scale(.88); background:#e8eef7;}
   #map-stage svg{position:absolute; inset:0; width:100%; height:100%; display:block;}
-  #map-vp{transition:transform .85s var(--ease-out);}
-  #map-vp.dragging{transition:none;}
+  /* 寄り引きは mapAnimTo が1コマずつ描く（CSSのtransitionは使わない） */
+  #map-vp{transition:none; will-change:transform;}
   #map-hl{fill:rgba(255,143,0,.16); stroke:#ef6c00; stroke-width:3; vector-effect:non-scaling-stroke;
     animation:hlPulse 1.6s var(--ease) infinite;}
   @keyframes hlPulse{ 0%,100%{opacity:1;} 50%{opacity:.45;} }
@@ -335,6 +335,12 @@
   .draft .d-no{font-weight:700;}
   .draft .d-sub{font-size:12px; color:var(--sub);}
   .draft .d-open{background:var(--accent); color:#fff; border:0; border-radius:8px; padding:8px 12px; font-weight:700; flex:none;}
+  /* 「開く」と「取消」を右端に縦に並べる */
+  .draft .d-act{display:flex; flex-direction:column; gap:6px; flex:none; align-items:stretch;}
+  .draft .d-undo{background:#fff; color:#8a4a44; border:1.5px solid #e6bdb9; border-radius:8px;
+    padding:6px 10px; font-weight:700; font-size:12px; font-family:inherit; white-space:nowrap;
+    transition:transform var(--t-fast) var(--ease), background var(--t-fast) var(--ease);}
+  .draft .d-undo:active{transform:scale(.92); background:#fdecea;}
   .draft .d-check{width:24px; height:24px; flex:none;}
   /* バージョン表記（本文の最後・フッターバーの上。目立たせない） */
   .app-ver{font-size:10.5px; color:#9aa3ad; text-align:center; padding:10px 12px 4px; line-height:1.7;}
@@ -368,6 +374,14 @@
   .rc-warn{margin:2px 0 12px; padding:10px 12px; border-radius:11px; background:#fdecea; color:#a5342b;
     border:1px solid #f3c2bd; font-size:12.5px; font-weight:600; line-height:1.75;}
   .rc-warn b{color:#b3261e;}
+  /* 開いただけの戸別をまとめて取り消す知らせ（急がない話なので赤にはしない） */
+  .rc-undo{margin:0 0 12px; padding:9px 12px; border-radius:11px; background:#eef2f7; color:#41506b;
+    border:1px solid #d7dee8; font-size:12.5px; font-weight:600; line-height:1.7;}
+  .rc-undo b{color:#0d47a1;}
+  .rc-undo button{display:block; width:100%; margin-top:8px; min-height:44px; border:0; border-radius:10px;
+    background:#5b6b85; color:#fff; font-weight:700; font-size:14px; font-family:inherit;
+    transition:transform var(--t-fast) var(--ease), filter var(--t-fast) var(--ease);}
+  .rc-undo button:active{transform:scale(.96); filter:brightness(.92);}
   .rc-warn .rc-saveall{display:block; width:100%; margin-top:10px; min-height:48px; border:0; border-radius:11px;
     background:#c62828; color:#fff; font-weight:700; font-size:15px; font-family:inherit;
     transition:transform var(--t-fast) var(--ease), filter var(--t-fast) var(--ease);}
@@ -508,6 +522,7 @@
     <div class="info">PCの受付台帳で <b>「📦 現場用」</b> を押すと <b class="fname">現場用_物件名_日付.json</b> ができます。下のボタンから<b>そのファイル</b>を選んでください。<br>受付台帳と地図が一緒に入っているので、これ1つで両方そろいます。<br>
     取り込むと下に一覧が出ます。タップすると<b>管理番号・氏名・住所が入った状態</b>で入力を開始できます（同じ管理番号の下書きがあれば続きから開きます）。<b>下見完了にした戸別は緑色</b>になり、撮った写真の枚数も出ます。<br>
     <b>備考</b>はPCの受付台帳の備考と同じ欄です。事務所が書いた内容が行に出るので、そのまま直せます。<br>
+    開いてみただけの戸別は、右の<b>「取消」</b>で<b>触っていないことに戻せます</b>（「入力中」の印が消えます）。<br>
     入力したのにまだPCへ渡していない戸別には <b class="unsaved-ex">未保存</b> が付きます。その戸別を開いて<b>「保存」</b>を押すと <b class="fname">管理番号.json</b> ができるので、それをPCへ渡してください（写真はフォルダごと渡します）。<br>
     <b>「まとめて保存」</b>を押せば、未保存の戸別を<b>一度に同じ場所へ</b>書き出せます。保存先は覚えているので、2回目からは選び直す必要がありません。<br>
     <span class="sub">※ 地図の入っていない <b class="fname">受付台帳_….json</b> でも取り込めます。</span></div>
@@ -2221,8 +2236,8 @@ function openMapView(no){
   modal.classList.add("open");
   // 開いた直後は全体を映してから、その建物へ寄っていく（どこに居るか分かるように）
   if(hit){
-    mapFitAll(true);
-    setTimeout(() => mapZoomTo(hit.mark), 460);
+    mapFitAll(false);                  // まず全体。ここは動かさず、そのあと一息おいて寄る
+    setTimeout(() => mapZoomTo(hit.mark), 420);
     document.getElementById("map-sub").textContent = _mapPack.sheets[_mapSheetIdx].name || "";
   } else {
     mapFitAll(true);
@@ -2287,9 +2302,57 @@ function mapApply(anim){
   g.classList.toggle("dragging", !anim);
   g.style.transform = "translate(" + mapView.tx + "px," + mapView.ty + "px) scale(" + mapView.s + ")";
 }
+/* ---- 寄り引きの動き ----
+   「全体」と「この家」の行き来は、拡大率を“掛け算で一定の速さ”で変えていくと目に自然に映る。
+   （0.1ずつ足していくように変えると、寄り始めが速すぎて寄り終わりが這うように見える）
+   同時に、画面の真ん中に来る図の点も動かすので、建物へ吸い寄せられるように寄っていく。
+   CSSのtransitionではこの動きが作れないので、1コマずつ自分で描く。 */
+let _mapAnim = null;
+function mapAnimStop(){ if(_mapAnim){ cancelAnimationFrame(_mapAnim); _mapAnim = null; } }
+function mapReduceMotion(){
+  try{ return !!(window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches); }
+  catch(_){ return false; }
+}
+/* いま画面の真ん中に来ている図の点（ワールド座標） */
+function mapCenterWorld(v){
+  const vb = _mapPack.sheets[_mapSheetIdx].viewBox;
+  return { x: (vb.x + vb.w / 2 - v.tx) / v.s, y: (vb.y + vb.h / 2 - v.ty) / v.s };
+}
+/* 拡大率 s1、画面の真ん中に w1 が来る状態まで、なめらかに動かす */
+function mapAnimTo(s1, w1, ms){
+  mapAnimStop();
+  s1 = Math.max(MAP_MIN_S, Math.min(MAP_MAX_S, s1));
+  const vb = _mapPack.sheets[_mapSheetIdx].viewBox;
+  const cx = vb.x + vb.w / 2, cy = vb.y + vb.h / 2;
+  const s0 = mapView.s, w0 = mapCenterWorld(mapView);
+  const put = (s, wx, wy) => {
+    mapView.s = s; mapView.tx = cx - wx * s; mapView.ty = cy - wy * s; mapApply(false);
+  };
+  // 寄り引きの大きさと、真ん中がどれだけ動くかで長さを決める（大きく動くときほど、ゆったり）
+  const ratio = Math.abs(Math.log(s1 / Math.max(1e-6, s0)));
+  const far = Math.hypot(w1.x - w0.x, w1.y - w0.y) / Math.max(1e-6, vb.w);
+  const dur = (ms != null) ? ms : Math.max(420, Math.min(1500, 480 + ratio * 210 + far * 700));
+  if(dur <= 0 || mapReduceMotion()){ put(s1, w1.x, w1.y); return; }
+  const t0 = (window.performance && performance.now) ? performance.now() : Date.now();
+  const step = now => {
+    const t = (typeof now === "number" ? now : Date.now()) - t0;
+    const p = Math.min(1, t / dur);
+    // ゆっくり動き出して、ゆっくり止まる
+    const u = p < 0.5 ? 4 * p * p * p : 1 - Math.pow(-2 * p + 2, 3) / 2;
+    put(s0 * Math.pow(s1 / s0, u), w0.x + (w1.x - w0.x) * u, w0.y + (w1.y - w0.y) * u);
+    _mapAnim = (p < 1) ? requestAnimationFrame(step) : null;
+  };
+  _mapAnim = requestAnimationFrame(step);
+}
 function mapFitAll(anim){
+  if(anim){
+    const vb = _mapPack.sheets[_mapSheetIdx].viewBox;
+    mapAnimTo(1, { x: vb.x + vb.w / 2, y: vb.y + vb.h / 2 });
+    return;
+  }
+  mapAnimStop();
   mapView.s = 1; mapView.tx = 0; mapView.ty = 0;
-  mapApply(!!anim);
+  mapApply(false);
 }
 /* いま画面に映っているワールドの範囲（図は縦横比を保って収めているので、
    余白のぶん viewBox より広く見えている）。拡大率の計算はこちらを基準にする。 */
@@ -2302,17 +2365,12 @@ function mapVisibleExtent(){
   return k > 0 ? { w: r.width / k, h: r.height / k } : { w: vb.w, h: vb.h };
 }
 /* 建物を真ん中に、やや拡大ぎみで映す */
-function mapZoomTo(mark){
-  const vb = _mapPack.sheets[_mapSheetIdx].viewBox;
+function mapZoomTo(mark, ms){
   const vis = mapVisibleExtent();
   // 建物が画面のおよそ 1/4 の大きさに見えるくらい（近所の様子も一緒に見える寄り具合）
   const s = Math.max(1, Math.min(30,
     Math.min(vis.w * 0.26 / Math.max(1e-6, mark.w), vis.h * 0.26 / Math.max(1e-6, mark.h))));
-  mapView.s = s;
-  // world→viewBox で (cx*s + tx) が画面の真ん中に来るようにする
-  mapView.tx = (vb.x + vb.w / 2) - mark.cx * s;
-  mapView.ty = (vb.y + vb.h / 2) - mark.cy * s;
-  mapApply(true);
+  mapAnimTo(s, { x: mark.cx, y: mark.cy }, ms);   // 建物を真ん中に置きにいく
 }
 /* 画面のpx → 図の座標（viewBox）。図は縦横比を保って収めているので、
    余白（レターボックス）のぶんを差し引いてから換算する。 */
@@ -2328,10 +2386,12 @@ function mapPt(clientX, clientY){
 function mapZoomAt(ns, p, anim){
   ns = Math.max(MAP_MIN_S, Math.min(MAP_MAX_S, ns));
   // p は viewBox 座標。いま p の下にある図の点が、拡大後も p に来るように平行移動を決める
-  mapView.tx = p.x - (p.x - mapView.tx) * (ns / mapView.s);
-  mapView.ty = p.y - (p.y - mapView.ty) * (ns / mapView.s);
-  mapView.s = ns;
-  mapApply(!!anim);
+  const tx = p.x - (p.x - mapView.tx) * (ns / mapView.s);
+  const ty = p.y - (p.y - mapView.ty) * (ns / mapView.s);
+  if(anim){ mapAnimTo(ns, mapCenterWorld({ s: ns, tx: tx, ty: ty }), 320); return; }
+  mapAnimStop();                       // 指で動かしている間は、動いている途中でも即その位置へ
+  mapView.tx = tx; mapView.ty = ty; mapView.s = ns;
+  mapApply(false);
 }
 /* ボタンでの拡大縮小は、画面の真ん中を中心にする */
 function mapZoomStep(mul){
@@ -2350,6 +2410,7 @@ function mapBindGestures(){
   const mid = a => ({ x: (a[0].x + a[1].x) / 2, y: (a[0].y + a[1].y) / 2 });
   stage.addEventListener("pointerdown", e => {
     e.preventDefault();
+    mapAnimStop();                     // 寄っている途中でも、指が触れたらそこで止める
     try { stage.setPointerCapture(e.pointerId); } catch(_){}
     pts.set(e.pointerId, raw(e));
     if(pts.size === 1){
@@ -2451,6 +2512,7 @@ async function saveJson(){
   const json=JSON.stringify(state);
   const blob=new Blob([json],{type:"application/json"});
   const fname=currentFileName();
+  M._touched = true;     // 明示的に保存したものは、中身が薄くても下書きに残す
   await persistDraft();  // 下書きは保存（ただし💾＝JSON書出済フラグは“実際に書き出せた時だけ”後で付ける）
   // ① File System Access（Android Chrome対応）
   if(window.showSaveFilePicker){
@@ -2624,6 +2686,10 @@ function _recHasContent(rec){
 }
 async function persistDraft(){
   try{
+    // 中身の無い下書き（管理番号も入力も写真も下見完了印も無い）は保存しない。
+    // ※ draftKey() より前に返すこと。draftKey() は一時IDを採番してしまうため。
+    if(!String(M.chosho_mgmt_no||"").trim() && M._touched !== true
+       && !(M.chosho_photos||[]).length && !M.survey_done) return;
     const wantKey=draftKey();
     const prev=await idbGet(wantKey);
     // 管理番号衝突ガード：このキーの下書きを今まさに編集しているのでなく（別番号から移動 or 新規で既存番号入力）、
@@ -2828,6 +2894,101 @@ async function saveAllUnsaved(){
     : (okNos.length + "件を" + where + "に保存しました"));
 }
 
+/* ============================================================================
+   「触っていないことにする」
+   この端末の下書きを消して、受付台帳を取り込んだ直後の見た目に戻す。
+   （PCの受付台帳の行と、すでに書き出した 管理番号.json は消さない）
+
+   消し残し・復活が起きやすいので、次の3点を必ず守る。
+   ・同じ管理番号のレコードは複数ありうる（管理番号衝突のとき tmp: キーへ退避される）
+     → キーを組み立てず、idbGetAll から管理番号一致のものを全部消す
+   ・一覧は編集中の M を最優先で見る（draftInfoOf）→ その戸別を開いたままなら M ごと差し替える
+   ・自動保存は「保留タイマー」「実行中のもの」「離脱時の flushPersist」の3経路がある
+     → タイマーを止め、_persistTimer=null まで代入し、一度 persistDraft を通して直列化する
+   ============================================================================ */
+async function draftsFlushAndStop(){
+  clearTimeout(_persistTimer); _persistTimer = null;
+  try{ await persistDraft(); }catch(_){}      // 実行中のものと順番を揃える（内容はこの後消す）
+  clearTimeout(_persistTimer); _persistTimer = null;
+}
+/* その管理番号を持つ下書きのキーを全部返す（tmp: へ退避されたものも拾う） */
+async function draftKeysOfNo(no){
+  no = String(no||"").trim(); if(!no) return [];
+  let all = [];
+  try{ all = await idbGetAll(); }catch(e){ console.warn("下書きの読み取りに失敗", e); return []; }
+  return (all||[]).filter(r => r && String(r.mgmt || (r.model && r.model.chosho_mgmt_no) || "").trim() === no)
+                  .map(r => r.key);
+}
+/* 下書きを消して後始末する。消したのが「いま開いている戸別」なら未着手の状態へ戻す。
+   curNo を渡すと、レコードが無くても M がその番号なら開いている扱いにする。 */
+async function forgetDrafts(keys, curNo){
+  const curKey = M._lastDraftKey || draftKey();       // 衝突退避中は draftKey() と食い違う
+  const delCur = keys.indexOf(curKey) >= 0
+    || (!!curNo && String(M.chosho_mgmt_no||"").trim() === String(curNo).trim());
+  for(const k of keys){ try{ await idbDel(k); }catch(e){ console.warn("下書きの削除に失敗", k, e); } }
+  if(delCur){
+    clearTimeout(_persistTimer); _persistTimer = null;  // 上の await 中に仕込まれた分を止め直す
+    M = freshModel();                                   // 丸ごと差し替え（_lastDraftKey等を持ち越さない）
+    guideFilledFields.clear();
+    resetOpenState();
+    persistDraft._collisionKey = null;
+    localStorage.removeItem(LS_LAST);                   // M を差し替えた後に消す
+    render(); appSwap();
+    await saveStateLoad();                              // 保存バーも初期化（failed も戻る）
+  }
+  await refreshDraftInfo();
+  return delCur;
+}
+/* 受付台帳の一覧を、検索語を保ったまま出し直す */
+function receptionRerender(){
+  const sv = document.getElementById("reception-search");
+  renderReceptionList(sv ? sv.value : "");
+}
+/* 「開いただけ（まだ何も入力していない）」の下書きか */
+function isOpenedOnly(info){
+  return !!(info && info.has && !info.done && handoverOf(info) === "");
+}
+/* 1件を「触っていないことにする」 */
+async function untouchCase(row){
+  if(!row) return;
+  const no = String(row.mgmt_no||"").trim();
+  const info = draftInfoOf(no);
+  if(!no || !info || !info.has || info.done) return;    // 対象は「入力中」の戸別だけ
+  const who = no + (row.name ? ("　" + row.name) : "");
+  const lost = [];
+  if(info.photos) lost.push("写真" + info.photos + "枚");
+  if(handoverOf(info) !== "") lost.push("まだ保存していない入力");
+  const msg = lost.length
+    ? ("この戸別を「触っていない」状態に戻します。\n\n" + who + "\n\n"
+       + "この端末の " + lost.join("と") + " が消えます。元には戻せません。\n"
+       + "（PCの受付台帳の行と、すでに保存した 管理番号.json は消えません）")
+    : ("この戸別を「触っていない」状態に戻します。\n\n" + who + "\n\n"
+       + "開いただけで、まだ何も入力されていません。「入力中」の印が消えます。");
+  if(!(await uiConfirm(msg))) return;
+  await draftsFlushAndStop();
+  const keys = await draftKeysOfNo(no);
+  await forgetDrafts(keys, no);
+  receptionRerender();
+  toast("「" + no + "」を触っていないことにしました");
+}
+/* 開いただけの戸別をまとめて取り消す（消えて困るものが無い戸別だけが対象） */
+async function untouchOpenedOnly(){
+  const rows = getReceptionRows();
+  const targets = rows.filter(r => r && String(r.mgmt_no||"").trim() && isOpenedOnly(draftInfoOf(r.mgmt_no)));
+  if(!targets.length){ await uiAlert("開いただけの戸別はありません。"); return; }
+  const listTxt = targets.slice(0, 8).map(r => "・" + r.mgmt_no).join("\n")
+    + (targets.length > 8 ? ("\n・ほか " + (targets.length - 8) + " 件") : "");
+  if(!(await uiConfirm("開いただけの " + targets.length + "件を「触っていない」状態に戻します。\n\n"
+      + listTxt + "\n\nどれもまだ何も入力されていないので、消えて困るものはありません。"))) return;
+  await draftsFlushAndStop();
+  let keys = [];
+  for(const r of targets){ keys = keys.concat(await draftKeysOfNo(r.mgmt_no)); }
+  await forgetDrafts(keys, null);
+  // まとめ消しでは、開いている戸別が対象に含まれていても forgetDrafts が面倒を見る
+  receptionRerender();
+  toast(targets.length + "件を触っていないことにしました");
+}
+
 async function openDraftModal(){
   document.getElementById("draft-modal").classList.add("open");
   const list=document.getElementById("draft-list");
@@ -2879,12 +3040,9 @@ async function openDraftModal(){
     const keys=[...list.querySelectorAll(".d-check:checked")].map(cb=>cb.getAttribute("data-draftcheck"));
     if(!keys.length) return;
     if(!(await uiConfirm("選択した "+keys.length+" 件の下書きを削除しますか？"))) return;
-    // 現在編集中の戸別が含まれる場合は、保留自動保存を止め・編集内容とLS_LASTをリセット（削除後の復活防止）
-    const curKey = M.chosho_mgmt_no ? ("no:"+M.chosho_mgmt_no) : (M._draftId||"");
-    const delCur = keys.indexOf(curKey)>=0;
-    if(delCur) clearTimeout(_persistTimer);
-    for(const k of keys){ await idbDel(k); }
-    if(delCur){ M=freshModel(); localStorage.removeItem(LS_LAST); render(); }
+    // 後始末（自動保存の止め方・Mの差し替え・保存バー・一覧の作り直し）は共通処理に任せる
+    await draftsFlushAndStop();
+    await forgetDrafts(keys, null);
     toast(keys.length+"件を削除しました");
     openDraftModal();
   });
@@ -3046,7 +3204,13 @@ function renderReceptionList(q){
                  : `<div class="rc-warn-sub">保存先をひとつ選ぶと、次からは同じ場所にまとめて入ります</div>`)
       + `</div>`
     : "";
-  host.innerHTML=warn+filtered.map(r=>{
+  // 開いただけ（何も入力していない）の戸別。たまると「入力中」だらけになるのでまとめて戻せる。
+  const openedOnly = rows.filter(r => r && String(r.mgmt_no||"").trim() && isOpenedOnly(draftInfoOf(r.mgmt_no))).length;
+  const undoBar = openedOnly >= 2
+    ? `<div class="rc-undo">開いただけの戸別が <b>${openedOnly}件</b> あります（まだ何も入力していません）。`
+      + `<button id="rc-undoall">まとめて取消（${openedOnly}件）</button></div>`
+    : "";
+  host.innerHTML=warn+undoBar+filtered.map(r=>{
     const idx=rows.indexOf(r);
     const info=draftInfoOf(r.mgmt_no);
     const sub=[r.addr, r.date?("予定 "+r.date):"", r.contractor].filter(Boolean).map(esc).join("・");
@@ -3068,13 +3232,23 @@ function renderReceptionList(q){
     // 備考はPCと共通の欄。事務所が書いた内容を現場でも読めるように行に出す。
     const note = String(r.note||"").replace(/\s+/g," ").trim();
     const noteHtml = note ? `<div class="rc-note">${esc(note)}</div>` : "";
+    // 「入力中」の戸別は、触っていないことにして取り込み直後の状態へ戻せる
+    const canUndo = !!(info && info.has && !info.done);
+    const act = `<div class="d-act"><button class="d-open" data-recopen="${idx}">${(info&&info.done)?"見直す":"開く"}</button>`
+      + (canUndo ? `<button class="d-undo" data-recundo="${idx}">取消</button>` : "")
+      + `</div>`;
     return `<div class="draft${cls}${unsaved?" rc-unsaved":""}"><div class="d-main" data-recopen="${idx}">
       <div class="d-no">${surv}${started}${unsaved}${hold}${badge}${esc(r.mgmt_no||"（番号なし）")}${r.name?(" ／ "+esc(r.name)):""}</div>
-      <div class="d-sub">${sub}${ph}${fileNote}</div>${noteHtml}</div>
-      <button class="d-open" data-recopen="${idx}">${(info&&info.done)?"見直す":"開く"}</button></div>`;
+      <div class="d-sub">${sub}${ph}${fileNote}</div>${noteHtml}</div>${act}</div>`;
   }).join("");
   const sa = document.getElementById("rc-saveall");
   if(sa) sa.addEventListener("click", saveAllUnsaved);
+  const ua = document.getElementById("rc-undoall");
+  if(ua) ua.addEventListener("click", untouchOpenedOnly);
+  // 「取消」は .d-main の外に置いてあるので、行を開くハンドラには拾われない
+  host.querySelectorAll("[data-recundo]").forEach(b=>b.addEventListener("click", async()=>{
+    await untouchCase(rows[parseInt(b.getAttribute("data-recundo"),10)]);
+  }));
   host.querySelectorAll("[data-recopen]").forEach(b=>b.addEventListener("click",async()=>{
     const i=parseInt(b.getAttribute("data-recopen"),10);
     const row=rows[i];
@@ -3190,7 +3364,7 @@ document.getElementById("map-here").addEventListener("click",()=>{
   const hit=mapFindMark(_mapTarget);
   if(!hit) return;
   if(hit.sheet!==_mapSheetIdx){ _mapSheetIdx=hit.sheet; mapRenderSheet(); mapFitAll(false); }
-  setTimeout(()=>mapZoomTo(hit.mark),30);
+  mapZoomTo(hit.mark);
 });
 document.getElementById("map-google").addEventListener("click",()=>{
   const q=String(M.chosho_cust_addr||"").trim();
