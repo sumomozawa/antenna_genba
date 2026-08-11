@@ -253,6 +253,14 @@
   #map-hl{fill:rgba(255,143,0,.16); stroke:#ef6c00; stroke-width:3; vector-effect:non-scaling-stroke;
     animation:hlPulse 1.6s var(--ease) infinite;}
   @keyframes hlPulse{ 0%,100%{opacity:1;} 50%{opacity:.45;} }
+  /* 印の切り替え（保・下・完・未）。地図の下のバーのすぐ上に小さく並べる */
+  #map-modal .mchips{display:flex; gap:6px; justify-content:center; padding:6px 10px 0;
+    background:rgba(255,255,255,.95);}
+  #map-modal .mchips .mkchip{min-width:42px; min-height:34px; border:1.5px solid #cdd3da; background:#fff;
+    color:#7b8794; border-radius:9px; font-weight:700; font-size:14px; font-family:inherit;
+    transition:transform var(--t-fast) var(--ease), background var(--t-fast) var(--ease);}
+  #map-modal .mchips .mkchip.on{color:#fff;}
+  #map-modal .mchips .mkchip:active{transform:scale(.92);}
   #map-modal .mbot{
     display:flex; gap:8px; padding:8px 10px calc(env(safe-area-inset-bottom) + 8px);
     background:rgba(255,255,255,.95); border-top:1px solid var(--line);
@@ -496,6 +504,7 @@
     <button id="map-zin" aria-label="拡大">＋</button>
     <button id="map-zout" aria-label="縮小">−</button>
   </div>
+  <div class="mchips" id="map-chips"></div>
   <div class="mbot" id="map-bot">
     <button id="map-here" class="pri">この家</button>
     <button id="map-all">全体</button>
@@ -709,8 +718,9 @@ function freshModel(){
     level:"level3",material:"siding",material_other:"",applicability_mode:"auto",
     contractor_name:"",contractor_addr:"",contractor_tel:"",supervisor_name:"",investigator_name:"",investigator_license:""};
   m.antenna_guide={ver:1,pattern:null,parts:{}};
-  // 調書日を今日に
-  m.chosho_date = todayStr();
+  // 工事予定日は空のまま。ここは PC の「施工日」＝受付台帳の「工事日程予定」と同じ欄で、
+  // 下見の段階では日程が決まっていない。既定で今日を入れると、取り込んだPC側で
+  // 今日が工事予定日として登録されてしまう（台帳から開いた場合は、その予定日が入る）。
   m._draftId = "tmp:"+Date.now()+"_"+(_tmpSeq++); // 一時ID（管理番号入力前の下書きキー。削除判定のズレ防止で必ず付与）
   syncTvArrays(m);
   return m;
@@ -1352,7 +1362,8 @@ function syncTvArrays(m){
 const SECTIONS = [
   { id:"chosho", ico:"📋", title:"調書・顧客", open:true, fields:[
     {id:"chosho_mgmt_no", type:"text", label:"管理番号", req:true, hint:"ファイル名・写真フォルダ名になります（例 245001）"},
-    {id:"chosho_date", type:"date", label:"調書日"},
+    {id:"chosho_date", type:"date", label:"工事予定日",
+     hint:"PCの受付台帳の「工事日程予定」と同じ欄です。下見の段階では空のままにしてください（台帳に予定日が入っていれば、開いたときに入ります）"},
     {id:"chosho_cust_name", type:"text", label:"顧客名"},
     {id:"chosho_cust_addr", type:"text", label:"住所", mapLink:true, hint:"「地図」は下のバーの「地図」と同じ。PCから取り込んだ図面でこの戸別の場所を見られます（図面が無いときはGoogleマップへ）"},
     {id:"chosho_cust_tel", type:"tel", label:"電話番号"},
@@ -2249,6 +2260,98 @@ function openMapView(no){
 }
 function closeMapView(){ document.getElementById("map-modal").classList.remove("open"); }
 
+/* ---- 地図に出す状態の印 ----
+   PCの地図と同じ流儀で、建物の上に 保／下／完／未 を出す。
+   ・下（下見済み）は、この端末で下見完了にしたかどうか＝下書きから見る
+   ・保・完・未 は、取り込んだ受付台帳の行から見る
+   図面に焼き込まれた印ではなく、その場で重ねて描くので、
+   下見完了を押した直後から地図に出る。 */
+const MAPMK = [
+  { key:"hold",   ch:"保", color:"#e65100", label:"保留",   def:true  },
+  { key:"surv",   ch:"下", color:"#00838f", label:"下見済", def:true  },
+  { key:"done",   ch:"完", color:"#2e7d32", label:"完了",   def:true  },
+  { key:"undone", ch:"未", color:"#1565c0", label:"未完了", def:false },
+];
+const _mapMkOn = {};
+MAPMK.forEach(m => {
+  _mapMkOn[m.key] = m.def;
+  try{ const v = localStorage.getItem("field_map_mark_" + m.key);
+       if(v === "1" || v === "0") _mapMkOn[m.key] = (v === "1"); }catch(_){}
+});
+/* 管理番号 → 受付台帳の行（印を決めるのに使う。開くたびに1回だけ作る） */
+let _mapRowIdx = null;
+function mapRowIndex(){
+  const idx = {};
+  getReceptionRows().forEach(r => {
+    const no = String((r && r.mgmt_no) || "").trim();
+    if(no && !idx[no]) idx[no] = r;
+  });
+  return idx;
+}
+function mapMarksFor(no){
+  const out = [];
+  no = String(no || "").trim();
+  if(!no) return out;
+  const row = (_mapRowIdx || {})[no];
+  if(_mapMkOn.hold && row && row.hold) out.push(MAPMK[0]);
+  if(_mapMkOn.surv){
+    const info = draftInfoOf(no);                 // いま開いている戸別は M を優先して見てくれる
+    if(info && info.done) out.push(MAPMK[1]);
+  }
+  const st = String((row && row.status) || "");
+  if(_mapMkOn.done && st === "completed") out.push(MAPMK[2]);
+  if(_mapMkOn.undone && st === "in_progress") out.push(MAPMK[3]);   // 仮受付は工事前なので付けない
+  return out;
+}
+/* 図面の上に印を重ねる。建物の大きさに合わせた文字の大きさで、右肩に並べる。 */
+function mapMarkLayer(sh){
+  _mapRowIdx = mapRowIndex();
+  const marks = sh.marks || {};
+  let out = "";
+  Object.keys(marks).forEach(no => {
+    const mk = marks[no], list = mapMarksFor(no);
+    if(!mk || !list.length) return;
+    // 2つ並べて2段まで建物の中に収まる大きさ（図面の管理番号と同じ考え方）
+    const fs = Math.max(sh.viewBox.w / 400, Math.min(mk.w * 0.30, mk.h * 0.42));
+    const step = fs * 0.95;
+    const xEnd = mk.cx + mk.w * 0.5 - fs * 0.55;      // 建物の中の右端
+    const yTop = mk.cy - mk.h * 0.5 + fs * 0.55;      // 建物の中の上端
+    list.forEach((d, i) => {
+      const row = Math.floor(i / 2), col = i % 2;
+      const n = Math.min(2, list.length - row * 2);   // その行に何個あるか（右詰めにする）
+      const x = xEnd - (n - 1 - col) * step, y = yTop + row * step;
+      out += '<text x="' + x + '" y="' + y + '" font-size="' + fs + '" fill="' + d.color
+        + '" stroke="#ffffff" stroke-width="' + (fs * 0.22) + '" paint-order="stroke"'
+        + ' text-anchor="middle" dominant-baseline="central" font-family="sans-serif"'
+        + ' font-weight="700" pointer-events="none" vector-effect="non-scaling-stroke">' + d.ch + '</text>';
+    });
+  });
+  return out ? ('<g id="map-mk">' + out + "</g>") : "";
+}
+/* 印の切り替え（地図の下のバー）。押すたびに描き直す。 */
+function renderMapMarkChips(){
+  const host = document.getElementById("map-chips"); if(!host) return;
+  host.innerHTML = MAPMK.map(m =>
+    '<button type="button" data-mk="' + m.key + '" class="mkchip' + (_mapMkOn[m.key] ? " on" : "") + '"'
+    + ' style="' + (_mapMkOn[m.key] ? ("background:" + m.color + ";border-color:" + m.color + ";") : "") + '"'
+    + ' title="' + esc(m.label) + '">' + m.ch + "</button>").join("");
+  host.querySelectorAll("[data-mk]").forEach(b => b.addEventListener("click", () => {
+    const k = b.getAttribute("data-mk");
+    _mapMkOn[k] = !_mapMkOn[k];
+    try{ localStorage.setItem("field_map_mark_" + k, _mapMkOn[k] ? "1" : "0"); }catch(_){}
+    renderMapMarkChips();
+    mapRefreshMarks();
+  }));
+}
+/* 図面はそのままに、印だけ描き直す（寄り引きの位置は動かさない） */
+function mapRefreshMarks(){
+  const vp = document.getElementById("map-vp"); if(!vp || !_mapPack) return;
+  const old = document.getElementById("map-mk");
+  if(old) old.remove();
+  const html = mapMarkLayer(_mapPack.sheets[_mapSheetIdx]);
+  if(html) vp.insertAdjacentHTML("beforeend", html);
+}
+
 function mapRenderSheet(){
   const sh = _mapPack.sheets[_mapSheetIdx];
   const vb = sh.viewBox;
@@ -2263,7 +2366,9 @@ function mapRenderSheet(){
   stage.innerHTML = '<svg id="map-svg" viewBox="' + vb.x + " " + vb.y + " " + vb.w + " " + vb.h
     + '" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">'
     + '<g id="map-vp">' + sh.svg + hl + "</g></svg>";
-  mapThinStrokes(vb);
+  mapThinStrokes(vb);                 // 線を細くしてから
+  mapRefreshMarks();                  // 印を重ねる（細くする処理に巻き込まれないよう後で足す）
+  renderMapMarkChips();
   // 図面が2枚以上ある物件は切り替えられるようにする
   const sel = document.getElementById("map-sheet");
   if(_mapPack.sheets.length > 1){
