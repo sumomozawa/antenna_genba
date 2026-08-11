@@ -364,6 +364,12 @@
   .rc-warn{margin:2px 0 12px; padding:10px 12px; border-radius:11px; background:#fdecea; color:#a5342b;
     border:1px solid #f3c2bd; font-size:12.5px; font-weight:600; line-height:1.75;}
   .rc-warn b{color:#b3261e;}
+  .rc-warn .rc-saveall{display:block; width:100%; margin-top:10px; min-height:48px; border:0; border-radius:11px;
+    background:#c62828; color:#fff; font-weight:700; font-size:15px; font-family:inherit;
+    transition:transform var(--t-fast) var(--ease), filter var(--t-fast) var(--ease);}
+  .rc-warn .rc-saveall:active{transform:scale(.96); filter:brightness(.92);}
+  .rc-warn .rc-saveall:disabled{background:#d9a3a0;}
+  .rc-warn .rc-warn-sub{margin-top:6px; font-size:11.5px; font-weight:600; color:#8a4a44;}
   .unsaved-ex{display:inline-block; background:#d32f2f; color:#fff; font-size:10px; font-weight:700;
     padding:0 6px; border-radius:8px; line-height:17px; vertical-align:1px;}
   /* 複数選択削除のアクションバー */
@@ -498,6 +504,7 @@
     <div class="info">PCの受付台帳で <b>「📦 現場用」</b> を押すと <b class="fname">現場用_物件名_日付.json</b> ができます。下のボタンから<b>そのファイル</b>を選んでください。<br>受付台帳と地図が一緒に入っているので、これ1つで両方そろいます。<br>
     取り込むと下に一覧が出ます。タップすると<b>管理番号・氏名・住所が入った状態</b>で入力を開始できます（同じ管理番号の下書きがあれば続きから開きます）。<b>下見完了にした戸別は緑色</b>になり、撮った写真の枚数も出ます。<br>
     入力したのにまだPCへ渡していない戸別には <b class="unsaved-ex">未保存</b> が付きます。その戸別を開いて<b>「保存」</b>を押すと <b class="fname">管理番号.json</b> ができるので、それをPCへ渡してください（写真はフォルダごと渡します）。<br>
+    <b>「まとめて保存」</b>を押せば、未保存の戸別を<b>一度に同じ場所へ</b>書き出せます。保存先は覚えているので、2回目からは選び直す必要がありません。<br>
     <span class="sub">※ 地図の入っていない <b class="fname">受付台帳_….json</b> でも取り込めます。</span></div>
     <button id="btn-reception-import" style="width:100%; padding:15px; border:0; border-radius:11px; background:#00695c; color:#fff; font-weight:700; font-size:15px; margin-bottom:10px;">現場用_….json を選ぶ</button>
     <input type="file" id="reception-file" accept=".json,application/json,*/*" style="display:none;">
@@ -2663,6 +2670,158 @@ async function markDraftSaved(){
     if(rec){ rec.fileSavedAt=Date.now(); await idbPut(rec); }
   }catch(e){ console.warn("markDraftSaved failed",e); }
 }
+/* ============================================================================
+   まとめて保存
+   まだPCに渡していない戸別を一度に書き出す。書き出し先は「前回のフォルダ」を
+   覚えておいて、2回目からは選び直さずに済むようにする。
+   ・PC(Chrome/Edge)：フォルダを1回選ぶ→以後そのフォルダへ直接書く
+   ・スマホ：フォルダを選べないので、共有（1回の操作でまとめて）→ダメならダウンロード
+     （どちらも同じ場所にまとまる）
+   ============================================================================ */
+const SAVEDIR_KEY  = "savedir";                   // IndexedDB(maps)に置くフォルダの手がかり
+const LS_SAVEDIR   = "field_savedir_name_v1";     // 画面に出す用のフォルダ名
+// この画面が覚えているフォルダ。IndexedDBに残せない端末でも、1回選べばその後は聞かない。
+let _saveDir = null;
+async function saveDirGet(){
+  if(_saveDir) return _saveDir;
+  try{ const r = await idbMapGet(SAVEDIR_KEY); _saveDir = (r && r.handle) || null; }catch(_){ _saveDir = null; }
+  return _saveDir;
+}
+async function saveDirSet(h){
+  _saveDir = h || null;
+  let kept = false;
+  try{ await idbMapPut({ key:SAVEDIR_KEY, handle:h, savedAt:Date.now() }); kept = true; }
+  catch(e){ console.warn("保存先フォルダを覚えられませんでした（この画面の間だけ覚えます）", e); }
+  // アプリを開き直しても残る時だけ名前を控える（次回も同じ所に入る、と言い切れる場合だけ出す）
+  try{ localStorage.setItem(LS_SAVEDIR, kept ? ((h && h.name) || "") : ""); }catch(_){}
+}
+function saveDirName(){
+  if(_saveDir && _saveDir.name) return _saveDir.name;
+  try{ return localStorage.getItem(LS_SAVEDIR) || ""; }catch(_){ return ""; }
+}
+/* フォルダへ書く許可があるか。ask=true なら聞き直す（許可はブラウザを閉じると切れることがある） */
+async function saveDirOk(h, ask){
+  if(!h || !h.queryPermission) return false;
+  try{
+    if(await h.queryPermission({ mode:"readwrite" }) === "granted") return true;
+    if(!ask) return false;
+    return (await h.requestPermission({ mode:"readwrite" })) === "granted";
+  }catch(_){ return false; }
+}
+/* いま開いていない下書きの書き出し内容を作る。
+   項目の並びや既定値の扱いを1か所（buildState）に保つため、Mを一時的に入れ替えて通す。
+   buildState は最初から最後まで同期処理なので、途中で他の処理が割り込むことはない。 */
+function buildStateOf(model){
+  const keep = M;
+  try{ M = model; ensureModelShape(M); return buildState(); }
+  finally{ M = keep; }
+}
+/* まだPCに渡していない戸別の管理番号。番号の無い下書きはファイル名を決められないので外す。 */
+function unsavedTargets(){
+  const seen = {}, out = [];
+  const add = no => {
+    no = String(no||"").trim();
+    if(!no || seen[no]) return;
+    const h = handoverOf(draftInfoOf(no));
+    if(h === "none" || h === "stale"){ seen[no] = 1; out.push(no); }
+  };
+  Object.keys(_draftInfo).forEach(add);
+  add(M.chosho_mgmt_no);                     // いま開いている戸別（下書きに書く前でも拾う）
+  return out.sort();
+}
+async function markDraftSavedFor(key){
+  try{
+    const rec = await idbGet(key);
+    if(rec){ rec.fileSavedAt = Date.now(); await idbPut(rec); }
+    if(M._lastDraftKey === key || draftKey() === key) saveStateFile();
+  }catch(e){ console.warn("markDraftSavedFor failed", e); }
+}
+async function saveAllUnsaved(){
+  const btn = document.getElementById("rc-saveall");
+  const setBusy = on => { if(btn){ btn.disabled = on; btn.textContent = on ? "保存中…" : btn.dataset.label; } };
+  clearTimeout(_persistTimer);
+  try{ await persistDraft(); }catch(_){}     // いまの入力を先に下書きへ確定
+  await refreshDraftInfo();
+  const nos = unsavedTargets();
+  const all = await idbGetAll();
+  // 管理番号が無くて対象にできない下書き（ファイル名を決められない）
+  const noNum = (all||[]).filter(r => r && r.model && !String(r.mgmt||"").trim()
+    && !r.fileSavedAt && (r.touched !== false || r.photos || r.surveyDone)).length;
+  if(!nos.length){
+    await uiAlert(noNum ? ("まとめて保存できる戸別はありません。\n\n管理番号の入っていない下書きが "+noNum+" 件あります。\n管理番号を入れてから保存してください。")
+                        : "まだ保存していない戸別はありません。");
+    return;
+  }
+  const byNo = {};
+  (all||[]).forEach(r => { const k = String((r && r.mgmt) || "").trim(); if(k) byNo[k] = r; });
+  const files = [];
+  nos.forEach(no => {
+    const rec = byNo[no];
+    if(!rec || !rec.model) return;
+    files.push({ no, key: rec.key, name: sanitizeFilename(no) + ".json",
+                 text: JSON.stringify(buildStateOf(rec.model)) });
+  });
+  if(!files.length){ await uiAlert("まとめて保存できる戸別はありません。"); return; }
+  const listTxt = files.slice(0, 8).map(f => "・" + f.name).join("\n")
+    + (files.length > 8 ? ("\n・ほか " + (files.length - 8) + " 件") : "");
+  if(!(await uiConfirm(files.length + "件をまとめて保存します。\n\n" + listTxt
+      + (noNum ? ("\n\n※ 管理番号の無い下書き " + noNum + " 件は対象外です") : "")))) return;
+
+  setBusy(true);
+  let dir = await saveDirGet();
+  if(dir && !(await saveDirOk(dir, true))) dir = null;   // 許可が切れていたら聞き直す
+  if(!dir && window.showDirectoryPicker){
+    try{ dir = await window.showDirectoryPicker({ id:"genba-save", mode:"readwrite" }); }
+    catch(e){ setBusy(false); if(e && e.name === "AbortError") return; dir = null; }
+    if(dir) await saveDirSet(dir);
+  }
+  const okNos = [], ngNos = [];
+  let where = "";
+  if(dir){
+    for(const f of files){
+      try{
+        const fh = await dir.getFileHandle(f.name, { create:true });
+        const w = await fh.createWritable();
+        await w.write(new Blob([f.text], { type:"application/json" }));
+        await w.close();
+        okNos.push(f);
+      }catch(e){ console.warn("まとめて保存 失敗", f.name, e); ngNos.push(f.no); }
+    }
+    where = "「" + (dir.name || "選んだフォルダ") + "」";
+  } else {
+    // フォルダを選べない端末：まず共有（1回の操作で全部まとめて渡せる）
+    let shared = false;
+    try{
+      const fs = files.map(f => new File([f.text], f.name, { type:"application/json" }));
+      if(navigator.canShare && navigator.canShare({ files: fs })){
+        await navigator.share({ files: fs });
+        shared = true; okNos.push.apply(okNos, files); where = "共有先";
+      }
+    }catch(e){ setBusy(false); if(e && e.name === "AbortError") return; }
+    if(!shared){
+      // 最後の手段：ダウンロード（端末の「ダウンロード」フォルダに全部並ぶ）
+      for(const f of files){
+        try{
+          const url = URL.createObjectURL(new Blob([f.text], { type:"application/json" }));
+          const a = document.createElement("a"); a.href = url; a.download = f.name;
+          document.body.appendChild(a); a.click();
+          setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 4000);
+          okNos.push(f);
+        }catch(e){ console.warn("ダウンロード失敗", f.name, e); ngNos.push(f.no); }
+        await new Promise(r => setTimeout(r, 260));   // 連続ダウンロードで弾かれないよう少し間を空ける
+      }
+      where = "ダウンロードフォルダ";
+    }
+  }
+  for(const f of okNos) await markDraftSavedFor(f.key);
+  await refreshDraftInfo();
+  const sv = document.getElementById("reception-search");
+  renderReceptionList(sv ? sv.value : "");
+  setBusy(false);
+  toast(ngNos.length
+    ? (okNos.length + "件を" + where + "に保存しました（" + ngNos.length + "件は失敗）")
+    : (okNos.length + "件を" + where + "に保存しました"));
+}
 
 async function openDraftModal(){
   document.getElementById("draft-modal").classList.add("open");
@@ -2871,11 +3030,16 @@ function renderReceptionList(q){
   const filtered=kw ? rows.filter(r=>((r.mgmt_no||"")+" "+(r.name||"")+" "+(r.addr||"")+" "+(r.tel||"")).toLowerCase().includes(kw)) : rows;
   if(!filtered.length){ host.innerHTML=`<div class="info" style="text-align:center">該当なし</div>`; return; }
   // 「まだPCに渡していない戸別」の数。ここで数えないと、書き出し忘れがそのまま埋もれる。
-  const notHanded = rows.filter(r=>{ const h=handoverOf(draftInfoOf(r.mgmt_no)); return h==="none"||h==="stale"; }).length;
+  const notHanded = unsavedTargets().length;
+  const dirName = saveDirName();
   const warn = notHanded
     ? `<div class="rc-warn">まだ保存していない戸別が <b>${notHanded}件</b> あります。<br>`
       + `その戸別を開いて<b>「保存」</b>を押すと <b class="fname">管理番号.json</b> ができます。`
-      + `これをPCに渡さないと、写真以外の入力はメインに取り込めません。</div>`
+      + `これをPCに渡さないと、写真以外の入力はメインに取り込めません。`
+      + `<button id="rc-saveall" class="rc-saveall" data-label="まとめて保存（${notHanded}件）">まとめて保存（${notHanded}件）</button>`
+      + (dirName ? `<div class="rc-warn-sub">前回のフォルダ「<b>${esc(dirName)}</b>」に入れます</div>`
+                 : `<div class="rc-warn-sub">保存先をひとつ選ぶと、次からは同じ場所にまとめて入ります</div>`)
+      + `</div>`
     : "";
   host.innerHTML=warn+filtered.map(r=>{
     const idx=rows.indexOf(r);
@@ -2901,6 +3065,8 @@ function renderReceptionList(q){
       <div class="d-sub">${sub}${ph}${fileNote}</div></div>
       <button class="d-open" data-recopen="${idx}">${(info&&info.done)?"見直す":"開く"}</button></div>`;
   }).join("");
+  const sa = document.getElementById("rc-saveall");
+  if(sa) sa.addEventListener("click", saveAllUnsaved);
   host.querySelectorAll("[data-recopen]").forEach(b=>b.addEventListener("click",async()=>{
     const i=parseInt(b.getAttribute("data-recopen"),10);
     const row=rows[i];
