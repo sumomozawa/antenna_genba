@@ -402,6 +402,16 @@
   .rc-warn .rc-saveall:active{transform:scale(.96); filter:brightness(.92);}
   .rc-warn .rc-saveall:disabled{background:#d9a3a0;}
   .rc-warn .rc-warn-sub{margin-top:6px; font-size:11.5px; font-weight:600; color:#8a4a44;}
+  /* PCで台帳を直したあとに、戸別ファイルを作り直してもらうための案内 */
+  .rc-redo{margin:0 0 12px; padding:9px 12px; border-radius:11px; background:#fff8e1; color:#6b5327;
+    border:1px solid #e8d9a8; font-size:12.5px; font-weight:600; line-height:1.75;}
+  .rc-redo b{color:#8a6d3b;}
+  .rc-redo button{display:block; width:100%; margin-top:8px; min-height:46px; border:0; border-radius:10px;
+    background:#8a6d3b; color:#fff; font-weight:700; font-size:14.5px; font-family:inherit;
+    transition:transform var(--t-fast) var(--ease), filter var(--t-fast) var(--ease);}
+  .rc-redo button:active{transform:scale(.96); filter:brightness(.92);}
+  .rc-redo button:disabled{background:#c3b391;}
+  .rc-redo .rc-redo-sub{margin-top:6px; font-size:11.5px; font-weight:600; color:#8a7a55;}
   .unsaved-ex{display:inline-block; background:#d32f2f; color:#fff; font-size:10px; font-weight:700;
     padding:0 6px; border-radius:8px; line-height:17px; vertical-align:1px;}
   /* 複数選択削除のアクションバー */
@@ -541,6 +551,7 @@
     開いてみただけの戸別は、右の<b>「取消」</b>で<b>触っていないことに戻せます</b>（「入力中」の印が消えます）。<br>
     入力したのにまだPCへ渡していない戸別には <b class="unsaved-ex">未保存</b> が付きます。その戸別を開いて<b>「保存」</b>を押すと <b class="fname">管理番号.json</b> ができるので、それをPCへ渡してください（写真はフォルダごと渡します）。<br>
     <b>「まとめて保存」</b>を押せば、未保存の戸別を<b>一度に同じ場所へ</b>書き出せます。保存先は覚えているので、2回目からは選び直す必要がありません。<br>
+    PCで台帳を直して<b>この受付台帳を入れ直したとき</b>は、<b>「全部保存し直す」</b>を押してください。直した内容を戸別ファイルへ入れ直します（押さないと、メインでフォルダを読み直したときに<b>直す前の内容に戻ります</b>）。<br>
     <span class="sub">※ 地図の入っていない <b class="fname">受付台帳_….json</b> でも取り込めます。</span></div>
     <button id="btn-reception-import" style="width:100%; padding:15px; border:0; border-radius:11px; background:#00695c; color:#fff; font-weight:700; font-size:15px; margin-bottom:10px;">現場用_….json を選ぶ</button>
     <input type="file" id="reception-file" accept=".json,application/json,*/*" style="display:none;">
@@ -2916,6 +2927,38 @@ function buildStateOf(model){
   try{ M = model; ensureModelShape(M); return buildState(); }
   finally{ M = keep; }
 }
+/* 受付台帳（PCで直したもの）を、この端末の下書きへ入れ直す。
+   PCが持ち主の項目＝名前・住所・電話・工事予定日・備考。現場で入力したもの
+   （アンテナ・部材・測定値・写真）は触らない。備考は現場でまだ書いていない時だけ入れる。
+   台帳側が空の項目では上書きしない（PCで空欄のまま＝直したわけではないため）。 */
+function receptionApplyToModel(m, row){
+  if(!m || !row) return false;
+  let changed = false;
+  const set = (k, v) => {
+    v = String(v == null ? "" : v);
+    if(v && String(m[k] == null ? "" : m[k]) !== v){ m[k] = v; changed = true; }
+  };
+  set("chosho_cust_name", row.name);
+  set("chosho_cust_addr", row.addr);
+  set("chosho_cust_tel",  row.tel);
+  set("chosho_date",      row.date);
+  if(!String(m.chosho_note || "").trim() && row.note){ m.chosho_note = String(row.note); changed = true; }
+  return changed;
+}
+/* 管理番号のある下書きすべて（保存済みも含む）。「全部保存し直す」の対象。 */
+function allDraftTargets(){
+  const seen = {}, out = [];
+  const add = no => {
+    no = String(no||"").trim();
+    if(!no || seen[no]) return;
+    const info = draftInfoOf(no);
+    if(!info || !info.has) return;
+    seen[no] = 1; out.push(no);
+  };
+  Object.keys(_draftInfo).forEach(add);
+  add(M.chosho_mgmt_no);                     // いま開いている戸別
+  return out.sort();
+}
 /* まだPCに渡していない戸別の管理番号。番号の無い下書きはファイル名を決められないので外す。 */
 function unsavedTargets(){
   const seen = {}, out = [];
@@ -2936,24 +2979,60 @@ async function markDraftSavedFor(key){
     if(M._lastDraftKey === key || draftKey() === key) saveStateFile();
   }catch(e){ console.warn("markDraftSavedFor failed", e); }
 }
-async function saveAllUnsaved(){
-  const btn = document.getElementById("rc-saveall");
+function saveAllUnsaved(){ return saveAllDrafts("unsaved"); }
+function saveAllOverwrite(){ return saveAllDrafts("all"); }
+/* mode="unsaved" … まだPCに渡していない戸別だけ保存する（まとめて保存）
+   mode="all"     … 管理番号のある下書きを全部、受付台帳の最新を入れ直してから上書きする
+                    （PCで台帳を直したとき用。ファイルを作り直さないと、メインでフォルダを
+                     読み直したときに直す前の内容へ戻ってしまう） */
+async function saveAllDrafts(mode){
+  const isAll = (mode === "all");
+  const btn = document.getElementById(isAll ? "rc-saveall2" : "rc-saveall");
   const setBusy = on => { if(btn){ btn.disabled = on; btn.textContent = on ? "保存中…" : btn.dataset.label; } };
   clearTimeout(_persistTimer);
   try{ await persistDraft(); }catch(_){}     // いまの入力を先に下書きへ確定
   await refreshDraftInfo();
-  const nos = unsavedTargets();
+  const nos = isAll ? allDraftTargets() : unsavedTargets();
   const all = await idbGetAll();
   // 管理番号が無くて対象にできない下書き（ファイル名を決められない）
   const noNum = (all||[]).filter(r => r && r.model && !String(r.mgmt||"").trim()
     && !r.fileSavedAt && (r.touched !== false || r.photos || r.surveyDone)).length;
   if(!nos.length){
-    await uiAlert(noNum ? ("まとめて保存できる戸別はありません。\n\n管理番号の入っていない下書きが "+noNum+" 件あります。\n管理番号を入れてから保存してください。")
+    await uiAlert(isAll ? "保存し直せる戸別はありません（この端末に下書きがありません）。"
+                : noNum ? ("まとめて保存できる戸別はありません。\n\n管理番号の入っていない下書きが "+noNum+" 件あります。\n管理番号を入れてから保存してください。")
                         : "まだ保存していない戸別はありません。");
     return;
   }
   const byNo = {};
   (all||[]).forEach(r => { const k = String((r && r.mgmt) || "").trim(); if(k) byNo[k] = r; });
+  // 全部保存し直す：PCで直した内容（名前・住所・電話・工事予定日・備考）を下書きへ入れ直す。
+  // 入れ直さずに書き出すと、古いままのファイルができてメイン側が元に戻ってしまう。
+  let applied = 0;
+  if(isAll){
+    const rcRows = ((getReceptionData() || {}).rows) || [];
+    const byRow = {};
+    rcRows.forEach(r => { const k = String((r && r.mgmt_no) || "").trim(); if(k) byRow[k] = r; });
+    const openNo = String(M.chosho_mgmt_no || "").trim();
+    for(const no of nos){
+      const row = byRow[no];
+      if(!row) continue;                       // 台帳に無い戸別はそのまま書き出す
+      if(no === openNo){                       // いま開いている戸別は画面ごと直す
+        if(receptionApplyToModel(M, row)){ applied++; saveDraftQuiet(); render(); }
+      } else {
+        const rec = byNo[no];
+        if(rec && rec.model && receptionApplyToModel(rec.model, row)){
+          rec.rev = (rec.rev | 0) + 1; applied++;
+          try{ await idbPut(rec); }catch(e){ console.warn("下書きの更新に失敗", no, e); }
+        }
+      }
+    }
+    if(applied){
+      clearTimeout(_persistTimer);
+      try{ await persistDraft(); }catch(_){}   // 開いている戸別の直しも下書きへ確定
+      const all2 = await idbGetAll();
+      (all2||[]).forEach(r => { const k = String((r && r.mgmt) || "").trim(); if(k) byNo[k] = r; });
+    }
+  }
   const files = [];
   nos.forEach(no => {
     const rec = byNo[no];
@@ -2964,8 +3043,14 @@ async function saveAllUnsaved(){
   if(!files.length){ await uiAlert("まとめて保存できる戸別はありません。"); return; }
   const listTxt = files.slice(0, 8).map(f => "・" + f.name).join("\n")
     + (files.length > 8 ? ("\n・ほか " + (files.length - 8) + " 件") : "");
-  if(!(await uiConfirm(files.length + "件をまとめて保存します。\n\n" + listTxt
-      + (noNum ? ("\n\n※ 管理番号の無い下書き " + noNum + " 件は対象外です") : "")))) return;
+  const head = isAll
+    ? (files.length + "件を保存し直します。\n\n受付台帳の最新（名前・住所・電話・工事予定日・備考）を"
+       + "入れ直してから、管理番号.json を上書きします。\n"
+       + "現場で入力したもの（アンテナ・部材・測定・写真）はそのままです。"
+       + (applied ? ("\n\n台帳の内容を入れ直した戸別： " + applied + "件") : "") + "\n\n")
+    : (files.length + "件をまとめて保存します。\n\n");
+  if(!(await uiConfirm(head + listTxt
+      + (noNum && !isAll ? ("\n\n※ 管理番号の無い下書き " + noNum + " 件は対象外です") : "")))) return;
 
   setBusy(true);
   let dir = await saveDirGet();
@@ -3018,9 +3103,10 @@ async function saveAllUnsaved(){
   const sv = document.getElementById("reception-search");
   renderReceptionList(sv ? sv.value : "");
   setBusy(false);
+  const verb = isAll ? "に保存し直しました" : "に保存しました";
   toast(ngNos.length
-    ? (okNos.length + "件を" + where + "に保存しました（" + ngNos.length + "件は失敗）")
-    : (okNos.length + "件を" + where + "に保存しました"));
+    ? (okNos.length + "件を" + where + verb + "（" + ngNos.length + "件は失敗）")
+    : (okNos.length + "件を" + where + verb));
 }
 
 /* ============================================================================
@@ -3337,13 +3423,24 @@ function renderReceptionList(q){
                  : `<div class="rc-warn-sub">保存先をひとつ選ぶと、次からは同じ場所にまとめて入ります</div>`)
       + `</div>`
     : "";
+  // PCで台帳を直したあとは、戸別ファイルも作り直さないと、メインでフォルダを読み直したときに
+  // 直す前の内容へ戻ってしまう（メインは戸別ファイルの中身を見るため）。ここから一気に作り直せる。
+  const redoCnt = allDraftTargets().length;
+  const redoBar = redoCnt
+    ? `<div class="rc-redo">PCで台帳を直したときは、<b>全部保存し直して</b>ください。`
+      + `押さないと、メインでフォルダを読み直したときに<b>直す前の内容に戻ります</b>。`
+      + `<button id="rc-saveall2" data-label="全部保存し直す（${redoCnt}件）">全部保存し直す（${redoCnt}件）</button>`
+      + `<div class="rc-redo-sub">受付台帳の最新（名前・住所・電話・工事予定日・備考）を入れ直してから、${redoCnt}件を上書きします。`
+      + `現場で入力したもの（アンテナ・部材・測定・写真）はそのままです。</div>`
+      + `</div>`
+    : "";
   // 開いただけ（何も入力していない）の戸別。たまると「入力中」だらけになるのでまとめて戻せる。
   const openedOnly = rows.filter(r => r && String(r.mgmt_no||"").trim() && isOpenedOnly(draftInfoOf(r.mgmt_no))).length;
   const undoBar = openedOnly >= 2
     ? `<div class="rc-undo">開いただけの戸別が <b>${openedOnly}件</b> あります（まだ何も入力していません）。`
       + `<button id="rc-undoall">まとめて取消（${openedOnly}件）</button></div>`
     : "";
-  host.innerHTML=warn+undoBar+filtered.map(r=>{
+  host.innerHTML=warn+redoBar+undoBar+filtered.map(r=>{
     const idx=rows.indexOf(r);
     const info=draftInfoOf(r.mgmt_no);
     const sub=[r.addr, r.date?("予定 "+r.date):"", r.contractor].filter(Boolean).map(esc).join("・");
@@ -3386,6 +3483,8 @@ function renderReceptionList(q){
   }).join("");
   const sa = document.getElementById("rc-saveall");
   if(sa) sa.addEventListener("click", saveAllUnsaved);
+  const sa2 = document.getElementById("rc-saveall2");
+  if(sa2) sa2.addEventListener("click", saveAllOverwrite);
   const ua = document.getElementById("rc-undoall");
   if(ua) ua.addEventListener("click", untouchOpenedOnly);
   // 「取消」は .d-main の外に置いてあるので、行を開くハンドラには拾われない
