@@ -76,7 +76,7 @@
   .savebar .sb-dot{width:9px; height:9px; border-radius:5px; flex:none; background:currentColor;}
   .savebar .sb-main{flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
   .savebar .sb-file{font-weight:600; font-size:11px; opacity:.75; white-space:nowrap;}
-  .savebar .sb-file.attn{opacity:1; text-decoration:underline;}
+  .savebar .sb-file.attn{opacity:1; background:#d32f2f; color:#fff; border-radius:8px; padding:1px 8px;}
   .savebar.ok{background:#e8f5e9; color:#1b5e20;}
   .savebar.warn{background:#fff8e1; color:#8a5a00;}
   .savebar.warn .sb-dot{animation:sbBlink 1s var(--ease) infinite;}
@@ -353,6 +353,19 @@
   .draft.rc-surv .d-open{background:#1b7a3d;}
   .rc-ph{display:inline-block; margin-left:8px; font-size:11.5px; font-weight:700; color:#00695c;
     background:#e0f2f1; border-radius:9px; padding:1px 8px;}
+  /* まだPCに渡していない（戸別ファイルに書き出していない）戸別。
+     写真以外はこの書き出しでしかメインに渡らないので、埋もれないよう赤で出す。 */
+  .rc-badge.unsaved{background:#d32f2f; animation:rcUns 1.9s var(--ease) infinite;}
+  @keyframes rcUns{0%,100%{box-shadow:0 0 0 0 rgba(211,38,47,.6);} 60%{box-shadow:0 0 0 6px rgba(211,38,47,0);}}
+  .draft.rc-unsaved{border-left:4px solid #d32f2f; padding-left:8px;}
+  .rc-file{display:inline-block; margin-left:8px; font-size:11.5px; font-weight:700;}
+  .rc-file.ng{color:#c62828;}
+  .rc-file.ok{color:#5b6673;}
+  .rc-warn{margin:2px 0 12px; padding:10px 12px; border-radius:11px; background:#fdecea; color:#a5342b;
+    border:1px solid #f3c2bd; font-size:12.5px; font-weight:600; line-height:1.75;}
+  .rc-warn b{color:#b3261e;}
+  .unsaved-ex{display:inline-block; background:#d32f2f; color:#fff; font-size:10px; font-weight:700;
+    padding:0 6px; border-radius:8px; line-height:17px; vertical-align:1px;}
   /* 複数選択削除のアクションバー */
   .draft-actions{display:flex; align-items:center; justify-content:space-between; gap:10px; padding:6px 2px 12px; position:sticky; top:0; background:#fff; z-index:2;}
   .d-selall{display:flex; align-items:center; gap:7px; font-size:14px; font-weight:600; color:var(--ink);}
@@ -484,6 +497,7 @@
     <h3>🗒 受付台帳から開く</h3>
     <div class="info">PCの受付台帳で <b>「📦 現場用」</b> を押すと <b class="fname">現場用_物件名_日付.json</b> ができます。下のボタンから<b>そのファイル</b>を選んでください。<br>受付台帳と地図が一緒に入っているので、これ1つで両方そろいます。<br>
     取り込むと下に一覧が出ます。タップすると<b>管理番号・氏名・住所が入った状態</b>で入力を開始できます（同じ管理番号の下書きがあれば続きから開きます）。<b>下見完了にした戸別は緑色</b>になり、撮った写真の枚数も出ます。<br>
+    入力したのにまだPCへ渡していない戸別には <b class="unsaved-ex">未保存</b> が付きます。その戸別を開いて<b>「保存」</b>を押すと <b class="fname">管理番号.json</b> ができるので、それをPCへ渡してください（写真はフォルダごと渡します）。<br>
     <span class="sub">※ 地図の入っていない <b class="fname">受付台帳_….json</b> でも取り込めます。</span></div>
     <button id="btn-reception-import" style="width:100%; padding:15px; border:0; border-radius:11px; background:#00695c; color:#fff; font-weight:700; font-size:15px; margin-bottom:10px;">現場用_….json を選ぶ</button>
     <input type="file" id="reception-file" accept=".json,application/json,*/*" style="display:none;">
@@ -2536,8 +2550,8 @@ async function idbDel(key){ const db=await idb(); return new Promise((res,rej)=>
 
 let _persistTimer=null;
 function draftKey(){ return M.chosho_mgmt_no ? ("no:"+M.chosho_mgmt_no) : (M._draftId||(M._draftId="tmp:"+Date.now())); }
-function saveDraft(){ updateHeader(); schedulePersist(); }
-function saveDraftQuiet(){ schedulePersist(); }
+function saveDraft(){ M._touched=true; updateHeader(); schedulePersist(); }
+function saveDraftQuiet(){ M._touched=true; schedulePersist(); }
 function schedulePersist(){ clearTimeout(_persistTimer); _persistTimer=setTimeout(()=>{ persistDraft(); }, 400); saveStateDirty(); }
 /* ---- 保存の状態表示 ----
    「この端末への自動保存」と「JSONファイルの書き出し」は別もの。
@@ -2569,17 +2583,19 @@ const _hhmm = t => { const d=new Date(t); const p=n=>String(n).padStart(2,"0");
 function renderSaveBar(){
   const el=document.getElementById("savebar"); if(!el) return;
   let cls, main;
-  if(_save.failed){ cls="ng"; main="この端末に保存できていません。「保存」でファイルに残してください"; }
-  else if(_save.dirty){ cls="warn"; main="未保存の変更があります（まもなく自動保存）"; }
-  else if(_save.savedAt){ cls="ok"; main="保存済み "+_hhmm(_save.savedAt); }
+  if(_save.failed){ cls="ng"; main="この端末に控えられません。「保存」でファイルに残してください"; }
+  else if(_save.dirty){ cls="warn"; main="入力中（まもなくこの端末に控えます）"; }
+  else if(_save.savedAt){ cls="ok"; main="この端末に控え済み "+_hhmm(_save.savedAt); }
   else { cls="idle"; main="まだ何も入力していません"; }
+  // 「保存」＝PCに渡す戸別ファイル。台帳一覧の「未保存」と同じ意味で出す。
   let file;
-  if(!_save.fileAt) file="ファイル未書出";
-  else if(_save.fileStale||_save.dirty) file="書き出し後に変更あり（"+_hhmm(_save.fileAt)+" 書出）";
-  else file="ファイル書出済 "+_hhmm(_save.fileAt);
+  if(!_save.fileAt && (!_save.savedAt || M._touched===false)) file="";   // まだ渡すものが無い
+  else if(!_save.fileAt) file="未保存";
+  else if(_save.fileStale||_save.dirty) file="未保存（"+_hhmm(_save.fileAt)+" 保存後に変更）";
+  else file="保存済 "+_hhmm(_save.fileAt);
   el.className="savebar "+cls;
   el.innerHTML='<span class="sb-dot"></span><span class="sb-main">'+esc(main)+'</span>'
-    +'<span class="sb-file'+((_save.fileStale||(!_save.fileAt&&_save.savedAt))?" attn":"")+'">'+esc(file)+'</span>';
+    + (file ? '<span class="sb-file'+((_save.fileStale||!_save.fileAt)?" attn":"")+'">'+esc(file)+'</span>' : "");
 }
 // レコードに中身があるか（別の実データ下書きかの判定用）
 function _recHasContent(rec){
@@ -2609,7 +2625,7 @@ async function persistDraft(){
     const cur = (key===wantKey) ? prev : await idbGet(key);
     const rec={ key, model:M, savedAt:Date.now(), fileSavedAt:(cur&&cur.fileSavedAt)||0,
       mgmt:M.chosho_mgmt_no||"", cust:M.chosho_cust_name||"", photos:(M.chosho_photos||[]).length,
-      surveyDone:!!M.survey_done };
+      surveyDone:!!M.survey_done, touched:(M._touched!==false) };
     await idbPut(rec);
     localStorage.setItem(LS_LAST, key);
     persistDraft._warned=false;
@@ -2629,7 +2645,7 @@ async function persistModel(m){
     const prev=await idbGet(key);
     await idbPut({ key, model:m, savedAt:Date.now(), fileSavedAt:(prev&&prev.fileSavedAt)||0,
       mgmt:m.chosho_mgmt_no||"", cust:m.chosho_cust_name||"", photos:(m.chosho_photos||[]).length,
-      surveyDone:!!m.survey_done });
+      surveyDone:!!m.survey_done, touched:(m._touched!==false) });
   }catch(e){ console.warn("persistModel failed",e); }
 }
 async function markDraftSaved(){
@@ -2800,7 +2816,8 @@ async function refreshDraftInfo(){
       const done = (rec.surveyDone !== undefined) ? !!rec.surveyDone : !!(rec.model && rec.model.survey_done);
       const ph = (typeof rec.photos === "number") ? rec.photos
                : ((rec.model && rec.model.chosho_photos) ? rec.model.chosho_photos.length : 0);
-      map[no] = { done, photos: ph, has: true };
+      map[no] = { done, photos: ph, has: true, touched: (rec.touched !== false),
+                  fileAt: rec.fileSavedAt || 0, savedAt: rec.savedAt || 0 };
     });
     _draftInfo = map;
   }catch(e){ console.warn("下書き情報の読み取りに失敗", e); }
@@ -2809,9 +2826,24 @@ async function refreshDraftInfo(){
 function draftInfoOf(no){
   no = String(no||"").trim();
   if(no && no === String(M.chosho_mgmt_no||"").trim()){
-    return { done: !!M.survey_done, photos: (M.chosho_photos||[]).length, has: true };
+    return { done: !!M.survey_done, photos: (M.chosho_photos||[]).length, has: true,
+             touched: (M._touched !== false),
+             fileAt: _save.fileAt, stale: !!(_save.fileStale || _save.dirty) };
   }
-  return _draftInfo[no] || null;
+  const d = _draftInfo[no];
+  if(!d) return null;
+  return { done: d.done, photos: d.photos, has: true, touched: d.touched, fileAt: d.fileAt,
+           stale: !!(d.fileAt && (d.savedAt||0) > d.fileAt + 1500) };
+}
+/* この戸別をPCに渡せているか。
+   "none"=一度も保存していない ／ "stale"=保存した後にまた直した ／ "ok"=保存済み。
+   （この端末への自動保存とは別もの。メインに渡るのは「保存」で作る戸別ファイルだけ） */
+function handoverOf(info){
+  if(!info || !info.has) return "";
+  // 台帳から開いただけ（まだ何も入力していない）は、渡すものが無いので何も出さない
+  if(!info.touched && !info.photos && !info.done && !info.fileAt) return "";
+  if(!info.fileAt) return "none";
+  return info.stale ? "stale" : "ok";
 }
 function renderReceptionList(q){
   const host=document.getElementById("reception-list"); if(!host) return;
@@ -2830,7 +2862,14 @@ function renderReceptionList(q){
   const kw=(q||"").trim().toLowerCase();
   const filtered=kw ? rows.filter(r=>((r.mgmt_no||"")+" "+(r.name||"")+" "+(r.addr||"")+" "+(r.tel||"")).toLowerCase().includes(kw)) : rows;
   if(!filtered.length){ host.innerHTML=`<div class="info" style="text-align:center">該当なし</div>`; return; }
-  host.innerHTML=filtered.map(r=>{
+  // 「まだPCに渡していない戸別」の数。ここで数えないと、書き出し忘れがそのまま埋もれる。
+  const notHanded = rows.filter(r=>{ const h=handoverOf(draftInfoOf(r.mgmt_no)); return h==="none"||h==="stale"; }).length;
+  const warn = notHanded
+    ? `<div class="rc-warn">まだ保存していない戸別が <b>${notHanded}件</b> あります。<br>`
+      + `その戸別を開いて<b>「保存」</b>を押すと <b class="fname">管理番号.json</b> ができます。`
+      + `これをPCに渡さないと、写真以外の入力はメインに取り込めません。</div>`
+    : "";
+  host.innerHTML=warn+filtered.map(r=>{
     const idx=rows.indexOf(r);
     const info=draftInfoOf(r.mgmt_no);
     const sub=[r.addr, r.date?("予定 "+r.date):"", r.contractor].filter(Boolean).map(esc).join("・");
@@ -2842,10 +2881,16 @@ function renderReceptionList(q){
     const surv = (info&&info.done) ? '<span class="rc-badge surv">下見済</span>' : '';
     const started = (info&&!info.done&&info.has) ? '<span class="rc-badge open">入力中</span>' : '';
     const ph = (info&&info.photos) ? ('<span class="rc-ph">写真'+info.photos+'枚</span>') : '';
+    // 戸別ファイルに書き出したか。写真以外はこの書き出しでしかPCへ渡らないので、一覧にも出す。
+    const hand = handoverOf(info);
+    const unsaved = (hand==="none"||hand==="stale") ? '<span class="rc-badge unsaved">未保存</span>' : '';
+    const fileNote = hand==="none" ? '<span class="rc-file ng">まだ保存していません</span>'
+                   : hand==="stale" ? '<span class="rc-file ng">保存後に変更あり</span>'
+                   : hand==="ok" ? ('<span class="rc-file ok">保存済 '+esc(_hhmm(info.fileAt))+'</span>') : '';
     const cls = (info&&info.done) ? " rc-surv" : (r.hold ? " rc-hold" : "");
-    return `<div class="draft${cls}"><div class="d-main" data-recopen="${idx}">
-      <div class="d-no">${surv}${started}${hold}${badge}${esc(r.mgmt_no||"（番号なし）")}${r.name?(" ／ "+esc(r.name)):""}</div>
-      <div class="d-sub">${sub}${ph}</div></div>
+    return `<div class="draft${cls}${unsaved?" rc-unsaved":""}"><div class="d-main" data-recopen="${idx}">
+      <div class="d-no">${surv}${started}${unsaved}${hold}${badge}${esc(r.mgmt_no||"（番号なし）")}${r.name?(" ／ "+esc(r.name)):""}</div>
+      <div class="d-sub">${sub}${ph}${fileNote}</div></div>
       <button class="d-open" data-recopen="${idx}">${(info&&info.done)?"見直す":"開く"}</button></div>`;
   }).join("");
   host.querySelectorAll("[data-recopen]").forEach(b=>b.addEventListener("click",async()=>{
@@ -2875,10 +2920,11 @@ async function openFromReception(row){
   m.chosho_cust_tel=row.tel||"";
   if(row.date) m.chosho_date=row.date;
   if(mgmt){ delete m._draftId; m._lastDraftKey="no:"+mgmt; }
+  m._touched=false;                               // 台帳の値を写しただけ。まだ現場で入力していない
   M=m; ensureModelShape(M); resetOpenState(); render(); appSwap();
-  saveStateLoad();
+  await saveStateLoad();
   localStorage.setItem(LS_LAST, mgmt?("no:"+mgmt):(M._draftId||""));
-  saveDraft();
+  updateHeader(); await persistDraft();            // 下書きは作るが「入力あり」にはしない
   closeReceptionModal(); toast("受付台帳から開きました");
 }
 /* 受付台帳の行をこの端末に保存する。件数を返す。
