@@ -361,6 +361,10 @@
   .rc-file{display:inline-block; margin-left:8px; font-size:11.5px; font-weight:700;}
   .rc-file.ng{color:#c62828;}
   .rc-file.ok{color:#5b6673;}
+  /* 備考（PCと共通の欄）。行では1行に丸めて出し、続きは開いてから読む。 */
+  .rc-note{margin-top:4px; font-size:12px; color:#5d4037; background:#fff8e1; border-radius:7px;
+    padding:3px 8px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .rc-note::before{content:"備考 "; font-weight:700; color:#8a6d3b;}
   .rc-warn{margin:2px 0 12px; padding:10px 12px; border-radius:11px; background:#fdecea; color:#a5342b;
     border:1px solid #f3c2bd; font-size:12.5px; font-weight:600; line-height:1.75;}
   .rc-warn b{color:#b3261e;}
@@ -503,6 +507,7 @@
     <h3>🗒 受付台帳から開く</h3>
     <div class="info">PCの受付台帳で <b>「📦 現場用」</b> を押すと <b class="fname">現場用_物件名_日付.json</b> ができます。下のボタンから<b>そのファイル</b>を選んでください。<br>受付台帳と地図が一緒に入っているので、これ1つで両方そろいます。<br>
     取り込むと下に一覧が出ます。タップすると<b>管理番号・氏名・住所が入った状態</b>で入力を開始できます（同じ管理番号の下書きがあれば続きから開きます）。<b>下見完了にした戸別は緑色</b>になり、撮った写真の枚数も出ます。<br>
+    <b>備考</b>はPCの受付台帳の備考と同じ欄です。事務所が書いた内容が行に出るので、そのまま直せます。<br>
     入力したのにまだPCへ渡していない戸別には <b class="unsaved-ex">未保存</b> が付きます。その戸別を開いて<b>「保存」</b>を押すと <b class="fname">管理番号.json</b> ができるので、それをPCへ渡してください（写真はフォルダごと渡します）。<br>
     <b>「まとめて保存」</b>を押せば、未保存の戸別を<b>一度に同じ場所へ</b>書き出せます。保存先は覚えているので、2回目からは選び直す必要がありません。<br>
     <span class="sub">※ 地図の入っていない <b class="fname">受付台帳_….json</b> でも取り込めます。</span></div>
@@ -1339,7 +1344,7 @@ const SECTIONS = [
     {id:"chosho_status", type:"select", label:"ステータス"},
     {id:"chosho_note", type:"area", label:"備考", rows:4,
      ph:"例）留守。奥様に電話済み／庭に犬あり／隣家の許可が必要",
-     hint:"現場で気付いたことを自由に書けます。改行もそのまま残ります。「保存」で書き出す 管理番号.json に入り、PCの戸別の「備考（現場メモ）」に取り込まれます"},
+     hint:"PCの受付台帳の「備考」と同じ欄です。取り込んだ時の内容が入っていて、ここで直すと「保存」→PCの取込でPC側の備考も同じ内容になります"},
   ]},
   { id:"basic", ico:"🏗️", title:"基本工事", fields:[
     {id:"work_type", type:"seg", label:"工事種別"},
@@ -3060,9 +3065,12 @@ function renderReceptionList(q){
                    : hand==="stale" ? '<span class="rc-file ng">保存後に変更あり</span>'
                    : hand==="ok" ? ('<span class="rc-file ok">保存済 '+esc(_hhmm(info.fileAt))+'</span>') : '';
     const cls = (info&&info.done) ? " rc-surv" : (r.hold ? " rc-hold" : "");
+    // 備考はPCと共通の欄。事務所が書いた内容を現場でも読めるように行に出す。
+    const note = String(r.note||"").replace(/\s+/g," ").trim();
+    const noteHtml = note ? `<div class="rc-note">${esc(note)}</div>` : "";
     return `<div class="draft${cls}${unsaved?" rc-unsaved":""}"><div class="d-main" data-recopen="${idx}">
       <div class="d-no">${surv}${started}${unsaved}${hold}${badge}${esc(r.mgmt_no||"（番号なし）")}${r.name?(" ／ "+esc(r.name)):""}</div>
-      <div class="d-sub">${sub}${ph}${fileNote}</div></div>
+      <div class="d-sub">${sub}${ph}${fileNote}</div>${noteHtml}</div>
       <button class="d-open" data-recopen="${idx}">${(info&&info.done)?"見直す":"開く"}</button></div>`;
   }).join("");
   const sa = document.getElementById("rc-saveall");
@@ -3083,7 +3091,10 @@ async function openFromReception(row){
   if(mgmt){
     const rec=await idbGet("no:"+mgmt);
     if(rec&&rec.model){                            // 既に下書きがあれば続きから
-      M=rec.model; M._lastDraftKey="no:"+mgmt; ensureModelShape(M); resetOpenState(); render();
+      M=rec.model; M._lastDraftKey="no:"+mgmt; ensureModelShape(M);
+      // 現場でまだ備考を書いていなければ、台帳の備考（PC側で書き足した分）を入れる
+      if(!String(M.chosho_note||"").trim() && row.note) M.chosho_note = String(row.note);
+      resetOpenState(); render();
       localStorage.setItem(LS_LAST,"no:"+mgmt); closeReceptionModal(); toast("下書きの続きを開きました"); return;
     }
   }
@@ -3094,6 +3105,7 @@ async function openFromReception(row){
   m.chosho_cust_tel=row.tel||"";
   if(row.date) m.chosho_date=row.date;
   if(mgmt){ delete m._draftId; m._lastDraftKey="no:"+mgmt; }
+  if(row.note) m.chosho_note = String(row.note);  // 備考はPCと共通の欄。台帳の内容から始める
   m._touched=false;                               // 台帳の値を写しただけ。まだ現場で入力していない
   M=m; ensureModelShape(M); resetOpenState(); render(); appSwap();
   await saveStateLoad();
