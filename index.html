@@ -606,6 +606,7 @@ const DEFAULTS = {
   cable_indoor_new:"2",cable_vvf_len:"5",cable_s5cfb_power:"5",ext_power_conn:"splitter_2",
   att_main:"no",att_46:"no",att_50:"no",box_consent:"no",ofmu_qty:"0",wire_sus16_len:"0",
   chosho_mgmt_no:"",chosho_date:"",chosho_cust_name:"",chosho_cust_addr:"",chosho_cust_tel:"",
+  chosho_note:"",
   chosho_status:"provisional",tax_mode:"excl",misc_fee:"include",
   outsource_fee_on:false,outsource_fee_amount:0,outsource_fee_auto:false,
 };
@@ -656,7 +657,7 @@ const GENBA_KNOWN_KEYS = new Set([
   "cable_indoor_new","cable_vvf_len","cable_s5cfb_power","ext_power_conn",
   "att_main","att_46","att_50","box_consent","ofmu_qty","wire_sus16_len",
   "chosho_mgmt_no","chosho_date","chosho_cust_name","chosho_cust_addr","chosho_cust_tel","chosho_status",
-  "survey_done","survey_done_at",
+  "chosho_note","survey_done","survey_done_at",
   "tax_mode","misc_fee","outsource_fee_on","outsource_fee_amount","outsource_fee_auto",
   "tv_rooms","tv_bd","tv_sp","tv_term",
   "wire_overrides","qty_overrides","node_offsets","meas_transforms","node_existing_overrides",
@@ -1329,6 +1330,9 @@ const SECTIONS = [
     {id:"chosho_cust_addr", type:"text", label:"住所", mapLink:true, hint:"「地図」は下のバーの「地図」と同じ。PCから取り込んだ図面でこの戸別の場所を見られます（図面が無いときはGoogleマップへ）"},
     {id:"chosho_cust_tel", type:"tel", label:"電話番号"},
     {id:"chosho_status", type:"select", label:"ステータス"},
+    {id:"chosho_note", type:"area", label:"備考", rows:4,
+     ph:"例）留守。奥様に電話済み／庭に犬あり／隣家の許可が必要",
+     hint:"現場で気付いたことを自由に書けます。改行もそのまま残ります。「保存」で書き出す 管理番号.json に入り、PCの戸別の「備考（現場メモ）」に取り込まれます"},
   ]},
   { id:"basic", ico:"🏗️", title:"基本工事", fields:[
     {id:"work_type", type:"seg", label:"工事種別"},
@@ -1566,6 +1570,9 @@ function renderField(f){
     const opts=f.opts||OPT[f.id]||[];
     inner = `<select data-fld="${f.id}"${f.asb?` data-asb="${f.asb}"`:""}>` +
       opts.map(([v,l])=>`<option value="${esc(v)}"${String(v)===String(val)?" selected":""}>${esc(l)}</option>`).join("") + `</select>`;
+  } else if(f.type==="area"){
+    // 何行でも書ける欄（備考など）。改行をそのまま持てるので現場のメモ向き。
+    inner = `<textarea data-fld="${f.id}" rows="${f.rows||4}"${f.ph?` placeholder="${esc(f.ph)}"`:""}>${esc(val==null?"":val)}</textarea>`;
   } else {
     const t = f.type==="num"?"number":(f.type==="date"?"date":(f.type==="tel"?"tel":"text"));
     const step = f.type==="num"?` step="0.5" min="0" inputmode="decimal"`:"";
@@ -2080,7 +2087,8 @@ function buildState(){
     "cable_new_len","cable_main_len","cable_ch46_len","cable_ch50_len","cable_amp_next_len",
     "cable_indoor_new","cable_vvf_len","cable_s5cfb_power","ext_power_conn",
     "att_main","att_46","att_50","box_consent","ofmu_qty","wire_sus16_len",
-    "chosho_mgmt_no","chosho_date","chosho_cust_name","chosho_cust_addr","chosho_cust_tel","chosho_status"];
+    "chosho_mgmt_no","chosho_date","chosho_cust_name","chosho_cust_addr","chosho_cust_tel","chosho_status",
+    "chosho_note"];
   const s={};
   STR_FIELDS.forEach(k=>{ s[k]=String(M[k]==null?"":M[k]); });
   s.tax_mode=M.tax_mode||"excl";
