@@ -1381,7 +1381,7 @@ const SECTIONS = [
   { id:"chosho", ico:"📋", title:"調書・顧客", open:true, fields:[
     {id:"chosho_mgmt_no", type:"text", label:"管理番号", req:true, hint:"ファイル名・写真フォルダ名になります（例 245001）"},
     {id:"chosho_date", type:"date", label:"工事予定日",
-     hint:"PCの受付台帳の「工事日程予定」と同じ欄です。下見の段階では空のままにしてください（台帳に予定日が入っていれば、開いたときに入ります）"},
+     hint:"PCの受付台帳の「工事日程予定」と同じ欄です。下見の段階では空のままにしてください（台帳に予定日が入っていれば、開いたときに入ります。ここで空にすれば空のまま残ります）"},
     {id:"chosho_cust_name", type:"text", label:"顧客名"},
     {id:"chosho_cust_addr", type:"text", label:"住所", mapLink:true, hint:"「地図」は下のバーの「地図」と同じ。PCから取り込んだ図面でこの戸別の場所を見られます（図面が無いときはGoogleマップへ）"},
     {id:"chosho_cust_tel", type:"tel", label:"電話番号"},
@@ -2817,6 +2817,24 @@ function renderSaveBar(){
   el.innerHTML='<span class="sb-dot"></span><span class="sb-main">'+esc(main)+'</span>'
     + (file ? '<span class="sb-file'+((saveStale()||!_save.fileAt)?" attn":"")+'">'+esc(file)+'</span>' : "");
 }
+/* 中身の指紋。saveDraft を通さずにモデルが書き換わっても、次に控えるときに
+   「変わった」と気づけるようにする。写真は中身ではなくID・名前だけを見る（重いため）。 */
+function stateSig(m){
+  try{
+    m = m || M;
+    const parts = [];
+    Object.keys(m).sort().forEach(k => {
+      if(k.charAt(0) === "_" || k === "chosho_photos") return;   // 内部の値（_rev等）は中身ではない
+      parts.push(k + "=" + JSON.stringify(m[k]));
+    });
+    parts.push("photos=" + (m.chosho_photos||[]).map(p =>
+      String((p && p.id) || "") + ":" + String((p && p.label) || "")).join("|"));
+    const s = parts.join("\u0001");
+    let a = 5381;
+    for(let i = 0; i < s.length; i++) a = ((a << 5) + a + s.charCodeAt(i)) >>> 0;
+    return "s" + a.toString(16) + "_" + s.length;
+  }catch(_){ return ""; }
+}
 // レコードに中身があるか（別の実データ下書きかの判定用）
 function _recHasContent(rec){
   return !!(rec && rec.model && (rec.model.chosho_cust_name || rec.fileSavedAt
@@ -2847,9 +2865,15 @@ async function persistDraft(){
     if(M._lastDraftKey && M._lastDraftKey !== key){ try{ await idbDel(M._lastDraftKey); }catch(_){} }
     M._lastDraftKey = key;
     const cur = (key===wantKey) ? prev : await idbGet(key);
+    // 画面を通さずに中身が変わっていた場合（台帳から引き継いだ等）も「変更あり」に数える。
+    // どの道から変わっても、PCへ渡し忘れないようにするための保険。
+    const sig = stateSig(M);
+    if(cur && cur.sig && cur.sig !== sig && (M._rev|0) <= (cur.rev|0)){
+      M._rev = (cur.rev|0) + 1; M._touched = true;
+    }
     const rec={ key, model:M, savedAt:Date.now(), fileSavedAt:(cur&&cur.fileSavedAt)||0,
       mgmt:M.chosho_mgmt_no||"", cust:M.chosho_cust_name||"", photos:(M.chosho_photos||[]).length,
-      surveyDone:!!M.survey_done, touched:(M._touched!==false),
+      surveyDone:!!M.survey_done, touched:(M._touched!==false), sig,
       rev:(M._rev|0), fileRev:(cur&&cur.fileRev)|0 };
     await idbPut(rec);
     localStorage.setItem(LS_LAST, key);
@@ -2871,7 +2895,8 @@ async function persistModel(m){
     m._touched=true; m._rev=(m._rev|0)+1;          // 写真やCSVが入った＝中身が変わった
     await idbPut({ key, model:m, savedAt:Date.now(), fileSavedAt:(prev&&prev.fileSavedAt)||0,
       mgmt:m.chosho_mgmt_no||"", cust:m.chosho_cust_name||"", photos:(m.chosho_photos||[]).length,
-      surveyDone:!!m.survey_done, touched:true, rev:(m._rev|0), fileRev:(prev&&prev.fileRev)|0 });
+      surveyDone:!!m.survey_done, touched:true, sig:stateSig(m),
+      rev:(m._rev|0), fileRev:(prev&&prev.fileRev)|0 });
   }catch(e){ console.warn("persistModel failed",e); }
 }
 async function markDraftSaved(){
@@ -2928,22 +2953,44 @@ function buildStateOf(model){
   finally{ M = keep; }
 }
 /* 受付台帳（PCで直したもの）を、この端末の下書きへ入れ直す。
-   PCが持ち主の項目＝名前・住所・電話・工事予定日・備考。現場で入力したもの
+   PCが持ち主の項目＝名前・住所・電話・工事予定日。現場で入力したもの
    （アンテナ・部材・測定値・写真）は触らない。備考は現場でまだ書いていない時だけ入れる。
-   台帳側が空の項目では上書きしない（PCで空欄のまま＝直したわけではないため）。 */
+
+   「前回この下書きへ入れた台帳の内容」を _rcSrc に控えておき、
+
+     ・台帳が前回から変わっている → PCで直した   → 台帳を採る（空欄になっていれば空にする）
+     ・台帳が前回と同じ           → 直したのは現場 → 現場の値を残す（消したままにできる）
+
+   控えが無い古い下書きでは、台帳が空の項目では上書きしない。ただし工事予定日だけは
+   空も反映する（前の版が勝手に入れてしまった日付を、PC側から消せるようにするため）。 */
 function receptionApplyToModel(m, row){
   if(!m || !row) return false;
   let changed = false;
-  const set = (k, v) => {
-    v = String(v == null ? "" : v);
-    if(v && String(m[k] == null ? "" : m[k]) !== v){ m[k] = v; changed = true; }
+  const src = (m._rcSrc && typeof m._rcSrc === "object") ? m._rcSrc : null;
+  const set = (k, rk, blankWins) => {
+    const v   = String(row[rk] == null ? "" : row[rk]);
+    const cur = String(m[k]    == null ? "" : m[k]);
+    if(cur === v) return;
+    if(src){
+      if(String(src[rk] == null ? "" : src[rk]) === v) return;   // 台帳は変わっていない＝現場が直した
+    } else if(!v && !blankWins){
+      return;                                                    // 控えが無い時は、空欄では消さない
+    }
+    m[k] = v; changed = true;
   };
-  set("chosho_cust_name", row.name);
-  set("chosho_cust_addr", row.addr);
-  set("chosho_cust_tel",  row.tel);
-  set("chosho_date",      row.date);
+  set("chosho_cust_name", "name", false);
+  set("chosho_cust_addr", "addr", false);
+  set("chosho_cust_tel",  "tel",  false);
+  set("chosho_date",      "date", true);   // 工事予定日はPCの台帳のもの。空にできないと直せない
   if(!String(m.chosho_note || "").trim() && row.note){ m.chosho_note = String(row.note); changed = true; }
+  m._rcSrc = rcSrcOf(row);
   return changed;
+}
+/* いま台帳から受け取った内容の控え（次に「PCが直したか」を見分けるための基準） */
+function rcSrcOf(row){
+  return { name:String((row&&row.name)||""), addr:String((row&&row.addr)||""),
+           tel:String((row&&row.tel)||""),   date:String((row&&row.date)||""),
+           note:String((row&&row.note)||"") };
 }
 /* 管理番号のある下書きすべて（保存済みも含む）。「全部保存し直す」の対象。 */
 function allDraftTargets(){
@@ -3513,7 +3560,7 @@ async function openFromReception(row){
     if(rec&&rec.model){                            // 既に下書きがあれば続きから
       M=rec.model; M._lastDraftKey="no:"+mgmt; ensureModelShape(M);
       // 現場でまだ備考を書いていなければ、台帳の備考（PC側で書き足した分）を入れる
-      if(!String(M.chosho_note||"").trim() && row.note) M.chosho_note = String(row.note);
+      if(!String(M.chosho_note||"").trim() && row.note){ M.chosho_note = String(row.note); saveDraftQuiet(); }
       resetOpenState(); render();
       await saveStateLoad();                       // その戸別の保存状況に合わせる（前の戸別のまま残さない）
       localStorage.setItem(LS_LAST,"no:"+mgmt); closeReceptionModal(); toast("下書きの続きを開きました"); return;
@@ -3527,6 +3574,7 @@ async function openFromReception(row){
   if(row.date) m.chosho_date=row.date;
   if(mgmt){ delete m._draftId; m._lastDraftKey="no:"+mgmt; }
   if(row.note) m.chosho_note = String(row.note);  // 備考はPCと共通の欄。台帳の内容から始める
+  m._rcSrc = rcSrcOf(row);                        // 次に「PCが直したか」を見分けるための控え
   m._touched=false;                               // 台帳の値を写しただけ。まだ現場で入力していない
   M=m; ensureModelShape(M); resetOpenState(); render(); appSwap();
   await saveStateLoad();
