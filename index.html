@@ -345,6 +345,12 @@
   .draft .d-open{background:var(--accent); color:#fff; border:0; border-radius:8px; padding:8px 12px; font-weight:700; flex:none;}
   /* 「開く」と「取消」を右端に縦に並べる */
   .draft .d-act{display:flex; flex-direction:column; gap:6px; flex:none; align-items:stretch;}
+  .draft .d-act2{display:flex; gap:6px;}
+  .draft .d-map{background:#eef2f7; color:var(--accent); border:1.5px solid #cdd3da; border-radius:8px;
+    padding:6px 10px; font-weight:700; font-size:12px; font-family:inherit; white-space:nowrap;
+    transition:transform var(--t-fast) var(--ease), background var(--t-fast) var(--ease);}
+  .draft .d-map.on{background:#00695c; color:#fff; border-color:#00695c;}
+  .draft .d-map:active{transform:scale(.92);}
   .draft .d-undo{background:#fff; color:#8a4a44; border:1.5px solid #e6bdb9; border-radius:8px;
     padding:6px 10px; font-weight:700; font-size:12px; font-family:inherit; white-space:nowrap;
     transition:transform var(--t-fast) var(--ease), background var(--t-fast) var(--ease);}
@@ -531,6 +537,7 @@
     <div class="info">PCの受付台帳で <b>「📦 現場用」</b> を押すと <b class="fname">現場用_物件名_日付.json</b> ができます。下のボタンから<b>そのファイル</b>を選んでください。<br>受付台帳と地図が一緒に入っているので、これ1つで両方そろいます。<br>
     取り込むと下に一覧が出ます。タップすると<b>管理番号・氏名・住所が入った状態</b>で入力を開始できます（同じ管理番号の下書きがあれば続きから開きます）。<b>下見完了にした戸別は緑色</b>になり、撮った写真の枚数も出ます。<br>
     <b>備考</b>はPCの受付台帳の備考と同じ欄です。事務所が書いた内容が行に出るので、そのまま直せます。<br>
+    行の<b>「地図」</b>を押すと、その戸別の建物を地図で見られます（戸別は開きません。地図を閉じればこの一覧に戻ります）。<br>
     開いてみただけの戸別は、右の<b>「取消」</b>で<b>触っていないことに戻せます</b>（「入力中」の印が消えます）。<br>
     入力したのにまだPCへ渡していない戸別には <b class="unsaved-ex">未保存</b> が付きます。その戸別を開いて<b>「保存」</b>を押すと <b class="fname">管理番号.json</b> ができるので、それをPCへ渡してください（写真はフォルダごと渡します）。<br>
     <b>「まとめて保存」</b>を押せば、未保存の戸別を<b>一度に同じ場所へ</b>書き出せます。保存先は覚えているので、2回目からは選び直す必要がありません。<br>
@@ -2193,6 +2200,15 @@ async function mapPackSave(pack){
   updateMapBtns();
 }
 /* いまの管理番号が地図にあるか */
+/* いま地図で見ている戸別の住所。編集中の戸別とは限らないので、
+   受付台帳の行からも引けるようにする（一覧の「地図」から開いた場合） */
+function mapTargetAddr(){
+  const no = String(_mapTarget || "").trim();
+  if(no && no === String(M.chosho_mgmt_no || "").trim()) return String(M.chosho_cust_addr || "").trim();
+  const row = no ? mapRowIndex()[no] : null;
+  if(row && row.addr) return String(row.addr).trim();
+  return String(M.chosho_cust_addr || "").trim();
+}
 function mapFindMark(no){
   no = String(no || "").trim();
   if(!no || !_mapPack) return null;
@@ -2221,7 +2237,7 @@ function openMapView(no){
   if(!_mapPack){
     stage.innerHTML = "";
     stage.className = "mempty";
-    const addr0 = String(M.chosho_cust_addr == null ? "" : M.chosho_cust_addr).trim();
+    const addr0 = mapTargetAddr();
     stage.innerHTML = '<div>地図がまだ入っていません。<br><br>'
       + 'PCの受付台帳で <b>「📦 現場用」</b> を押すと<br><b class="fname">現場用_物件名_日付.json</b> ができます。<br>'
       + '下のボタンから<b>そのファイル</b>を選んでください。<br>'
@@ -3351,9 +3367,19 @@ function renderReceptionList(q){
     const noteHtml = note ? `<div class="rc-note">${esc(note)}</div>` : "";
     // 「入力中」の戸別は、触っていないことにして取り込み直後の状態へ戻せる
     const canUndo = !!(info && info.has && !info.done);
-    const act = `<div class="d-act"><button class="d-open" data-recopen="${idx}">${(info&&info.done)?"見直す":"開く"}</button>`
-      + (canUndo ? `<button class="d-undo" data-recundo="${idx}">取消</button>` : "")
-      + `</div>`;
+    // 一覧からそのまま地図へ飛べる（戸別は開かない。地図を閉じればこの一覧に戻る）
+    const onMap = !!(_mapPack && mapFindMark(r.mgmt_no));
+    const mapBtn = _mapPack
+      ? `<button class="d-map${onMap?" on":""}" data-recmap="${idx}"`
+        + (onMap ? ` title="この戸別の建物を地図で見る"` : ` title="この管理番号は地図に登録されていません"`)
+        + `>地図</button>`
+      : "";
+    const act2 = (mapBtn || canUndo)
+      ? `<div class="d-act2">${mapBtn}`
+        + (canUndo ? `<button class="d-undo" data-recundo="${idx}">取消</button>` : "")
+        + `</div>`
+      : "";
+    const act = `<div class="d-act"><button class="d-open" data-recopen="${idx}">${(info&&info.done)?"見直す":"開く"}</button>${act2}</div>`;
     return `<div class="draft${cls}${unsaved?" rc-unsaved":""}"><div class="d-main" data-recopen="${idx}">
       <div class="d-no">${surv}${started}${unsaved}${hold}${badge}${esc(r.mgmt_no||"（番号なし）")}${r.name?(" ／ "+esc(r.name)):""}</div>
       <div class="d-sub">${sub}${ph}${fileNote}</div>${noteHtml}</div>${act}</div>`;
@@ -3363,6 +3389,10 @@ function renderReceptionList(q){
   const ua = document.getElementById("rc-undoall");
   if(ua) ua.addEventListener("click", untouchOpenedOnly);
   // 「取消」は .d-main の外に置いてあるので、行を開くハンドラには拾われない
+  host.querySelectorAll("[data-recmap]").forEach(b=>b.addEventListener("click",()=>{
+    const r = rows[parseInt(b.getAttribute("data-recmap"),10)];
+    if(r) openMapView(r.mgmt_no);        // 地図を閉じれば、この一覧に戻ってくる
+  }));
   host.querySelectorAll("[data-recundo]").forEach(b=>b.addEventListener("click", async()=>{
     await untouchCase(rows[parseInt(b.getAttribute("data-recundo"),10)]);
   }));
@@ -3485,8 +3515,8 @@ document.getElementById("map-here").addEventListener("click",()=>{
   mapZoomTo(hit.mark);
 });
 document.getElementById("map-google").addEventListener("click",()=>{
-  const q=String(M.chosho_cust_addr||"").trim();
-  window.open(mapUrl(q||M.chosho_mgmt_no||""),"_blank","noopener");
+  const q=mapTargetAddr();
+  window.open(mapUrl(q||_mapTarget||M.chosho_mgmt_no||""),"_blank","noopener");
 });
 document.getElementById("map-sheet").addEventListener("change",function(){
   _mapSheetIdx=parseInt(this.value,10)||0;
