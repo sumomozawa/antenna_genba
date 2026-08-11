@@ -27,11 +27,11 @@
     --bg:#eef1f5; --card:#fff; --line:#d4dae2; --ink:#1a2430; --sub:#5b6673;
     --accent:#0d47a1; --accent2:#1565c0; --red:#d32f2f; --green:#2e7d32;
     --warn:#e65100; --radius:12px;
-    /* 動きの基準。スマホで気持ちよく感じる、少し弾む曲線にそろえる */
+    /* 動きの基準。しっかり弾ませて、切り替わりが目で追えるようにする */
     --ease:cubic-bezier(.22,.61,.36,1);
     --ease-out:cubic-bezier(.16,1,.3,1);
-    --ease-spring:cubic-bezier(.34,1.56,.64,1);
-    --t-fast:.12s; --t-med:.24s; --t-slow:.38s;
+    --ease-spring:cubic-bezier(.34,1.8,.5,1);      /* 大きめに行き過ぎて戻る */
+    --t-fast:.15s; --t-med:.34s; --t-slow:.62s;
     /* このアプリは明色デザイン固定。Android等のOSダークモードでも、ネイティブの
        <select>候補ポップアップが暗背景＋暗文字になって読めなくなるのを防ぐため、
        フォーム部品を明色（白背景＋黒文字）で描画するよう明示する。 */
@@ -61,10 +61,28 @@
     transition:transform var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
   }
   header button.ghost{background:rgba(255,255,255,.16); color:#fff;}
-  header button:active{transform:scale(.94);}
+  header button:active{transform:scale(.87);}
   /* 画面を下へ送ると上部バーを薄く縮める（入力欄を広く見せる） */
   body.scrolled header{padding-top:calc(env(safe-area-inset-top) + 4px); padding-bottom:4px; box-shadow:0 3px 14px rgba(13,71,161,.34);}
   body.scrolled header .ttl .app{display:none;}
+  /* 取り込むファイルの名前は、探しやすいよう等幅で目立たせる */
+  .fname{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:12.5px;
+    background:#eef2f7; color:#0d47a1; border-radius:5px; padding:1px 6px; word-break:break-all;}
+  #map-modal .mempty .fname{background:#e8eef7;}
+  /* ---- 保存の状態 ---- */
+  .savebar{position:sticky; top:0; z-index:45; display:flex; align-items:center; gap:8px;
+    padding:6px 12px; font-size:12px; font-weight:600; border-bottom:1px solid var(--line);
+    transition:background var(--t-med) var(--ease), color var(--t-med) var(--ease);}
+  .savebar .sb-dot{width:9px; height:9px; border-radius:5px; flex:none; background:currentColor;}
+  .savebar .sb-main{flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .savebar .sb-file{font-weight:600; font-size:11px; opacity:.75; white-space:nowrap;}
+  .savebar .sb-file.attn{opacity:1; text-decoration:underline;}
+  .savebar.ok{background:#e8f5e9; color:#1b5e20;}
+  .savebar.warn{background:#fff8e1; color:#8a5a00;}
+  .savebar.warn .sb-dot{animation:sbBlink 1s var(--ease) infinite;}
+  .savebar.ng{background:#fdecea; color:#a5342b;}
+  .savebar.idle{background:#f2f5f8; color:#5b6673;}
+  @keyframes sbBlink{ 0%,100%{opacity:1;} 50%{opacity:.25;} }
   /* ---- セクション（アコーディオン）---- */
   .sec{background:var(--card); margin:10px 8px; border:1px solid var(--line); border-radius:var(--radius); overflow:hidden;}
   .sec>.head{
@@ -162,7 +180,7 @@
     transition:transform var(--t-fast) var(--ease), background var(--t-med) var(--ease),
                box-shadow var(--t-med) var(--ease), color var(--t-med) var(--ease);
   }
-  .footbar button:active{transform:scale(.95);}
+  .footbar button:active{transform:scale(.88);}
   .footbar .nav button{flex:1; min-height:42px; font-size:13.5px; background:#eef2f7; color:var(--accent);}
   .footbar .nav button:disabled{opacity:.45;}
   .footbar .save{flex:1; min-height:56px; font-size:16px; background:var(--accent); color:#fff;
@@ -179,23 +197,30 @@
     box-shadow:0 3px 10px rgba(27,122,61,.34); animation:none;
   }
   @keyframes surveyPulse{
-    0%,100%{ box-shadow:0 3px 12px rgba(239,108,0,.42); }
-    50%    { box-shadow:0 3px 20px rgba(239,108,0,.72); }
+    0%,100%{ box-shadow:0 3px 12px rgba(239,108,0,.42); filter:brightness(1); }
+    50%    { box-shadow:0 7px 30px rgba(239,108,0,.9);  filter:brightness(1.12); }
+  }
+  /* 押して完了になった瞬間は、はっきり跳ねる */
+  .footbar .survey.justdone{ animation:surveyPop .7s var(--ease-spring) both; }
+  @keyframes surveyPop{
+    0%  { transform:scale(1); }
+    35% { transform:scale(1.16) rotate(-1.5deg); }
+    100%{ transform:scale(1); }
   }
   header .surveytag{display:inline-block; margin-left:6px; background:#1b7a3d; color:#fff; font-size:10.5px;
     font-weight:700; padding:1px 7px; border-radius:9px; vertical-align:middle;
     animation:tagIn var(--t-med) var(--ease-out) both;}
   @keyframes tagIn{ from{ opacity:0; transform:translateY(-4px) scale(.85);} to{ opacity:1; transform:none;} }
-  .savedhint{position:fixed; bottom:132px; left:50%; background:#263238; color:#fff; font-size:13.5px;
-    padding:10px 18px; border-radius:22px; opacity:0; z-index:70; pointer-events:none;
-    transform:translate(-50%,10px) scale(.96);
-    transition:opacity var(--t-med) var(--ease-out), transform var(--t-med) var(--ease-out);
-    box-shadow:0 6px 20px rgba(0,0,0,.28);}
+  .savedhint{position:fixed; bottom:132px; left:50%; background:#263238; color:#fff; font-size:14px;
+    padding:12px 22px; border-radius:24px; opacity:0; z-index:70; pointer-events:none;
+    transform:translate(-50%,34px) scale(.7);
+    transition:opacity var(--t-med) var(--ease-out), transform .5s var(--ease-spring);
+    box-shadow:0 8px 26px rgba(0,0,0,.34);}
   .savedhint.show{opacity:1; transform:translate(-50%,0) scale(1);}
   /* ---- 地図ビューア ---- */
   #map-modal{position:fixed; inset:0; z-index:110; background:#f2f5f8; display:none; flex-direction:column;}
-  #map-modal.open{display:flex; animation:mapIn var(--t-med) var(--ease-out) both;}
-  @keyframes mapIn{ from{ opacity:0; transform:scale(.98);} to{ opacity:1; transform:none;} }
+  #map-modal.open{display:flex; animation:mapIn .42s var(--ease-spring) both;}
+  @keyframes mapIn{ from{ opacity:0; transform:scale(.9) translateY(28px);} to{ opacity:1; transform:none;} }
   #map-modal .mtop{
     background:var(--accent); color:#fff; display:flex; align-items:center; gap:8px;
     padding:calc(env(safe-area-inset-top) + 8px) 10px 8px; box-shadow:0 2px 10px rgba(13,71,161,.3);
@@ -211,9 +236,18 @@
   #map-modal .mtop select{max-width:38vw; appearance:none; -webkit-appearance:none; padding-right:26px;
     background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='8'><path d='M1 1l5 5 5-5' stroke='white' stroke-width='2' fill='none'/></svg>");
     background-repeat:no-repeat; background-position:right 9px center;}
-  #map-stage{flex:1; position:relative; overflow:hidden; background:#fff; touch-action:none;}
+  #map-stage{flex:1; position:relative; overflow:hidden; background:#fff; touch-action:none; overscroll-behavior:none;}
+  /* 拡大縮小のボタン（つまむ操作が苦手でも押すだけで寄れる） */
+  #map-modal .mzoom{position:absolute; right:12px; bottom:96px; display:flex; flex-direction:column; gap:10px; z-index:5;}
+  #map-modal .mzoom button{
+    width:56px; height:56px; border-radius:28px; border:0; background:rgba(255,255,255,.96);
+    color:var(--accent); font-size:28px; font-weight:700; line-height:1;
+    box-shadow:0 4px 14px rgba(20,30,45,.28);
+    transition:transform var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
+  }
+  #map-modal .mzoom button:active{transform:scale(.88); background:#e8eef7;}
   #map-stage svg{position:absolute; inset:0; width:100%; height:100%; display:block;}
-  #map-vp{transition:transform var(--t-slow) var(--ease-out);}
+  #map-vp{transition:transform .85s var(--ease-out);}
   #map-vp.dragging{transition:none;}
   #map-hl{fill:rgba(255,143,0,.16); stroke:#ef6c00; stroke-width:3; vector-effect:non-scaling-stroke;
     animation:hlPulse 1.6s var(--ease) infinite;}
@@ -243,34 +277,42 @@
   .sec>.head .chev{transition:transform var(--t-med) var(--ease-spring);}
   .sec>.body{will-change:height;}
   /* 中身の各行が順に立ち上がる（開いた瞬間の気持ちよさ） */
-  .sec.just-opened>.body>*{animation:fldIn .34s var(--ease-out) both;}
-  .sec.just-opened>.body>*:nth-child(1){animation-delay:.01s;}
-  .sec.just-opened>.body>*:nth-child(2){animation-delay:.035s;}
-  .sec.just-opened>.body>*:nth-child(3){animation-delay:.06s;}
-  .sec.just-opened>.body>*:nth-child(4){animation-delay:.085s;}
-  .sec.just-opened>.body>*:nth-child(5){animation-delay:.11s;}
-  .sec.just-opened>.body>*:nth-child(n+6){animation-delay:.13s;}
-  @keyframes fldIn{ from{ opacity:0; transform:translateY(7px);} to{ opacity:1; transform:none;} }
+  .sec.just-opened>.body>*{animation:fldIn .5s var(--ease-spring) both;}
+  .sec.just-opened>.body>*:nth-child(1){animation-delay:.02s;}
+  .sec.just-opened>.body>*:nth-child(2){animation-delay:.07s;}
+  .sec.just-opened>.body>*:nth-child(3){animation-delay:.12s;}
+  .sec.just-opened>.body>*:nth-child(4){animation-delay:.17s;}
+  .sec.just-opened>.body>*:nth-child(5){animation-delay:.22s;}
+  .sec.just-opened>.body>*:nth-child(6){animation-delay:.27s;}
+  .sec.just-opened>.body>*:nth-child(n+7){animation-delay:.3s;}
+  @keyframes fldIn{ from{ opacity:0; transform:translateY(26px) scale(.94);} to{ opacity:1; transform:none;} }
+  .sec.open>.head .chev{transform:rotate(90deg) scale(1.25);}
   /* 押した時の手応え */
   .seg button, .wire .tg button, .addphoto label, .note button, .draft .d-open, .modal .closebtn{
     transition:transform var(--t-fast) var(--ease), background var(--t-med) var(--ease),
                border-color var(--t-med) var(--ease), color var(--t-med) var(--ease), box-shadow var(--t-med) var(--ease);
   }
   .seg button:active, .wire .tg button:active, .addphoto label:active, .note button:active,
-  .draft .d-open:active, .modal .closebtn:active{transform:scale(.94);}
+  .draft .d-open:active, .modal .closebtn:active{transform:scale(.90);}
   .seg button.on{box-shadow:0 2px 8px rgba(13,71,161,.28);}
   .seg button.on.red{box-shadow:0 2px 8px rgba(211,47,47,.28);}
   input,select,textarea{transition:border-color var(--t-med) var(--ease), box-shadow var(--t-med) var(--ease), background var(--t-med) var(--ease);}
   /* 戸別を切り替えた時、中身がふわっと入れ替わる */
-  #app.swap{animation:appSwap .34s var(--ease-out) both;}
-  @keyframes appSwap{ from{ opacity:0; transform:translateY(10px);} to{ opacity:1; transform:none;} }
+  #app.swap{animation:appSwap .6s var(--ease-spring) both;}
+  @keyframes appSwap{
+    0%  { opacity:0; transform:translateY(46px) scale(.93); }
+    60% { opacity:1; }
+    100%{ opacity:1; transform:none; }
+  }
   /* モーダルは下からせり上がる */
   .modal{transition:background var(--t-med) var(--ease);}
   .modal .sheet, .modal .dlg{will-change:transform;}
-  .modal.open .sheet{animation:sheetUp .36s var(--ease-out) both;}
-  .modal.open .dlg{animation:dlgIn .28s var(--ease-spring) both;}
-  @keyframes sheetUp{ from{ transform:translateY(34px); opacity:.4;} to{ transform:none; opacity:1;} }
-  @keyframes dlgIn{ from{ transform:scale(.9); opacity:0;} to{ transform:none; opacity:1;} }
+  .modal.open{animation:modalBg .3s var(--ease) both;}
+  @keyframes modalBg{ from{ background:rgba(0,0,0,0);} to{ background:rgba(0,0,0,.5);} }
+  .modal.open .sheet{animation:sheetUp .56s var(--ease-spring) both;}
+  .modal.open .dlg{animation:dlgIn .46s var(--ease-spring) both;}
+  @keyframes sheetUp{ from{ transform:translateY(100%); opacity:.2;} to{ transform:none; opacity:1;} }
+  @keyframes dlgIn{ from{ transform:scale(.72) translateY(24px); opacity:0;} to{ transform:none; opacity:1;} }
   .draft{transition:background var(--t-fast) var(--ease);}
   .draft:active{background:#f2f6fb;}
   .photo{transition:transform var(--t-med) var(--ease-out), box-shadow var(--t-med) var(--ease-out);}
@@ -300,6 +342,14 @@
   /* 保留：PC（受付台帳・地図の「保」マーク）と同じ橙色 */
   .rc-badge.hold{background:#e65100;}
   .draft.rc-hold{background:#fff4e8; border-left:4px solid #e65100; padding-left:8px;}
+  /* 下見が終わった戸別（この端末で「下見完了」を押したもの） */
+  .rc-badge.surv{background:#1b7a3d;}
+  .rc-badge.open{background:#1565c0;}
+  .draft.rc-surv{background:#e9f6ec; border-left:4px solid #1b7a3d; padding-left:8px;}
+  .draft.rc-surv .d-no{color:#1b5e20;}
+  .draft.rc-surv .d-open{background:#1b7a3d;}
+  .rc-ph{display:inline-block; margin-left:8px; font-size:11.5px; font-weight:700; color:#00695c;
+    background:#e0f2f1; border-radius:9px; padding:1px 8px;}
   /* 複数選択削除のアクションバー */
   .draft-actions{display:flex; align-items:center; justify-content:space-between; gap:10px; padding:6px 2px 12px; position:sticky; top:0; background:#fff; z-index:2;}
   .d-selall{display:flex; align-items:center; gap:7px; font-size:14px; font-weight:600; color:var(--ink);}
@@ -375,6 +425,7 @@
   <button id="btn-save-top">保存</button>
 </header>
 
+<div class="savebar idle" id="savebar"></div>
 <div id="app"></div>
 <div class="app-ver" id="app-ver"></div>
 
@@ -401,6 +452,10 @@
   </div>
   <input type="file" id="map-file" accept=".json,application/json,*/*" style="display:none;">
   <div id="map-stage"></div>
+  <div class="mzoom">
+    <button id="map-zin" aria-label="拡大">＋</button>
+    <button id="map-zout" aria-label="縮小">−</button>
+  </div>
   <div class="mbot" id="map-bot">
     <button id="map-here" class="pri">この家</button>
     <button id="map-all">全体</button>
@@ -424,8 +479,10 @@
 <div class="modal" id="reception-modal">
   <div class="sheet">
     <h3>🗒 受付台帳から開く</h3>
-    <div class="info">PC（受付台帳）で <b>「📤 受付台帳ファイル」</b> を書き出したファイルを取り込むと、下に一覧が出ます。タップすると<b>管理番号・氏名・住所が入った状態</b>で入力を開始できます（同じ管理番号の下書きがあれば続きから開きます）。</div>
-    <button id="btn-reception-import" style="width:100%; padding:15px; border:0; border-radius:11px; background:#00695c; color:#fff; font-weight:700; font-size:15px; margin-bottom:10px;">📥 受付台帳ファイルを取り込む</button>
+    <div class="info">PCの受付台帳で <b>「📦 現場用」</b> を押すと <b class="fname">現場用_物件名_日付.json</b> ができます。下のボタンから<b>そのファイル</b>を選んでください。<br>受付台帳と地図が一緒に入っているので、これ1つで両方そろいます。<br>
+    取り込むと下に一覧が出ます。タップすると<b>管理番号・氏名・住所が入った状態</b>で入力を開始できます（同じ管理番号の下書きがあれば続きから開きます）。<b>下見完了にした戸別は緑色</b>になり、撮った写真の枚数も出ます。<br>
+    <span class="sub">※ 地図の入っていない <b class="fname">受付台帳_….json</b> でも取り込めます。</span></div>
+    <button id="btn-reception-import" style="width:100%; padding:15px; border:0; border-radius:11px; background:#00695c; color:#fff; font-weight:700; font-size:15px; margin-bottom:10px;">現場用_….json を選ぶ</button>
     <input type="file" id="reception-file" accept=".json,application/json,*/*" style="display:none;">
     <input type="search" id="reception-search" placeholder="管理番号・氏名・住所で絞り込み" style="width:100%; box-sizing:border-box; padding:11px 12px; border:1px solid #cdd3da; border-radius:10px; font-size:15px; margin-bottom:10px;">
     <div id="reception-meta" class="info" style="display:none;"></div>
@@ -1865,6 +1922,9 @@ async function toggleSurveyDone(){
     }
     if(!(await uiConfirm("この戸別の下見を完了にします。\n\nいまの入力内容で材料が確定し、PC側の「🧰 発注材料数量」の集計に入ります。\n（あとから取り消せます）"))) return;
     M.survey_done=true; M.survey_done_at=new Date().toISOString();
+    const b=document.getElementById("btn-survey");
+    if(b){ b.classList.remove("justdone"); void b.offsetWidth; b.classList.add("justdone");
+           setTimeout(()=>b.classList.remove("justdone"),800); }
     toast("下見完了にしました");
   }
   saveDraft();
@@ -2064,6 +2124,7 @@ let _mapPack = null;             // { project, sheets:[{name, viewBox, svg, mark
 let _mapSheetIdx = 0;
 let _mapTarget = "";             // いま見ている管理番号
 const mapView = { s:1, tx:0, ty:0 };   // ワールド→表示の変換（scale と平行移動）
+const MAP_MIN_S = 0.5, MAP_MAX_S = 60;   // 拡大縮小の下限・上限
 
 async function mapPackLoad(){
   try { const r = await idbMapGet(MAP_KEY); _mapPack = (r && r.pack) || null; }
@@ -2106,16 +2167,20 @@ function openMapView(no){
   if(!_mapPack){
     stage.innerHTML = "";
     stage.className = "mempty";
-    stage.innerHTML = '<div>PCの地図がまだ入っていません。<br>'
-      + 'PCの <b>地図</b> で <b>「現場用に地図を書き出し」</b> したファイルを、<br>この端末に取り込んでください。'
-      + '<button id="map-import-btn">地図ファイルを取り込む</button></div>';
+    stage.innerHTML = '<div>地図がまだ入っていません。<br><br>'
+      + 'PCの受付台帳で <b>「📦 現場用」</b> を押すと<br><b class="fname">現場用_物件名_日付.json</b> ができます。<br>'
+      + '下のボタンから<b>そのファイル</b>を選んでください。<br>'
+      + '<span class="sub">（受付台帳と地図が一緒に入っています）</span>'
+      + '<button id="map-import-btn">現場用_….json を選ぶ</button></div>';
     bot.style.display = "none";
+    document.querySelector("#map-modal .mzoom").style.display = "none";
     document.getElementById("map-import-btn").addEventListener("click", () => document.getElementById("map-file").click());
     modal.classList.add("open");
     return;
   }
   stage.className = "";
   bot.style.display = "";
+  document.querySelector("#map-modal .mzoom").style.display = "";
   const hit = mapFindMark(_mapTarget);
   _mapSheetIdx = hit ? hit.sheet : Math.min(_mapSheetIdx, _mapPack.sheets.length - 1);
   mapRenderSheet();
@@ -2123,7 +2188,7 @@ function openMapView(no){
   // 開いた直後は全体を映してから、その建物へ寄っていく（どこに居るか分かるように）
   if(hit){
     mapFitAll(true);
-    setTimeout(() => mapZoomTo(hit.mark), 260);
+    setTimeout(() => mapZoomTo(hit.mark), 460);
     document.getElementById("map-sub").textContent = _mapPack.sheets[_mapSheetIdx].name || "";
   } else {
     mapFitAll(true);
@@ -2149,6 +2214,7 @@ function mapRenderSheet(){
   stage.innerHTML = '<svg id="map-svg" viewBox="' + vb.x + " " + vb.y + " " + vb.w + " " + vb.h
     + '" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">'
     + '<g id="map-vp">' + sh.svg + hl + "</g></svg>";
+  mapThinStrokes(vb);
   // 図面が2枚以上ある物件は切り替えられるようにする
   const sel = document.getElementById("map-sheet");
   if(_mapPack.sheets.length > 1){
@@ -2157,6 +2223,30 @@ function mapRenderSheet(){
       '<option value="' + i + '"' + (i === _mapSheetIdx ? " selected" : "") + ">" + esc(s.name || ("図面" + (i + 1))) + "</option>").join("");
   } else sel.style.display = "none";
   mapBindGestures();
+}
+/* 線の太さを、スマホの画面で見やすい細さに直す。
+   PCの地図は「図の横幅1000px」を前提に太さを図の単位へ焼き込んであるので、
+   まず元の画面px相当へ戻し、細めにしてから「拡大しても太くならない」指定にする。
+   こうしないと、寄るほど線が太って何も見えなくなる。 */
+function mapThinStrokes(vb){
+  const g = document.getElementById("map-vp"); if(!g) return;
+  const back = 1000 / Math.max(1e-6, vb.w);          // 図の単位 → 元の画面px
+  g.querySelectorAll("*").forEach(n => {
+    if(n.id === "map-hl") return;                     // 目印の枠はそのまま
+    const st = n.getAttribute("stroke");
+    if(!st || st === "none") return;
+    const sw = parseFloat(n.getAttribute("stroke-width"));
+    if(!isFinite(sw) || sw <= 0) return;
+    const orig = sw * back;                           // PCで何px相当だったか
+    const t = Math.max(0.5, Math.min(1.8, orig * 0.55));
+    n.setAttribute("stroke-width", t);
+    n.setAttribute("vector-effect", "non-scaling-stroke");   // 拡大しても太くならない
+    const da = n.getAttribute("stroke-dasharray");
+    if(da){                                           // 破線の刻みも画面px基準へ
+      n.setAttribute("stroke-dasharray", da.split(/[\s,]+/).filter(Boolean)
+        .map(v => Math.max(0.5, parseFloat(v) * back * 0.55)).join(" "));
+    }
+  });
 }
 function mapApply(anim){
   const g = document.getElementById("map-vp"); if(!g) return;
@@ -2190,57 +2280,100 @@ function mapZoomTo(mark){
   mapView.ty = (vb.y + vb.h / 2) - mark.cy * s;
   mapApply(true);
 }
-/* 指の操作：1本でなぞる＝移動、2本でつまむ＝拡大縮小、素早く2回叩く＝拡大 */
+/* 画面のpx → 図の座標（viewBox）。図は縦横比を保って収めているので、
+   余白（レターボックス）のぶんを差し引いてから換算する。 */
+function mapPt(clientX, clientY){
+  const vb = _mapPack.sheets[_mapSheetIdx].viewBox;
+  const st = document.getElementById("map-stage"), r = st.getBoundingClientRect();
+  const k = Math.min(r.width / vb.w, r.height / vb.h) || 1;
+  const ox = (r.width - vb.w * k) / 2, oy = (r.height - vb.h * k) / 2;
+  return { x: vb.x + (clientX - r.left - ox) / k, y: vb.y + (clientY - r.top - oy) / k, k };
+}
+/* ある点を動かさずに拡大縮小する（指の間や画面の真ん中を中心に寄る）。
+   これをしないと、拡大するたび図が画面の外へ飛んでいってしまう。 */
+function mapZoomAt(ns, p, anim){
+  ns = Math.max(MAP_MIN_S, Math.min(MAP_MAX_S, ns));
+  // p は viewBox 座標。いま p の下にある図の点が、拡大後も p に来るように平行移動を決める
+  mapView.tx = p.x - (p.x - mapView.tx) * (ns / mapView.s);
+  mapView.ty = p.y - (p.y - mapView.ty) * (ns / mapView.s);
+  mapView.s = ns;
+  mapApply(!!anim);
+}
+/* ボタンでの拡大縮小は、画面の真ん中を中心にする */
+function mapZoomStep(mul){
+  const st = document.getElementById("map-stage"), r = st.getBoundingClientRect();
+  mapZoomAt(mapView.s * mul, mapPt(r.left + r.width / 2, r.top + r.height / 2), true);
+}
+/* 指の操作：1本でなぞる＝移動、2本でつまむ＝その間を中心に拡大縮小、
+   素早く2回叩く＝叩いた場所を中心に拡大。 */
 function mapBindGestures(){
   const stage = document.getElementById("map-stage");
   if(!stage || stage._bound) return;
   stage._bound = true;
   const pts = new Map();
-  let last = null, pinch = null, lastTap = 0;
-  const world = e => { const r = stage.getBoundingClientRect(); return { x: e.clientX - r.left, y: e.clientY - r.top }; };
-  const px2vb = () => {   // 表示px → viewBox単位（preserveAspectRatio="meet" ぶんを見る）
-    const vb = _mapPack.sheets[_mapSheetIdx].viewBox, r = stage.getBoundingClientRect();
-    const k = Math.min(r.width / vb.w, r.height / vb.h);
-    return k > 0 ? 1 / k : 1;
-  };
+  let last = null, pinch = null, lastTap = 0, lastTapPt = null, moved = 0;
+  const raw = e => ({ x: e.clientX, y: e.clientY });
+  const mid = a => ({ x: (a[0].x + a[1].x) / 2, y: (a[0].y + a[1].y) / 2 });
   stage.addEventListener("pointerdown", e => {
-    stage.setPointerCapture(e.pointerId);
-    pts.set(e.pointerId, world(e));
+    e.preventDefault();
+    try { stage.setPointerCapture(e.pointerId); } catch(_){}
+    pts.set(e.pointerId, raw(e));
     if(pts.size === 1){
-      last = world(e);
+      last = raw(e); moved = 0;
       const now = Date.now();
-      if(now - lastTap < 300){ mapView.s = Math.min(30, mapView.s * 1.8); mapApply(true); lastTap = 0; }
-      else lastTap = now;
+      if(now - lastTap < 320 && lastTapPt
+         && Math.hypot(e.clientX - lastTapPt.x, e.clientY - lastTapPt.y) < 40){
+        mapZoomAt(mapView.s * 2.2, mapPt(e.clientX, e.clientY), true);   // 2回叩いて拡大
+        lastTap = 0; lastTapPt = null;
+      } else { lastTap = now; lastTapPt = raw(e); }
     } else if(pts.size === 2){
-      const a = [...pts.values()];
-      pinch = { d: Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y), s: mapView.s };
+      const a = [...pts.values()], m = mid(a);
+      const p0 = mapPt(m.x, m.y);
+      // つまみ始めに指の間にあった「図の点」を覚えておく。以後この点を指の間へ置き続ける。
+      pinch = { d: Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y), s: mapView.s,
+                c: { x: (p0.x - mapView.tx) / mapView.s, y: (p0.y - mapView.ty) / mapView.s } };
+      last = null;
     }
   });
   stage.addEventListener("pointermove", e => {
     if(!pts.has(e.pointerId)) return;
-    pts.set(e.pointerId, world(e));
-    const k = px2vb();
+    e.preventDefault();
+    pts.set(e.pointerId, raw(e));
     if(pts.size >= 2 && pinch){
       const a = [...pts.values()];
       const d = Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y);
-      if(pinch.d > 0) mapView.s = Math.max(0.4, Math.min(40, pinch.s * (d / pinch.d)));
-      mapApply(false);
+      if(pinch.d > 4){
+        const m = mid(a), pm = mapPt(m.x, m.y);
+        const ns = Math.max(MAP_MIN_S, Math.min(MAP_MAX_S, pinch.s * (d / pinch.d)));
+        // 覚えておいた図の点を、いまの指の間へ置く。これで拡大縮小と移動が同時に効く。
+        mapView.s = ns;
+        mapView.tx = pm.x - pinch.c.x * ns;
+        mapView.ty = pm.y - pinch.c.y * ns;
+        mapApply(false);
+      }
     } else if(last){
-      const p = world(e);
-      mapView.tx += (p.x - last.x) * k;
-      mapView.ty += (p.y - last.y) * k;
-      last = p;
+      const k = mapPt(e.clientX, e.clientY).k;
+      mapView.tx += (e.clientX - last.x) / k;
+      mapView.ty += (e.clientY - last.y) / k;
+      moved += Math.abs(e.clientX - last.x) + Math.abs(e.clientY - last.y);
+      last = raw(e);
       mapApply(false);
     }
   });
   const up = e => {
     pts.delete(e.pointerId);
     if(pts.size < 2) pinch = null;
-    if(pts.size === 0) last = null;
-    else last = [...pts.values()][0];
+    last = pts.size ? [...pts.values()][0] : null;
+    if(moved > 12){ lastTap = 0; lastTapPt = null; }   // なぞった後は2回叩き扱いにしない
   };
   stage.addEventListener("pointerup", up);
   stage.addEventListener("pointercancel", up);
+  stage.addEventListener("pointerleave", up);
+  // マウスの車輪でも拡大縮小できるようにする（PCで確認するとき用）
+  stage.addEventListener("wheel", e => {
+    e.preventDefault();
+    mapZoomAt(mapView.s * (e.deltaY < 0 ? 1.15 : 1 / 1.15), mapPt(e.clientX, e.clientY), false);
+  }, { passive: false });
 }
 /* 地図ファイルの取り込み */
 async function mapImportFile(file){
@@ -2260,7 +2393,7 @@ async function mapImportFile(file){
     }
   }
   if(!p || p.type !== "antenna_map_pack" || !Array.isArray(p.sheets) || !p.sheets.length){
-    await uiAlert("地図ファイルではありません。\nPCの受付台帳で「📤 現場用」、または地図で「現場用に地図を書き出し」したファイルを選んでください。"); return; }
+    await uiAlert("このファイルには地図が入っていません。\n\nPCの受付台帳で「📦 現場用」を押してできる\n「現場用_物件名_日付.json」を選んでください。"); return; }
   try { await mapPackSave({ project: p.project || "", exportedAt: p.exportedAt || "", sheets: p.sheets }); }
   catch(e){ await uiAlert("この端末に保存できませんでした（空き容量不足かもしれません）。"); return; }
   toast(addedLedger
@@ -2294,7 +2427,7 @@ async function saveJson(){
       });
       const w=await handle.createWritable();
       await w.write(blob); await w.close();
-      await markDraftSaved();   // ← 書込成功後にだけ💾
+      await markDraftSaved(); saveStateFile();   // ← 書込成功後にだけ💾
       toast("保存しました："+fname);
       return;
     }catch(e){ if(e && e.name==="AbortError") return; /* 失敗時は下へフォールバック */ }
@@ -2306,7 +2439,7 @@ async function saveJson(){
       if(navigator.canShare({files:[file]})){
         // iOSはtitle/textを渡すと別テキストファイルが作られるためfilesのみ共有
         await navigator.share({files:[file]});
-        await markDraftSaved();
+        await markDraftSaved(); saveStateFile();
         toast("共有しました："+fname);
         return;
       }
@@ -2316,7 +2449,7 @@ async function saveJson(){
   const url=URL.createObjectURL(blob);
   const a=document.createElement("a"); a.href=url; a.download=fname; document.body.appendChild(a); a.click();
   setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); },4000); // 大量写真でDLダイアログが遅延しても失敗しないよう余裕を持つ
-  await markDraftSaved();
+  await markDraftSaved(); saveStateFile();
   toast("ダウンロードしました："+fname);
 }
 
@@ -2405,7 +2538,49 @@ let _persistTimer=null;
 function draftKey(){ return M.chosho_mgmt_no ? ("no:"+M.chosho_mgmt_no) : (M._draftId||(M._draftId="tmp:"+Date.now())); }
 function saveDraft(){ updateHeader(); schedulePersist(); }
 function saveDraftQuiet(){ schedulePersist(); }
-function schedulePersist(){ clearTimeout(_persistTimer); _persistTimer=setTimeout(()=>{ persistDraft(); }, 400); }
+function schedulePersist(){ clearTimeout(_persistTimer); _persistTimer=setTimeout(()=>{ persistDraft(); }, 400); saveStateDirty(); }
+/* ---- 保存の状態表示 ----
+   「この端末への自動保存」と「JSONファイルの書き出し」は別もの。
+   入力したのに保存されていない、書き出したあとにまた直した、が一目で分かるようにする。 */
+const _save = { savedAt:0, dirty:false, fileAt:0, fileStale:false, failed:false };
+function saveStateDirty(){ _save.dirty=true; if(_save.fileAt) _save.fileStale=true; renderSaveBar(); }
+function saveStateSaved(fileAt){
+  _save.savedAt=Date.now(); _save.dirty=false; _save.failed=false;
+  if(typeof fileAt==="number") _save.fileAt=fileAt;
+  if(_save.fileAt && _save.savedAt > _save.fileAt + 1500) _save.fileStale=true;
+  renderSaveBar();
+}
+function saveStateFile(){ _save.fileAt=Date.now(); _save.fileStale=false; renderSaveBar(); }
+function saveStateFailed(){ _save.failed=true; renderSaveBar(); }
+/* 別の戸別を開いたとき、その戸別の保存状況を読み直す */
+async function saveStateLoad(){
+  _save.dirty=false; _save.failed=false; _save.savedAt=0; _save.fileAt=0; _save.fileStale=false;
+  try{
+    const key = M._lastDraftKey || draftKey();
+    const rec = await idbGet(key);
+    if(rec){ _save.savedAt=rec.savedAt||0; _save.fileAt=rec.fileSavedAt||0;
+             _save.fileStale = !!(_save.fileAt && _save.savedAt > _save.fileAt + 1500); }
+  }catch(_){}
+  renderSaveBar();
+}
+const _hhmm = t => { const d=new Date(t); const p=n=>String(n).padStart(2,"0");
+  const now=new Date(); const sameDay = d.toDateString()===now.toDateString();
+  return (sameDay?"":(d.getMonth()+1)+"/"+d.getDate()+" ") + p(d.getHours())+":"+p(d.getMinutes()); };
+function renderSaveBar(){
+  const el=document.getElementById("savebar"); if(!el) return;
+  let cls, main;
+  if(_save.failed){ cls="ng"; main="この端末に保存できていません。「保存」でファイルに残してください"; }
+  else if(_save.dirty){ cls="warn"; main="未保存の変更があります（まもなく自動保存）"; }
+  else if(_save.savedAt){ cls="ok"; main="保存済み "+_hhmm(_save.savedAt); }
+  else { cls="idle"; main="まだ何も入力していません"; }
+  let file;
+  if(!_save.fileAt) file="ファイル未書出";
+  else if(_save.fileStale||_save.dirty) file="書き出し後に変更あり（"+_hhmm(_save.fileAt)+" 書出）";
+  else file="ファイル書出済 "+_hhmm(_save.fileAt);
+  el.className="savebar "+cls;
+  el.innerHTML='<span class="sb-dot"></span><span class="sb-main">'+esc(main)+'</span>'
+    +'<span class="sb-file'+((_save.fileStale||(!_save.fileAt&&_save.savedAt))?" attn":"")+'">'+esc(file)+'</span>';
+}
 // レコードに中身があるか（別の実データ下書きかの判定用）
 function _recHasContent(rec){
   return !!(rec && rec.model && (rec.model.chosho_cust_name || rec.fileSavedAt
@@ -2433,14 +2608,17 @@ async function persistDraft(){
     M._lastDraftKey = key;
     const cur = (key===wantKey) ? prev : await idbGet(key);
     const rec={ key, model:M, savedAt:Date.now(), fileSavedAt:(cur&&cur.fileSavedAt)||0,
-      mgmt:M.chosho_mgmt_no||"", cust:M.chosho_cust_name||"", photos:(M.chosho_photos||[]).length };
+      mgmt:M.chosho_mgmt_no||"", cust:M.chosho_cust_name||"", photos:(M.chosho_photos||[]).length,
+      surveyDone:!!M.survey_done };
     await idbPut(rec);
     localStorage.setItem(LS_LAST, key);
     persistDraft._warned=false;
+    saveStateSaved(rec.fileSavedAt);   // 「いつ保存したか」の表示を更新
   }catch(e){
     console.warn("draft persist failed",e);
     // 容量不足等で自動保存が失敗した時は無音で失わせず、1度だけ警告（JSON保存を促す）
-    if(!persistDraft._warned){ persistDraft._warned=true; toast("⚠ 自動保存に失敗（空き容量不足かも）。💾保存でJSONを残してください"); }
+    saveStateFailed();
+    if(!persistDraft._warned){ persistDraft._warned=true; toast("⚠ 自動保存に失敗（空き容量不足かも）。「保存」でファイルに残してください"); }
   }
 }
 // 指定モデルを（現在編集中でなくても）そのキーで直接保存。写真読込完了が別戸別切替後に走った時などに使用。
@@ -2450,7 +2628,8 @@ async function persistModel(m){
     const key = m.chosho_mgmt_no ? ("no:"+m.chosho_mgmt_no) : (m._draftId || (m._draftId="tmp:"+Date.now()));
     const prev=await idbGet(key);
     await idbPut({ key, model:m, savedAt:Date.now(), fileSavedAt:(prev&&prev.fileSavedAt)||0,
-      mgmt:m.chosho_mgmt_no||"", cust:m.chosho_cust_name||"", photos:(m.chosho_photos||[]).length });
+      mgmt:m.chosho_mgmt_no||"", cust:m.chosho_cust_name||"", photos:(m.chosho_photos||[]).length,
+      surveyDone:!!m.survey_done });
   }catch(e){ console.warn("persistModel failed",e); }
 }
 async function markDraftSaved(){
@@ -2570,6 +2749,7 @@ async function newCase(){
   localStorage.removeItem(LS_LAST);       // 次回起動で古い戸別を復元しないよう「最後に開いたキー」をクリア
   resetOpenState();                       // アコーディオン開閉を既定へ
   render(); appSwap();
+  _save.savedAt=0; _save.dirty=false; _save.fileAt=0; _save.fileStale=false; renderSaveBar();
   toast("新規を作成しました");
 }
 document.getElementById("btn-save").addEventListener("click",saveJson);
@@ -2599,9 +2779,40 @@ function renderAppVer(){
 function openReceptionModal(){
   document.getElementById("reception-modal").classList.add("open");
   const s=document.getElementById("reception-search"); if(s) s.value="";
-  renderReceptionList("");
+  renderReceptionList("");                       // まず今ある情報ですぐ出す
+  refreshDraftInfo().then(()=>{                  // 下見の状況を取り直して出し直す
+    const sv=document.getElementById("reception-search");
+    renderReceptionList(sv?sv.value:"");
+  });
 }
 function closeReceptionModal(){ document.getElementById("reception-modal").classList.remove("open"); }
+/* 管理番号 → { 下見完了, 写真枚数 }。台帳一覧で「この戸別はもう終わったか」を出すために使う。
+   下書きの見出し情報だけを見るので、写真の中身は読み込まない。 */
+let _draftInfo = {};
+async function refreshDraftInfo(){
+  try{
+    const all = await idbGetAll();
+    const map = {};
+    (all||[]).forEach(rec=>{
+      if(!rec) return;
+      const no = String(rec.mgmt || (rec.model && rec.model.chosho_mgmt_no) || "").trim();
+      if(!no) return;
+      const done = (rec.surveyDone !== undefined) ? !!rec.surveyDone : !!(rec.model && rec.model.survey_done);
+      const ph = (typeof rec.photos === "number") ? rec.photos
+               : ((rec.model && rec.model.chosho_photos) ? rec.model.chosho_photos.length : 0);
+      map[no] = { done, photos: ph, has: true };
+    });
+    _draftInfo = map;
+  }catch(e){ console.warn("下書き情報の読み取りに失敗", e); }
+}
+/* いま編集中の戸別は、まだ保存されていなくても最新の状態を出す */
+function draftInfoOf(no){
+  no = String(no||"").trim();
+  if(no && no === String(M.chosho_mgmt_no||"").trim()){
+    return { done: !!M.survey_done, photos: (M.chosho_photos||[]).length, has: true };
+  }
+  return _draftInfo[no] || null;
+}
 function renderReceptionList(q){
   const host=document.getElementById("reception-list"); if(!host) return;
   const data=getReceptionData(); const rows=data?data.rows:[];
@@ -2615,21 +2826,27 @@ function renderReceptionList(q){
     }
     else { meta.style.display="none"; meta.textContent=""; }
   }
-  if(!rows.length){ host.innerHTML=`<div class="info" style="text-align:center">受付台帳はまだ取り込まれていません。上の「📥 受付台帳ファイルを取り込む」から取り込んでください。</div>`; return; }
+  if(!rows.length){ host.innerHTML=`<div class="info" style="text-align:center">受付台帳はまだ取り込まれていません。<br>上のボタンから <b class="fname">現場用_….json</b> を選んでください。</div>`; return; }
   const kw=(q||"").trim().toLowerCase();
   const filtered=kw ? rows.filter(r=>((r.mgmt_no||"")+" "+(r.name||"")+" "+(r.addr||"")+" "+(r.tel||"")).toLowerCase().includes(kw)) : rows;
   if(!filtered.length){ host.innerHTML=`<div class="info" style="text-align:center">該当なし</div>`; return; }
   host.innerHTML=filtered.map(r=>{
     const idx=rows.indexOf(r);
+    const info=draftInfoOf(r.mgmt_no);
     const sub=[r.addr, r.date?("予定 "+r.date):"", r.contractor].filter(Boolean).map(esc).join("・");
     const badge = r.status==="completed" ? '<span class="rc-badge done">完了</span>'
                 : r.status==="provisional" ? '<span class="rc-badge prov">仮</span>' : '';
     // 保留は状態（完了/仮）とは別枠。PCで保留にした戸別は現場でも一目で分かるようにする
     const hold = r.hold ? '<span class="rc-badge hold">保留</span>' : '';
-    return `<div class="draft${r.hold?" rc-hold":""}"><div class="d-main" data-recopen="${idx}">
-      <div class="d-no">${hold}${badge}${esc(r.mgmt_no||"（番号なし）")}${r.name?(" ／ "+esc(r.name)):""}</div>
-      <div class="d-sub">${sub}</div></div>
-      <button class="d-open" data-recopen="${idx}">開く</button></div>`;
+    // この端末で下見を終えた戸別は、行ごと色を変えて一目で分かるようにする
+    const surv = (info&&info.done) ? '<span class="rc-badge surv">下見済</span>' : '';
+    const started = (info&&!info.done&&info.has) ? '<span class="rc-badge open">入力中</span>' : '';
+    const ph = (info&&info.photos) ? ('<span class="rc-ph">写真'+info.photos+'枚</span>') : '';
+    const cls = (info&&info.done) ? " rc-surv" : (r.hold ? " rc-hold" : "");
+    return `<div class="draft${cls}"><div class="d-main" data-recopen="${idx}">
+      <div class="d-no">${surv}${started}${hold}${badge}${esc(r.mgmt_no||"（番号なし）")}${r.name?(" ／ "+esc(r.name)):""}</div>
+      <div class="d-sub">${sub}${ph}</div></div>
+      <button class="d-open" data-recopen="${idx}">${(info&&info.done)?"見直す":"開く"}</button></div>`;
   }).join("");
   host.querySelectorAll("[data-recopen]").forEach(b=>b.addEventListener("click",async()=>{
     const i=parseInt(b.getAttribute("data-recopen"),10);
@@ -2659,6 +2876,7 @@ async function openFromReception(row){
   if(row.date) m.chosho_date=row.date;
   if(mgmt){ delete m._draftId; m._lastDraftKey="no:"+mgmt; }
   M=m; ensureModelShape(M); resetOpenState(); render(); appSwap();
+  saveStateLoad();
   localStorage.setItem(LS_LAST, mgmt?("no:"+mgmt):(M._draftId||""));
   saveDraft();
   closeReceptionModal(); toast("受付台帳から開きました");
@@ -2708,7 +2926,7 @@ document.getElementById("reception-file").addEventListener("change",e=>{
       else if(data && Array.isArray(data.rows)) rows=data.rows;
       if(!rows){
         if(gotMap){ toast("地図を取り込みました（"+gotMap+"件）"); return; }   // 地図だけ入っていた場合
-        await uiAlert("受付台帳ファイルとして認識できませんでした。PCの受付台帳で「📤 現場用」か「📤 受付台帳」を書き出したファイルを選んでください。"); return;
+        await uiAlert("受付台帳が入っていないファイルです。\n\nPCの受付台帳で「📦 現場用」を押してできる\n「現場用_物件名_日付.json」を選んでください。"); return;
       }
       let n;
       try{ n = receptionSaveRows({ rows, project, exportedAt, appVersion:mainVersion }); }
@@ -2726,6 +2944,8 @@ document.getElementById("btn-reception2").addEventListener("click",openReception
 document.getElementById("btn-map").addEventListener("click",()=>openMapView(M.chosho_mgmt_no));
 document.getElementById("map-close").addEventListener("click",closeMapView);
 document.getElementById("map-all").addEventListener("click",()=>mapFitAll(true));
+document.getElementById("map-zin").addEventListener("click",()=>mapZoomStep(1.7));
+document.getElementById("map-zout").addEventListener("click",()=>mapZoomStep(1/1.7));
 document.getElementById("map-here").addEventListener("click",()=>{
   const hit=mapFindMark(_mapTarget);
   if(!hit) return;
@@ -2767,6 +2987,8 @@ window.addEventListener("pagehide", flushPersist);
     }
   }catch(e){ console.warn("boot draft load failed",e); }
   try{ await mapPackLoad(); }catch(e){ console.warn("boot map load failed",e); }
+  try{ await saveStateLoad(); }catch(_){}
+  setInterval(renderSaveBar, 30000);   // 「◯時◯分に保存」の表示を時々あらため直す
   // 画面を下へ送ったら上部バーを薄くする（入力欄を広く見せる）
   let _lastScrolled=false;
   const onScroll=()=>{
