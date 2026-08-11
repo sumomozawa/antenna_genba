@@ -118,9 +118,10 @@
   .addr-row{display:flex; gap:8px; align-items:stretch;}
   .addr-row input{flex:1; min-width:0;}
   .map-btn{flex:0 0 auto; display:flex; align-items:center; justify-content:center; gap:2px;
-    min-height:48px; padding:0 14px; border-radius:10px; background:var(--green); color:#fff;
-    font-weight:700; font-size:14px; text-decoration:none; white-space:nowrap;}
-  .map-btn.disabled{opacity:.4; pointer-events:none;}
+    min-height:48px; padding:0 14px; border:0; border-radius:10px; background:var(--green); color:#fff;
+    font-family:inherit; font-weight:700; font-size:14px; white-space:nowrap;
+    transition:background var(--t-fast) var(--ease), transform var(--t-fast) var(--ease);}
+  .map-btn:active{transform:scale(.94);}
   /* セグメント（はい/いいえ等の2〜3択を大ボタン化）*/
   .seg{display:flex; gap:6px; flex-wrap:wrap;}
   .seg button{
@@ -266,8 +267,10 @@
   #map-modal .mempty b{color:var(--ink);}
   #map-modal .mempty button{margin-top:14px; background:#00695c; color:#fff; border:0; border-radius:11px;
     padding:15px 20px; font-weight:700; font-size:15px; width:100%;}
+  #map-modal .mempty button.alt{margin-top:9px; background:#eef2f7; color:#0d47a1;}
   /* 地図に載っている戸別は、地図ボタンを目立たせる */
   .footbar .nav button.on-map{background:#00695c; color:#fff;}
+  .addr-row .map-btn.on-map{background:#00695c;}
   header button.ghost.on-map{background:#00897b; color:#fff;}
   /* ---- 動き（スマホで気持ちよく動くように） ---- */
   .sec{transition:box-shadow var(--t-med) var(--ease), border-color var(--t-med) var(--ease);}
@@ -1309,7 +1312,7 @@ const SECTIONS = [
     {id:"chosho_mgmt_no", type:"text", label:"管理番号", req:true, hint:"ファイル名・写真フォルダ名になります（例 245001）"},
     {id:"chosho_date", type:"date", label:"調書日"},
     {id:"chosho_cust_name", type:"text", label:"顧客名"},
-    {id:"chosho_cust_addr", type:"text", label:"住所", mapLink:true, hint:"「地図」で住所を地図アプリで開けます。下のバーの「地図」はPCから取り込んだ図面です"},
+    {id:"chosho_cust_addr", type:"text", label:"住所", mapLink:true, hint:"「地図」は下のバーの「地図」と同じ。PCから取り込んだ図面でこの戸別の場所を見られます（図面が無いときはGoogleマップへ）"},
     {id:"chosho_cust_tel", type:"tel", label:"電話番号"},
     {id:"chosho_status", type:"select", label:"ステータス"},
   ]},
@@ -1554,9 +1557,10 @@ function renderField(f){
     const step = f.type==="num"?` step="0.5" min="0" inputmode="decimal"`:"";
     const inputHtml = `<input type="${t}"${step} data-fld="${f.id}"${f.asb?` data-asb="${f.asb}"`:""} value="${esc(val==null?"":val)}">`;
     if(f.mapLink){
-      const has = !!String(val==null?"":val).trim();
+      // 住所の横の「地図」は、下のバーの「地図」と同じ動き（取り込んだ図面を開く）。
+      // 図面が無いとき／管理番号が図面に無いときは、その場からGoogleマップへ行ける。
       inner = `<div class="addr-row">${inputHtml}`
-        + `<a class="map-btn${has?"":" disabled"}" id="addr-map-link" href="${has?esc(mapUrl(val)):"#"}" target="_blank" rel="noopener">地図</a></div>`;
+        + `<button type="button" class="map-btn" id="addr-map-link">地図</button></div>`;
     } else {
       inner = inputHtml;
     }
@@ -1855,19 +1859,11 @@ function bindEvents(root){
 function onTextInput(id){
   saveDraft();
   updateHeader();
-  if(id==="chosho_cust_addr") updateMapLink(); // 住所入力に追従して地図リンクを更新
 }
 // 住所→Googleマップ（各OSの地図アプリ）URL
 function mapUrl(addr){
   const q = String(addr==null?"":addr).replace(/[\t\r\n]+/g," ").trim();
   return "https://www.google.com/maps/search/?api=1&query=" + encodeURIComponent(q);
-}
-function updateMapLink(){
-  const a = document.getElementById("addr-map-link");
-  if(!a) return;
-  const has = !!String(M.chosho_cust_addr==null?"":M.chosho_cust_addr).trim();
-  if(has){ a.href = mapUrl(M.chosho_cust_addr); a.classList.remove("disabled"); }
-  else { a.href = "#"; a.classList.add("disabled"); }
 }
 // 選択系（ドロップダウンの change／セグメントボタンのクリック）：全体再描画で
 // 「選択中」表示・条件表示（例：外壁材=その他で別欄が出る等）を確実に反映。IME懸念なし。
@@ -2149,14 +2145,12 @@ function mapFindMark(no){
 /* 地図ボタンの見た目（地図に載っている戸別は色を変える） */
 function updateMapBtns(){
   const has = !!_mapPack, hit = has && !!mapFindMark(M.chosho_mgmt_no);
-  ["btn-map"].forEach(id => {
+  ["btn-map", "addr-map-link"].forEach(id => {
     const b = document.getElementById(id); if(!b) return;
     b.classList.toggle("on-map", !!hit);
     b.title = !has ? "PCの地図を取り込むと、この戸別の場所を見られます"
       : (hit ? "この戸別の建物を地図で見る" : "地図を見る（この管理番号は地図に登録されていません）");
   });
-  const a = document.getElementById("addr-map-link");
-  if(a) a.textContent = hit ? "地図" : "地図";
 }
 function openMapView(no){
   _mapTarget = String(no || M.chosho_mgmt_no || "").trim();
@@ -2167,14 +2161,20 @@ function openMapView(no){
   if(!_mapPack){
     stage.innerHTML = "";
     stage.className = "mempty";
+    const addr0 = String(M.chosho_cust_addr == null ? "" : M.chosho_cust_addr).trim();
     stage.innerHTML = '<div>地図がまだ入っていません。<br><br>'
       + 'PCの受付台帳で <b>「📦 現場用」</b> を押すと<br><b class="fname">現場用_物件名_日付.json</b> ができます。<br>'
       + '下のボタンから<b>そのファイル</b>を選んでください。<br>'
       + '<span class="sub">（受付台帳と地図が一緒に入っています）</span>'
-      + '<button id="map-import-btn">現場用_….json を選ぶ</button></div>';
+      + '<button id="map-import-btn">現場用_….json を選ぶ</button>'
+      + (addr0 ? '<button id="map-google-empty" class="alt">住所でGoogleマップを開く</button>' : '')
+      + '</div>';
     bot.style.display = "none";
     document.querySelector("#map-modal .mzoom").style.display = "none";
     document.getElementById("map-import-btn").addEventListener("click", () => document.getElementById("map-file").click());
+    // 図面がまだ無くても、これまで通り住所からGoogleマップへ行けるようにしておく
+    const ge = document.getElementById("map-google-empty");
+    if(ge) ge.addEventListener("click", () => window.open(mapUrl(addr0), "_blank", "noopener"));
     modal.classList.add("open");
     return;
   }
@@ -2942,6 +2942,14 @@ document.getElementById("reception-close").addEventListener("click",closeRecepti
 document.getElementById("btn-reception2").addEventListener("click",openReceptionModal);
 /* --- 地図 --- */
 document.getElementById("btn-map").addEventListener("click",()=>openMapView(M.chosho_mgmt_no));
+/* 住所の横の「地図」も同じ場所を開く。住所欄は入力のたび描き直されるので、
+   個別に付けずに画面全体で拾う（付け直し漏れ・二重登録を防ぐ） */
+document.addEventListener("click",e=>{
+  const b = e.target && e.target.closest && e.target.closest("#addr-map-link");
+  if(!b) return;
+  e.preventDefault();
+  openMapView(M.chosho_mgmt_no);
+});
 document.getElementById("map-close").addEventListener("click",closeMapView);
 document.getElementById("map-all").addEventListener("click",()=>mapFitAll(true));
 document.getElementById("map-zin").addEventListener("click",()=>mapZoomStep(1.7));
