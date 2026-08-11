@@ -2247,11 +2247,25 @@ async function mapImportFile(file){
   let p;
   try { p = JSON.parse(await file.text()); }
   catch(_){ await uiAlert("地図ファイルを読み込めませんでした。"); return; }
+  // 「現場用（ひとまとめ）」なら、受付台帳もここで一緒に取り込む
+  let addedLedger = 0;
+  if(p && p.type === "antenna_genba_set"){
+    if(p.ledger && Array.isArray(p.ledger.rows) && p.ledger.rows.length){
+      try { addedLedger = receptionSaveRows(p.ledger); } catch(_){}
+    }
+    p = p.map || null;
+    if(!p){
+      if(addedLedger){ toast("受付台帳を取り込みました（" + addedLedger + "件）"); return; }
+      await uiAlert("このファイルには地図が入っていません。"); return;
+    }
+  }
   if(!p || p.type !== "antenna_map_pack" || !Array.isArray(p.sheets) || !p.sheets.length){
-    await uiAlert("地図ファイルではありません。\nPCの地図で「現場用に地図を書き出し」したファイルを選んでください。"); return; }
+    await uiAlert("地図ファイルではありません。\nPCの受付台帳で「📤 現場用」、または地図で「現場用に地図を書き出し」したファイルを選んでください。"); return; }
   try { await mapPackSave({ project: p.project || "", exportedAt: p.exportedAt || "", sheets: p.sheets }); }
   catch(e){ await uiAlert("この端末に保存できませんでした（空き容量不足かもしれません）。"); return; }
-  toast("地図を取り込みました（" + (p.markCount || 0) + "件）");
+  toast(addedLedger
+    ? ("受付台帳" + addedLedger + "件と地図を取り込みました")
+    : ("地図を取り込みました（" + (p.markCount || 0) + "件）"));
   openMapView(M.chosho_mgmt_no);
 }
 /* ============================================================================
@@ -2649,34 +2663,57 @@ async function openFromReception(row){
   saveDraft();
   closeReceptionModal(); toast("受付台帳から開きました");
 }
+/* 受付台帳の行をこの端末に保存する。件数を返す。
+   受付台帳ファイル単体からも、現場用（ひとまとめ）からも同じ道を通す。 */
+function receptionSaveRows(src){
+  const rows = (src && src.rows) || [];
+  const norm = rows.map(x=>({
+    mgmt_no:String(x.mgmt_no||x.chosho_mgmt_no||"").trim(),
+    name:String(x.name||x.chosho_cust_name||""),
+    addr:String(x.addr||x.chosho_cust_addr||""),
+    tel:String(x.tel||x.chosho_cust_tel||""),
+    date:String(x.date||x.chosho_date||""),
+    status:String(x.status||x.chosho_status||""),
+    contractor:String(x.contractor||""),
+    hold:!!x.hold,                      // 保留（古い書き出しファイルには無いので false 扱い）
+    note:String(x.note||"")
+  })).filter(x=>x.mgmt_no||x.name||x.addr);
+  localStorage.setItem(LS_RECEPTION, JSON.stringify({ type:"antenna_reception_ledger",
+    importedAt:Date.now(), exportedAt:(src&&src.exportedAt)||"", project:(src&&src.project)||"",
+    mainVersion:(src&&src.appVersion)||"", rows:norm }));
+  try{ renderReceptionList(document.getElementById("reception-search").value||""); }catch(_){}
+  try{ renderAppVer(); }catch(_){}
+  return norm.length;
+}
 document.getElementById("reception-file").addEventListener("change",e=>{
   const f=e.target.files[0]; e.target.value="";
   if(!f) return;
   const r=new FileReader();
   r.onload=async()=>{
     try{
-      const data=JSON.parse(r.result);
-      let rows=null, project="", exportedAt="", mainVersion="";
+      let data=JSON.parse(r.result);
+      let rows=null, project="", exportedAt="", mainVersion="", gotMap=0;
+      // 「現場用（ひとまとめ）」＝受付台帳と地図が1つに入っているファイル。地図も同時に取り込む。
+      if(data && data.type==="antenna_genba_set"){
+        if(data.map && Array.isArray(data.map.sheets) && data.map.sheets.length){
+          try{
+            await mapPackSave({ project:data.map.project||data.project||"", exportedAt:data.map.exportedAt||"", sheets:data.map.sheets });
+            gotMap = data.map.markCount || 0;
+          }catch(_){}
+        }
+        data = data.ledger || {};
+      }
       if(data && data.type==="antenna_reception_ledger" && Array.isArray(data.rows)){ rows=data.rows; project=data.project||""; exportedAt=data.exportedAt||""; mainVersion=data.appVersion||""; }
       else if(Array.isArray(data)) rows=data;
       else if(data && Array.isArray(data.rows)) rows=data.rows;
-      if(!rows){ await uiAlert("受付台帳ファイルとして認識できませんでした。PCの受付台帳で「📤 受付台帳ファイル」を書き出したファイルを選んでください。"); return; }
-      const norm=rows.map(x=>({
-        mgmt_no:String(x.mgmt_no||x.chosho_mgmt_no||"").trim(),
-        name:String(x.name||x.chosho_cust_name||""),
-        addr:String(x.addr||x.chosho_cust_addr||""),
-        tel:String(x.tel||x.chosho_cust_tel||""),
-        date:String(x.date||x.chosho_date||""),
-        status:String(x.status||x.chosho_status||""),
-        contractor:String(x.contractor||""),
-        hold:!!x.hold,                      // 保留（古い書き出しファイルには無いので false 扱い）
-        note:String(x.note||"")
-      })).filter(x=>x.mgmt_no||x.name||x.addr);
-      try{ localStorage.setItem(LS_RECEPTION, JSON.stringify({ type:"antenna_reception_ledger", importedAt:Date.now(), exportedAt, project, mainVersion, rows:norm })); }
+      if(!rows){
+        if(gotMap){ toast("地図を取り込みました（"+gotMap+"件）"); return; }   // 地図だけ入っていた場合
+        await uiAlert("受付台帳ファイルとして認識できませんでした。PCの受付台帳で「📤 現場用」か「📤 受付台帳」を書き出したファイルを選んでください。"); return;
+      }
+      let n;
+      try{ n = receptionSaveRows({ rows, project, exportedAt, appVersion:mainVersion }); }
       catch(err){ await uiAlert("取り込んだ台帳の保存に失敗しました（空き容量不足かも）："+err.message); return; }
-      renderReceptionList(document.getElementById("reception-search").value||"");
-      renderAppVer();   // メイン側の版が分かったので併記を更新
-      toast("受付台帳を取り込みました（"+norm.length+"件）");
+      toast(gotMap ? ("受付台帳"+n+"件と地図を取り込みました") : ("受付台帳を取り込みました（"+n+"件）"));
     }catch(err){ await uiAlert("取込みに失敗しました："+err.message); }
   };
   r.readAsText(f);
