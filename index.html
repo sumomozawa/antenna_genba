@@ -2548,7 +2548,7 @@ function openMapView(no){
   // 開いた直後は全体を映してから、その建物へ寄っていく（どこに居るか分かるように）
   if(hit){
     mapFitAll(false);                  // まず全体。ここは動かさず、そのあと一息おいて寄る
-    setTimeout(() => mapZoomTo(hit.mark), 420);
+    setTimeout(() => mapZoomTo(hit.mark), MAP_ANIM_OPEN_WAIT);
     document.getElementById("map-sub").textContent = _mapPack.sheets[_mapSheetIdx].name || "";
   } else {
     mapFitAll(true);
@@ -2716,6 +2716,11 @@ function mapApply(anim){
    （0.1ずつ足していくように変えると、寄り始めが速すぎて寄り終わりが這うように見える）
    同時に、画面の真ん中に来る図の点も動かすので、建物へ吸い寄せられるように寄っていく。
    CSSのtransitionではこの動きが作れないので、1コマずつ自分で描く。 */
+/* 寄り引きの長さ。ごく短くして、操作のたびに待たされないようにする。
+   （以前は大きく動くほど長くしていたが、寄るたびに時間を取られるので短くそろえた） */
+const MAP_ANIM_MS = 140;         // ふつうの寄り引き
+const MAP_ANIM_MS_MAX = 200;     // うんと大きく動くときでも、これ以上は延ばさない
+const MAP_ANIM_OPEN_WAIT = 120;  // 地図を開いた直後、全体を見せてから寄り始めるまでの間
 let _mapAnim = null;
 function mapAnimStop(){ if(_mapAnim){ cancelAnimationFrame(_mapAnim); _mapAnim = null; } }
 function mapReduceMotion(){
@@ -2737,10 +2742,11 @@ function mapAnimTo(s1, w1, ms){
   const put = (s, wx, wy) => {
     mapView.s = s; mapView.tx = cx - wx * s; mapView.ty = cy - wy * s; mapApply(false);
   };
-  // 寄り引きの大きさと、真ん中がどれだけ動くかで長さを決める（大きく動くときほど、ゆったり）
+  // 寄り引きの大きさと、真ん中がどれだけ動くかで少しだけ長さを変える（ごく短い範囲で）
   const ratio = Math.abs(Math.log(s1 / Math.max(1e-6, s0)));
   const far = Math.hypot(w1.x - w0.x, w1.y - w0.y) / Math.max(1e-6, vb.w);
-  const dur = (ms != null) ? ms : Math.max(420, Math.min(1500, 480 + ratio * 210 + far * 700));
+  const dur = (ms != null) ? ms
+            : Math.min(MAP_ANIM_MS_MAX, MAP_ANIM_MS + ratio * 12 + far * 40);
   if(dur <= 0 || mapReduceMotion()){ put(s1, w1.x, w1.y); return; }
   const t0 = (window.performance && performance.now) ? performance.now() : Date.now();
   const step = now => {
@@ -2797,7 +2803,7 @@ function mapZoomAt(ns, p, anim){
   // p は viewBox 座標。いま p の下にある図の点が、拡大後も p に来るように平行移動を決める
   const tx = p.x - (p.x - mapView.tx) * (ns / mapView.s);
   const ty = p.y - (p.y - mapView.ty) * (ns / mapView.s);
-  if(anim){ mapAnimTo(ns, mapCenterWorld({ s: ns, tx: tx, ty: ty }), 320); return; }
+  if(anim){ mapAnimTo(ns, mapCenterWorld({ s: ns, tx: tx, ty: ty }), MAP_ANIM_MS); return; }
   mapAnimStop();                       // 指で動かしている間は、動いている途中でも即その位置へ
   mapView.tx = tx; mapView.ty = ty; mapView.s = ns;
   mapApply(false);
