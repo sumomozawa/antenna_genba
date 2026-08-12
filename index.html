@@ -153,6 +153,38 @@
   .wire .tg button.new{color:var(--red);} .wire .tg button.exist{color:#333;}
   .wire .tg button.on.new{background:var(--red); color:#fff; border-color:var(--red);}
   .wire .tg button.on.exist{background:#37474f; color:#fff; border-color:#37474f;}
+  /* ---- 工程（下見 → ビラ配り → 工事 → 完了） ----
+     上の帯で「いま何合目か」を見せ、下の行で1つずつ済み／未済を切り替える。 */
+  .flowstrip{display:flex; margin:2px 0 12px;}
+  .flowstrip .fsx{flex:1; position:relative; text-align:center; padding-top:32px;
+    font-size:11px; font-weight:700; color:#9aa3ad;}
+  .flowstrip .fsx .dot{position:absolute; top:0; left:50%; margin-left:-14px; z-index:2;
+    width:28px; height:28px; border-radius:14px; background:#e6eaef; color:#8b95a1;
+    font-size:14px; line-height:28px; font-weight:700;
+    transition:background var(--t-med) var(--ease), color var(--t-med) var(--ease), transform var(--t-med) var(--ease-spring);}
+  .flowstrip .fsx .bar{position:absolute; top:12px; right:50%; width:100%; height:4px; background:#e6eaef; z-index:1;}
+  .flowstrip .fsx:first-child .bar{display:none;}
+  .flowstrip .fsx.on{color:#33404d;}
+  .flowstrip .fsx.on .dot{color:#fff; transform:scale(1.06);}
+  /* 1工程ずつの行。右のボタンを押すと済み／未済が入れ替わる。 */
+  .flowrow{display:flex; align-items:center; gap:10px; padding:10px 2px; border-bottom:1px solid var(--line);}
+  .flowrow:last-child{border-bottom:0;}
+  .flowrow .fr-main{flex:1; min-width:0;}
+  .flowrow .fr-nm{font-size:15px; font-weight:700; color:var(--ink);}
+  .flowrow .fr-at{font-size:11.5px; color:var(--sub); margin-top:2px;}
+  .flowrow .fr-btn{flex:none; min-width:92px; min-height:46px; border-radius:10px; font-family:inherit;
+    border:1.5px solid var(--line); background:#fff; color:#8b95a1; font-weight:700; font-size:13.5px;
+    transition:transform var(--t-fast) var(--ease), background var(--t-med) var(--ease), color var(--t-med) var(--ease);}
+  .flowrow .fr-btn:active{transform:scale(.92);}
+  .flowrow .fr-btn.on{color:#fff; border-color:transparent;}
+  .flowrow.next .fr-nm{color:#b35400;}
+  .flowrow.next .fr-btn{border-color:#ef6c00; color:#ef6c00;}
+  /* 「完了」は同意書と工事完了書の2枚。工程は1つなので、ぶら下げて見せる。 */
+  .flowrow.doc{padding-left:14px; border-bottom:1px dashed var(--line);}
+  .flowrow.doc .fr-nm{font-size:14px; font-weight:600;}
+  .flowrow.doc .fr-nm::before{content:"└ "; color:#9aa3ad; font-weight:400;}
+  .flowhint{font-size:11.5px; color:var(--sub); line-height:1.7; margin-top:10px;
+    background:#f6f8fb; border:1px solid var(--line); border-radius:8px; padding:8px 10px;}
   /* ---- 写真 ---- */
   .photos{display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-top:6px;}
   .photo{border:1px solid var(--line); border-radius:10px; overflow:hidden; background:#fff; position:relative;}
@@ -186,14 +218,28 @@
   .footbar .nav button:disabled{opacity:.45;}
   .footbar .save{flex:1; min-height:56px; font-size:16px; background:var(--accent); color:#fff;
     box-shadow:0 3px 10px rgba(13,71,161,.32);}
-  /* ---- 下見完了（いちばん目立たせる） ---- */
-  .footbar .survey{
+  /* ---- 工程を1つ進めるボタン（いちばん目立たせる） ----
+     下見 → ビラ配り → 工事 → 同意書 → 工事完了書 の「次にやること」を出す。 */
+  .footbar .flow{
     flex:1.5; min-height:56px; font-size:16.5px; letter-spacing:.02em;
     background:linear-gradient(180deg,#ff8f00,#ef6c00); color:#fff;
     box-shadow:0 3px 12px rgba(239,108,0,.42);
     animation:surveyPulse 2.4s var(--ease) infinite;
   }
-  .footbar .survey.done{
+  /* 工程ごとに色を変えて、いま何をする所か色でも分かるようにする */
+  .footbar .flow.st-flyer{
+    background:linear-gradient(180deg,#ab47bc,#7b1fa2);
+    box-shadow:0 3px 12px rgba(123,31,162,.42); animation:none;
+  }
+  .footbar .flow.st-work{
+    background:linear-gradient(180deg,#42a5f5,#1565c0);
+    box-shadow:0 3px 12px rgba(21,101,192,.42); animation:none;
+  }
+  .footbar .flow.st-doc{
+    background:linear-gradient(180deg,#26a69a,#00695c);
+    box-shadow:0 3px 12px rgba(0,105,92,.42); animation:none;
+  }
+  .footbar .flow.done{
     background:linear-gradient(180deg,#2e9e57,#1b7a3d); color:#fff;
     box-shadow:0 3px 10px rgba(27,122,61,.34); animation:none;
   }
@@ -202,15 +248,20 @@
     50%    { box-shadow:0 7px 30px rgba(239,108,0,.9);  filter:brightness(1.12); }
   }
   /* 押して完了になった瞬間は、はっきり跳ねる */
-  .footbar .survey.justdone{ animation:surveyPop .7s var(--ease-spring) both; }
+  .footbar .flow.justdone{ animation:surveyPop .7s var(--ease-spring) both; }
   @keyframes surveyPop{
     0%  { transform:scale(1); }
     35% { transform:scale(1.16) rotate(-1.5deg); }
     100%{ transform:scale(1); }
   }
-  header .surveytag{display:inline-block; margin-left:6px; background:#1b7a3d; color:#fff; font-size:10.5px;
+  header .flowtag{display:inline-block; margin-left:6px; background:#1b7a3d; color:#fff; font-size:10.5px;
     font-weight:700; padding:1px 7px; border-radius:9px; vertical-align:middle;
     animation:tagIn var(--t-med) var(--ease-out) both;}
+  /* いまどこまで進んだか（下見済／ビラ済／工事済／完了）を工程の色で出す */
+  header .flowtag.ph-survey{background:#00838f;}
+  header .flowtag.ph-flyer{background:#7b1fa2;}
+  header .flowtag.ph-work{background:#1565c0;}
+  header .flowtag.ph-done{background:#1b5e20;}
   @keyframes tagIn{ from{ opacity:0; transform:translateY(-4px) scale(.85);} to{ opacity:1; transform:none;} }
   .savedhint{position:fixed; bottom:132px; left:50%; background:#263238; color:#fff; font-size:14px;
     padding:12px 22px; border-radius:24px; opacity:0; z-index:70; pointer-events:none;
@@ -371,6 +422,29 @@
   .draft.rc-surv{background:#e9f6ec; border-left:4px solid #1b7a3d; padding-left:8px;}
   .draft.rc-surv .d-no{color:#1b5e20;}
   .draft.rc-surv .d-open{background:#1b7a3d;}
+  /* いまどこまで進んだか（工程のバッジ）。色は地図の印・工程の帯と合わせる。 */
+  .rc-badge.ph-survey{background:#00838f;}
+  .rc-badge.ph-flyer{background:#7b1fa2;}
+  .rc-badge.ph-work{background:#1565c0;}
+  .rc-badge.ph-done{background:#1b5e20;}
+  /* 下・ビ・工・完 の小さな4つ並び。済んだ工程だけ色が付く。 */
+  .rc-flow{display:inline-flex; gap:3px; margin-right:6px; vertical-align:1px;}
+  .rc-flow i{display:inline-block; width:17px; height:17px; line-height:17px; text-align:center;
+    border-radius:5px; font-size:10px; font-style:normal; font-weight:700;
+    background:#e6eaef; color:#a8b0ba;}
+  .rc-flow i.on{color:#fff;}
+  /* 全部終わった戸別（書類まで受け取った） */
+  .draft.rc-done{background:#e6f4ea; border-left:4px solid #1b5e20; padding-left:8px;}
+  .draft.rc-done .d-no{color:#14501a;}
+  .draft.rc-done .d-open{background:#1b5e20;}
+  /* 受付台帳一覧の「いまの工程で絞る」 */
+  /* 6つ全部が見えるように折り返す（横スクロールだと隠れた分に気付けない） */
+  .rc-filter{display:flex; flex-wrap:wrap; gap:6px; padding:2px 0 10px;}
+  .rc-filter button{flex:none; min-height:38px; padding:0 12px; border-radius:19px; font-family:inherit;
+    border:1.5px solid #cdd3da; background:#fff; color:#5b6673; font-weight:700; font-size:13px;
+    transition:transform var(--t-fast) var(--ease), background var(--t-med) var(--ease), color var(--t-med) var(--ease);}
+  .rc-filter button:active{transform:scale(.93);}
+  .rc-filter button.on{background:var(--accent); border-color:var(--accent); color:#fff;}
   .rc-ph{display:inline-block; margin-left:8px; font-size:11.5px; font-weight:700; color:#00695c;
     background:#e0f2f1; border-radius:9px; padding:1px 8px;}
   /* まだPCに渡していない（戸別ファイルに書き出していない）戸別。
@@ -501,7 +575,7 @@
     <button id="btn-map">地図</button>
   </div>
   <div class="act">
-    <button class="survey" id="btn-survey">下見完了</button>
+    <button class="flow" id="btn-flow">下見 完了</button>
     <button class="save" id="btn-save">保存</button>
   </div>
 </div>
@@ -546,6 +620,7 @@
     <h3>🗒 受付台帳から開く</h3>
     <div class="info">PCの受付台帳で <b>「📦 現場用」</b> を押すと <b class="fname">現場用_物件名_日付.json</b> ができます。下のボタンから<b>そのファイル</b>を選んでください。<br>受付台帳と地図が一緒に入っているので、これ1つで両方そろいます。<br>
     取り込むと下に一覧が出ます。タップすると<b>管理番号・氏名・住所が入った状態</b>で入力を開始できます（同じ管理番号の下書きがあれば続きから開きます）。<b>下見完了にした戸別は緑色</b>になり、撮った写真の枚数も出ます。<br>
+    行の左に出る <b class="rc-flow"><i class="on" style="background:#00838f">下</i><i>ビ</i><i>工</i><i>完</i></b> は<b>工程</b>です（下＝下見／ビ＝ビラ配り／工＝工事／完＝完了＝同意書と工事完了書を受け取った）。<b>上のボタンで「いまやる工程」だけに絞り込め</b>ます。<br>
     <b>備考</b>はPCの受付台帳の備考と同じ欄です。事務所が書いた内容が行に出るので、そのまま直せます。<br>
     行の<b>「地図」</b>を押すと、その戸別の建物を地図で見られます（戸別は開きません。地図を閉じればこの一覧に戻ります）。<br>
     開いてみただけの戸別は、右の<b>「取消」</b>で<b>触っていないことに戻せます</b>（「入力中」の印が消えます）。<br>
@@ -556,6 +631,7 @@
     <button id="btn-reception-import" style="width:100%; padding:15px; border:0; border-radius:11px; background:#00695c; color:#fff; font-weight:700; font-size:15px; margin-bottom:10px;">現場用_….json を選ぶ</button>
     <input type="file" id="reception-file" accept=".json,application/json,*/*" style="display:none;">
     <input type="search" id="reception-search" placeholder="管理番号・氏名・住所で絞り込み" style="width:100%; box-sizing:border-box; padding:11px 12px; border:1px solid #cdd3da; border-radius:10px; font-size:15px; margin-bottom:10px;">
+    <div class="rc-filter" id="reception-filter"></div>
     <div id="reception-meta" class="info" style="display:none;"></div>
     <div id="reception-list"></div>
     <button class="closebtn" id="reception-close">閉じる</button>
@@ -655,7 +731,12 @@ const DEFAULTS = {
   line_booster:"yes",hpf:"hpf_std",outer_splitter:"sp_2cw",indoor_split:"unknown",split_all_pass:"no",
   power_pos:"tv_back",indoor_wire:"existing",outer_wire:"existing",tv_count:"4",
   remove_safety:"yes",remove_drop:"yes",cable_drop_len:"20",dummy_attached:"yes",use_fa:"yes",meas_show:"yes",
+  // 現場の流れ（下見 → ビラ配り → 工事 → 完了）。詳しくは FLOW_STEPS の説明を見てください。
   survey_done:false,survey_done_at:"",
+  flyer_done:false,flyer_done_at:"",
+  work_done:false,work_done_at:"",
+  consent_received:false,consent_received_at:"",
+  compdoc_received:false,compdoc_received_at:"",
   cable_new_len:"0",cable_main_len:"5",cable_ch46_len:"5",cable_ch50_len:"5",cable_amp_next_len:"10",
   cable_indoor_new:"2",cable_vvf_len:"5",cable_s5cfb_power:"5",ext_power_conn:"splitter_2",
   att_main:"no",att_46:"no",att_50:"no",box_consent:"no",ofmu_qty:"0",wire_sus16_len:"0",
@@ -686,7 +767,7 @@ const GENBA_SCHEMA_VER = 1;
    （PC側で「現場入力アプリの版」を確認でき、メインとの食い違いに気付ける）。
    ★更新したらこの2行を書き換える。 */
 const APP_NAME_SHORT = "現場入力";
-const APP_VERSION = "2026.07.27";
+const APP_VERSION = "2026.08.12";
 function photoContentId(dataUri){
   if(!dataUri || typeof dataUri !== "string") return "";
   let a = 5381, b = 0;
@@ -712,6 +793,8 @@ const GENBA_KNOWN_KEYS = new Set([
   "att_main","att_46","att_50","box_consent","ofmu_qty","wire_sus16_len",
   "chosho_mgmt_no","chosho_date","chosho_cust_name","chosho_cust_addr","chosho_cust_tel","chosho_status",
   "chosho_note","survey_done","survey_done_at",
+  "flyer_done","flyer_done_at","work_done","work_done_at",
+  "consent_received","consent_received_at","compdoc_received","compdoc_received_at",
   "tax_mode","misc_fee","outsource_fee_on","outsource_fee_amount","outsource_fee_auto",
   "tv_rooms","tv_bd","tv_sp","tv_term",
   "wire_overrides","qty_overrides","node_offsets","meas_transforms","node_existing_overrides",
@@ -758,6 +841,100 @@ function syncTvArrays(m){
     term.push((m.tv_term&&m.tv_term[i])||"");
   }
   m.tv_rooms=rooms; m.tv_bd=bd; m.tv_sp=sp; m.tv_term=term;
+}
+
+/* ============================================================================
+   2.5) 現場の流れ（下見 → ビラ配り → 工事 → 完了）
+   ----------------------------------------------------------------------------
+   現場は1軒につき、この順で回ります。
+
+       ① 下見       … 見て測って、材料を決める
+       ② ビラ配り   … 工事のお知らせを配る
+       ③ 工事       … 実際に取り付ける
+       ④ 完了       … 同意書と工事完了書を受け取る（書類が2枚なので押す所も2つ）
+
+   どこまで済んだかを戸別ごとに持ち、下のボタン・「🚩 工程」の欄・受付台帳の一覧・
+   地図の印の4か所で同じ内容を出します。
+
+   PC（メイン）側の受付台帳との対応
+       下見       survey_done        →（PCの「🧰 発注材料数量」の集計対象）
+       ビラ配り   flyer_done         → 受付台帳の「ビラ」
+       工事       work_done          → 受付台帳の「完了」（＝工事完了。状態も completed になる）
+       同意書     consent_received   → 受付台帳の「承諾書」
+       工事完了書 compdoc_received   → 受付台帳の「完了書」
+
+   ※ 順番どおりでない押し方（下見より先にビラ等）も止めません。現場は前後することが
+      あるので、「前が済んでいません」と一言聞いてから通します。
+   ============================================================================ */
+const FLOW_STEPS = [
+  { key:"survey", flag:"survey_done", at:"survey_done_at", ch:"下", phase:"survey",
+    name:"下見", btn:"下見 完了", tone:"",
+    ask:"この戸別の下見を完了にします。\n\nいまの入力内容で材料が確定し、PC側の「🧰 発注材料数量」の集計に入ります。\n（あとから取り消せます）",
+    undo:"下見完了の印を取り消しますか？\n（PC側の発注材料数量の集計から外れます）",
+    hint:"この戸別の下見が終わったら押してください。PC側の「発注材料数量」で、この戸別の材料が集計に入ります。" },
+  { key:"flyer", flag:"flyer_done", at:"flyer_done_at", ch:"ビ", phase:"flyer",
+    name:"ビラ配り", btn:"ビラ配り 完了", tone:"st-flyer",
+    ask:"この戸別のビラ配りを済みにします。\n\nPCの受付台帳の「ビラ」に○が付きます。\n（あとから取り消せます）",
+    undo:"ビラ配りの印を取り消しますか？\n（PCの受付台帳の「ビラ」の○が外れます）",
+    hint:"工事のお知らせを配り終えたら押してください。PCの受付台帳の「ビラ」と同じ印です。" },
+  { key:"work", flag:"work_done", at:"work_done_at", ch:"工", phase:"work",
+    name:"工事", btn:"工事 完了", tone:"st-work",
+    ask:"この戸別の工事を完了にします。\n\nPCの受付台帳の「完了」に○が付き、ステータスも「完了」になります。\n（あとから取り消せます）",
+    undo:"工事完了の印を取り消しますか？\n（PCの受付台帳の「完了」の○が外れ、ステータスは「未完了」に戻ります）",
+    hint:"取り付けが終わったら押してください。PCの受付台帳の「完了」と同じ印です。" },
+  { key:"consent", flag:"consent_received", at:"consent_received_at", ch:"同", phase:"done", doc:true,
+    name:"同意書 受取", btn:"同意書 受取", tone:"st-doc",
+    ask:"同意書を受け取ったことにします。\n\nPCの受付台帳の「承諾書」に○が付きます。\n（あとから取り消せます）",
+    undo:"同意書 受取の印を取り消しますか？\n（PCの受付台帳の「承諾書」の○が外れます）",
+    hint:"同意書（PCの受付台帳では「承諾書」）を受け取ったら押してください。" },
+  { key:"compdoc", flag:"compdoc_received", at:"compdoc_received_at", ch:"完", phase:"done", doc:true,
+    name:"工事完了書 受取", btn:"工事完了書 受取", tone:"st-doc",
+    ask:"工事完了書を受け取ったことにします。\n\nPCの受付台帳の「完了書」に○が付きます。\n（あとから取り消せます）",
+    undo:"工事完了書 受取の印を取り消しますか？\n（PCの受付台帳の「完了書」の○が外れます）",
+    hint:"工事完了書（PCの受付台帳では「完了書」）を受け取ったら押してください。" },
+];
+/* 画面に出す4つの工程。「完了」だけは書類2枚（同意書・工事完了書）でひとまとまり。 */
+const FLOW_PHASES = [
+  { key:"survey", ch:"下", name:"下見",     badge:"下見済", color:"#00838f" },
+  { key:"flyer",  ch:"ビ", name:"ビラ配り", badge:"ビラ済", color:"#7b1fa2" },
+  { key:"work",   ch:"工", name:"工事",     badge:"工事済", color:"#1565c0" },
+  { key:"done",   ch:"完", name:"完了",     badge:"完了",   color:"#1b5e20" },
+];
+function flowStep(key){ for(const s of FLOW_STEPS){ if(s.key===key) return s; } return null; }
+function flowStepsOfPhase(pk){ return FLOW_STEPS.filter(s=>s.phase===pk); }
+/* 済んだ工程を { survey:true, ... } の形で取り出す。model でも、下書き一覧の控えでも使える。 */
+function flowOf(m){
+  const o={};
+  FLOW_STEPS.forEach(s=>{ o[s.key] = !!(m && m[s.flag]); });
+  return o;
+}
+function flowPhaseDone(f, pk){
+  const list=flowStepsOfPhase(pk);
+  return list.length>0 && list.every(s=>!!(f && f[s.key]));
+}
+function flowAny(f){ return FLOW_STEPS.some(s=>!!(f && f[s.key])); }
+/* いちばん先まで進んだ工程（穴が空いていても、進んだ所を出す） */
+function flowTopPhase(f){
+  let top=null;
+  FLOW_PHASES.forEach(ph=>{ if(flowPhaseDone(f, ph.key)) top=ph; });
+  return top;
+}
+/* 次にやること（上から順に、まだ済んでいない最初の1つ）。全部済んでいれば null */
+function flowNextStep(f){
+  for(const s of FLOW_STEPS){ if(!f || !f[s.key]) return s; }
+  return null;
+}
+/* その工程より前で、まだ済んでいないもの（「前が済んでいません」と知らせる用） */
+function flowPrevUndone(f, key){
+  const out=[];
+  for(const s of FLOW_STEPS){ if(s.key===key) break; if(!f || !f[s.key]) out.push(s); }
+  return out;
+}
+/* 2026-08-12T09:03:00.000Z → 8/12（一覧・工程の欄に小さく出す） */
+function flowWhen(iso){
+  const s=String(iso||""); if(!s) return "";
+  const m=/^(\d{4})-(\d{2})-(\d{2})/.exec(s);
+  return m ? (parseInt(m[2],10)+"/"+parseInt(m[3],10)) : "";
 }
 
 /* ==ANTENNA-GUIDE-CORE START (編集元はindex.html。ENDまでを現場入力.htmlへ逐語コピー) == */
@@ -1378,6 +1555,8 @@ function syncTvArrays(m){
 // type: seg(2-3択ボタン) / select / num / text / date / tel
 // show: (m)=>bool  条件表示
 const SECTIONS = [
+  // 現場の流れ（下見→ビラ配り→工事→完了）。いちばん上・最初から開いた状態にする。
+  { id:"flow", ico:"🚩", title:"工程", open:true, fields:[{custom:"flow"}] },
   { id:"chosho", ico:"📋", title:"調書・顧客", open:true, fields:[
     {id:"chosho_mgmt_no", type:"text", label:"管理番号", req:true, hint:"ファイル名・写真フォルダ名になります（例 245001）"},
     {id:"chosho_date", type:"date", label:"工事予定日",
@@ -1385,7 +1564,8 @@ const SECTIONS = [
     {id:"chosho_cust_name", type:"text", label:"顧客名"},
     {id:"chosho_cust_addr", type:"text", label:"住所", mapLink:true, hint:"「地図」は下のバーの「地図」と同じ。PCから取り込んだ図面でこの戸別の場所を見られます（図面が無いときはGoogleマップへ）"},
     {id:"chosho_cust_tel", type:"tel", label:"電話番号"},
-    {id:"chosho_status", type:"select", label:"ステータス"},
+    {id:"chosho_status", type:"select", label:"ステータス",
+     hint:"上の「🚩 工程」で工事を済みにすると、ここも自動で「完了」になります（PCの受付台帳の「完了」と同じ欄です）"},
     {id:"chosho_note", type:"area", label:"備考", rows:4,
      ph:"例）留守。奥様に電話済み／庭に犬あり／隣家の許可が必要",
      hint:"PCの受付台帳の「備考」と同じ欄です。取り込んだ時の内容が入っていて、ここで直すと「保存」→PCの取込でPC側の備考も同じ内容になります"},
@@ -1603,6 +1783,11 @@ function autoReflectGuideToModel(guide){
   }
 }
 function secBadge(sec){
+  if(sec.id==="flow"){
+    const ph=flowTopPhase(flowOf(M));
+    return ph ? `<span class="badge" style="background:${ph.color};color:#fff;">${esc(ph.badge)}</span>`
+              : `<span class="badge">未着手</span>`;
+  }
   if(sec.id==="photos"){ return `<span class="badge">${M.chosho_photos.length}枚</span>`; }
   if(sec.id==="tv"){ return `<span class="badge">${M.tv_count}台</span>`; }
   if(sec.id==="chosho" && M.chosho_mgmt_no){ return `<span class="badge">${esc(M.chosho_mgmt_no)}</span>`; }
@@ -1610,6 +1795,7 @@ function secBadge(sec){
 }
 function renderField(f){
   if(f.sub) return `<div class="subhdr">${f.sub}</div>`;
+  if(f.custom==="flow") return `<div id="flowbox">${renderFlow()}</div>`;
   if(f.custom==="tvrows") return `<div id="tvrows">${renderTvRows()}</div>`;
   if(f.custom==="wires") return renderWires();
   if(f.custom==="photos") return renderPhotos();
@@ -1644,6 +1830,54 @@ function renderField(f){
   }
   const agCls = (!f.asb && f.id && guideFilledFields.has(f.id)) ? " ag-filled" : ""; // ガイド自動入力欄は別色
   return `<div class="fld${f.req?" req":""}${agCls}"><label>${esc(f.label)}</label>${inner}${f.hint?`<div class="hint">${esc(f.hint)}</div>`:""}</div>`;
+}
+
+// ---- 工程（下見 → ビラ配り → 工事 → 完了）----
+// 上の帯で「いま何合目か」、下の行で1つずつ済み／未済を切り替える。
+function renderFlow(){
+  const f = flowOf(M);
+  const next = flowNextStep(f);
+  const NUM = ["①","②","③","④"];
+  let strip = '<div class="flowstrip">';
+  FLOW_PHASES.forEach(ph=>{
+    const on = flowPhaseDone(f, ph.key);
+    const col = on ? (' style="background:'+ph.color+'"') : "";
+    strip += '<div class="fsx'+(on?" on":"")+'">'
+      + '<span class="bar"'+col+'></span><span class="dot"'+col+'>'+ph.ch+'</span>'
+      + esc(ph.name)+'</div>';
+  });
+  strip += '</div>';
+  // 1工程ぶんの行（右のボタンで済み／未済が入れ替わる）
+  const rowOf = (s, ph, num) => {
+    const on = !!f[s.key];
+    const isNext = !!(next && next.key===s.key);
+    const when = on ? flowWhen(M[s.at]) : "";
+    const sub = on ? ("済" + (when?("　"+when):"")) : (isNext ? "次はここ" : "まだ");
+    return '<div class="flowrow'+(s.doc?" doc":"")+((isNext&&!on)?" next":"")+'">'
+      + '<div class="fr-main"><div class="fr-nm">'+esc((num?num+" ":"")+s.name)+'</div>'
+      + '<div class="fr-at">'+esc(sub)+'</div></div>'
+      + '<button type="button" class="fr-btn'+(on?" on":"")+'" data-flowstep="'+esc(s.key)+'"'
+      + (on?(' style="background:'+ph.color+'"'):'')
+      + ' title="'+esc(s.hint)+'">'+(on?"済 ✓":"済にする")+'</button></div>';
+  };
+  let rows = "";
+  FLOW_PHASES.forEach((ph, i)=>{
+    const steps = flowStepsOfPhase(ph.key);
+    if(steps.length===1 && !steps[0].doc){ rows += rowOf(steps[0], ph, NUM[i]); return; }
+    // 「完了」は書類2枚でひとまとまり。まず見出しの行を出して、その下に2枚をぶら下げる。
+    const on = flowPhaseDone(f, ph.key);
+    rows += '<div class="flowrow">'
+      + '<div class="fr-main"><div class="fr-nm">'+esc(NUM[i]+" "+ph.name)+'</div>'
+      + '<div class="fr-at">'+(on?"同意書・工事完了書をどちらも受け取りました":"下の2つがそろうと完了です")+'</div></div>'
+      + '<span class="fr-btn'+(on?" on":"")+'" style="'+(on?("background:"+ph.color+";"):"")
+      + 'display:flex; align-items:center; justify-content:center;">'+(on?"完了":"まだ")+'</span></div>';
+    steps.forEach(s=>{ rows += rowOf(s, ph, ""); });
+  });
+  return strip + rows
+    + '<div class="flowhint">下見 → ビラ配り → 工事 → 完了 の順に進みます。'
+    + '下のバーの<b>オレンジのボタン</b>でも、次の工程をひとつずつ進められます。<br>'
+    + '「完了」は<b>同意書と工事完了書の両方</b>を受け取った状態です。<br>'
+    + 'PCの受付台帳では、ビラ配り＝「ビラ」／工事＝「完了」／同意書＝「承諾書」／工事完了書＝「完了書」の欄になります。</div>';
 }
 
 // ---- TV各室 ----
@@ -1882,6 +2116,10 @@ function bindEvents(root){
       });
     });
   });
+  // 工程（下見・ビラ配り・工事・同意書・工事完了書）の済み／未済
+  root.querySelectorAll("[data-flowstep]").forEach(b=>b.addEventListener("click",()=>{
+    flowToggle(b.getAttribute("data-flowstep"));
+  }));
   // TV行
   root.querySelectorAll("[data-room]").forEach(el=>el.addEventListener("change",()=>{ M.tv_rooms[+el.getAttribute("data-room")]=el.value; saveDraft(); refreshWires(); }));
   root.querySelectorAll("[data-bd]").forEach(el=>el.addEventListener("change",()=>{ M.tv_bd[+el.getAttribute("data-bd")]=el.checked; saveDraft(); }));
@@ -1964,43 +2202,74 @@ function updateHeader(){
   const el=document.getElementById("hdr-mgmt");
   el.textContent = M.chosho_mgmt_no || "管理番号 未入力";
   el.classList.toggle("empty", !M.chosho_mgmt_no);
-  if(M.survey_done){
+  // どこまで進んだか（下見済／ビラ済／工事済／完了）を管理番号の右に出す
+  const ph = flowTopPhase(flowOf(M));
+  if(ph){
     const tag=document.createElement("span");
-    tag.className="surveytag";
-    tag.textContent="下見完了";
+    tag.className="flowtag ph-"+ph.key;
+    tag.textContent=ph.badge;
     el.appendChild(tag);
   }
-  updateSurveyBtn();
+  updateFlowBtn();
   try{ updateMapBtns(); }catch(_){}
 }
-/* 下見完了のボタン。押すと「この戸別の下見は終わった」という印が付き、
-   PC側（メイン）の「発注材料数量」で、この戸別ぶんの材料が集計に入る。 */
-function updateSurveyBtn(){
-  const b=document.getElementById("btn-survey");
+/* 下のバーの大きなボタン。「次にやること」を出し、押すとその工程を1つ進める。
+   下見 → ビラ配り → 工事 → 同意書 → 工事完了書 の順。全部済むと緑の「完了 済」になる。
+   （やり直し・順番の入れ替えは、上の「🚩 工程」の欄から） */
+function updateFlowBtn(){
+  const b=document.getElementById("btn-flow");
   if(!b) return;
-  b.classList.toggle("done", !!M.survey_done);
-  b.textContent = M.survey_done ? "下見 済" : "下見完了";
-  b.title = M.survey_done
-    ? "この戸別は下見完了になっています。押すと取り消せます。"
-    : "この戸別の下見が終わったら押してください。PC側の「発注材料数量」で、この戸別の材料が集計に入ります。";
+  const f=flowOf(M);
+  const nx=flowNextStep(f);
+  b.classList.remove("st-flyer","st-work","st-doc","done");
+  if(!nx){
+    b.classList.add("done");
+    b.textContent="完了 済";
+    b.title="この戸別は下見からビラ配り・工事・書類の受取まで、全部終わっています。直すときは上の「🚩 工程」から。";
+    return;
+  }
+  if(nx.tone) b.classList.add(nx.tone);
+  b.textContent=nx.btn;
+  b.title=nx.hint;
 }
-async function toggleSurveyDone(){
-  if(M.survey_done){
-    if(!(await uiConfirm("下見完了の印を取り消しますか？\n（PC側の発注材料数量の集計から外れます）"))) return;
-    M.survey_done=false; M.survey_done_at="";
-    toast("下見完了を取り消しました");
+/* 下のバーのボタン：次の工程を1つ進める */
+async function flowAdvance(){
+  const nx=flowNextStep(flowOf(M));
+  if(!nx){ await uiAlert("この戸別は全部終わっています。\n\n直すときは、上の「🚩 工程」の欄から取り消してください。"); return; }
+  await flowToggle(nx.key);
+}
+/* 工程ひとつの済み／未済を入れ替える。
+   ・順番どおりでなくても止めない（現場は前後する）。前が済んでいなければ一言聞く。
+   ・工事は、PCの受付台帳の「完了」＝ステータス completed と同じものなので、一緒に動かす。 */
+async function flowToggle(key){
+  const s=flowStep(key); if(!s) return;
+  const f=flowOf(M);
+  const on=!!f[key];
+  if(on){
+    if(!(await uiConfirm(s.undo))) return;
+    M[s.flag]=false; M[s.at]="";
+    if(key==="work" && M.chosho_status==="completed") M.chosho_status="in_progress";
+    toast(s.name+"の印を取り消しました");
   } else {
-    if(!M.chosho_mgmt_no){
+    if(key==="survey" && !String(M.chosho_mgmt_no||"").trim()){
       if(!(await uiConfirm("管理番号が未入力です。このまま下見完了にしますか？\n（PC側で戸別を見分けにくくなります）"))) return;
     }
-    if(!(await uiConfirm("この戸別の下見を完了にします。\n\nいまの入力内容で材料が確定し、PC側の「🧰 発注材料数量」の集計に入ります。\n（あとから取り消せます）"))) return;
-    M.survey_done=true; M.survey_done_at=new Date().toISOString();
-    const b=document.getElementById("btn-survey");
+    const back=flowPrevUndone(f, key);
+    if(back.length){
+      if(!(await uiConfirm("まだ済んでいない工程があります。\n\n"
+          + back.map(x=>"・"+x.name).join("\n")
+          + "\n\nこのまま「"+s.name+"」を済みにしますか？"))) return;
+    }
+    if(!(await uiConfirm(s.ask))) return;
+    M[s.flag]=true; M[s.at]=new Date().toISOString();
+    if(key==="work") M.chosho_status="completed";
+    const b=document.getElementById("btn-flow");
     if(b){ b.classList.remove("justdone"); void b.offsetWidth; b.classList.add("justdone");
            setTimeout(()=>b.classList.remove("justdone"),800); }
-    toast("下見完了にしました");
+    toast(flowNextStep(flowOf(M)) ? (s.name+"を済みにしました") : "🎉 完了しました（下見〜書類の受取まで）");
   }
   saveDraft();
+  render();   // 工程の欄・ステータス欄・見出しをまとめて出し直す
 }
 
 /* ============================================================================
@@ -2172,9 +2441,13 @@ function buildState(){
   });
   s.asbestos=Object.assign({},M.asbestos);
   s.antenna_guide=JSON.parse(JSON.stringify(M.antenna_guide||{ver:1,pattern:null,parts:{}}));
-  // 下見完了の印（PC側の「🧰 発注材料数量」がこの印を見て集計する）
-  s.survey_done=!!M.survey_done;
-  s.survey_done_at=String(M.survey_done_at||"");
+  // 現場の流れ（下見 → ビラ配り → 工事 → 完了）の印。
+  // ・下見完了 … PC側の「🧰 発注材料数量」がこの印を見て集計する
+  // ・ビラ／工事／同意書／工事完了書 … PC側が受付台帳の「ビラ・完了・承諾書・完了書」に取り込む
+  FLOW_STEPS.forEach(st=>{
+    s[st.flag] = !!M[st.flag];
+    s[st.at]   = String(M[st.at]||"");
+  });
   // 取込んだ戸別JSONの未知トップレベルキー（PC側の ag_placement 等）をそのまま復元（往復での欠落防止）。
   if(M._passthrough && typeof M._passthrough==="object"){
     for(const k in M._passthrough){ if(!(k in s)) s[k]=M._passthrough[k]; }
@@ -2288,16 +2561,19 @@ function openMapView(no){
 function closeMapView(){ document.getElementById("map-modal").classList.remove("open"); }
 
 /* ---- 地図に出す状態の印 ----
-   PCの地図と同じ流儀で、建物の上に 保／下／完／未 を出す。
-   ・下（下見済み）は、この端末で下見完了にしたかどうか＝下書きから見る
-   ・保・完・未 は、取り込んだ受付台帳の行から見る
+   建物の上に 保／下／ビ／工／完／未 を出す。工程の色は「🚩 工程」の帯と同じ。
+   ・下・ビ・工・完（工程）は、この端末の下書きが最優先。まだ開いていない戸別は
+     取り込んだ受付台帳の行から見る（PCで既にビラ済・完了になっていれば、それが出る）。
+   ・保・未 は受付台帳の行から見る
    図面に焼き込まれた印ではなく、その場で重ねて描くので、
-   下見完了を押した直後から地図に出る。 */
+   工程を押した直後から地図に出る。 */
 const MAPMK = [
   { key:"hold",   ch:"保", color:"#e65100", label:"保留",   def:true  },
   { key:"surv",   ch:"下", color:"#00838f", label:"下見済", def:true  },
-  { key:"done",   ch:"完", color:"#2e7d32", label:"完了",   def:true  },
-  { key:"undone", ch:"未", color:"#1565c0", label:"未完了", def:false },
+  { key:"flyer",  ch:"ビ", color:"#7b1fa2", label:"ビラ済", def:true  },
+  { key:"work",   ch:"工", color:"#1565c0", label:"工事済", def:true  },
+  { key:"done",   ch:"完", color:"#1b5e20", label:"完了（書類まで）", def:true  },
+  { key:"undone", ch:"未", color:"#90a4ae", label:"未完了", def:false },
 ];
 const _mapMkOn = {};
 MAPMK.forEach(m => {
@@ -2320,14 +2596,15 @@ function mapMarksFor(no){
   no = String(no || "").trim();
   if(!no) return out;
   const row = (_mapRowIdx || {})[no];
-  if(_mapMkOn.hold && row && row.hold) out.push(MAPMK[0]);
-  if(_mapMkOn.surv){
-    const info = draftInfoOf(no);                 // いま開いている戸別は M を優先して見てくれる
-    if(info && info.done) out.push(MAPMK[1]);
-  }
-  const st = String((row && row.status) || "");
-  if(_mapMkOn.done && st === "completed") out.push(MAPMK[2]);
-  if(_mapMkOn.undone && st === "in_progress") out.push(MAPMK[3]);   // 仮受付は工事前なので付けない
+  const push = k => { const d = MAPMK.find(x => x.key === k); if(d && _mapMkOn[k]) out.push(d); };
+  const f = rowFlowOf(row || { mgmt_no: no });    // いま開いている戸別は M を優先して見てくれる
+  if(row && row.hold) push("hold");
+  if(flowPhaseDone(f, "survey")) push("surv");
+  if(flowPhaseDone(f, "flyer"))  push("flyer");
+  if(flowPhaseDone(f, "work"))   push("work");
+  if(flowPhaseDone(f, "done"))   push("done");
+  // 「未」は、まだ工事が終わっていない受付済みの戸別だけ（仮受付は工事前なので付けない）
+  else if(!flowPhaseDone(f, "work") && String((row && row.status) || "") === "in_progress") push("undone");
   return out;
 }
 /* 図面の上に印を重ねる。建物の大きさに合わせた文字の大きさで、右肩に並べる。 */
@@ -2842,10 +3119,10 @@ function _recHasContent(rec){
 }
 async function persistDraft(){
   try{
-    // 中身の無い下書き（管理番号も入力も写真も下見完了印も無い）は保存しない。
+    // 中身の無い下書き（管理番号も入力も写真も工程の印も無い）は保存しない。
     // ※ draftKey() より前に返すこと。draftKey() は一時IDを採番してしまうため。
     if(!String(M.chosho_mgmt_no||"").trim() && M._touched !== true
-       && !(M.chosho_photos||[]).length && !M.survey_done) return;
+       && !(M.chosho_photos||[]).length && !flowAny(flowOf(M))) return;
     const wantKey=draftKey();
     const prev=await idbGet(wantKey);
     // 管理番号衝突ガード：このキーの下書きを今まさに編集しているのでなく（別番号から移動 or 新規で既存番号入力）、
@@ -2873,7 +3150,7 @@ async function persistDraft(){
     }
     const rec={ key, model:M, savedAt:Date.now(), fileSavedAt:(cur&&cur.fileSavedAt)||0,
       mgmt:M.chosho_mgmt_no||"", cust:M.chosho_cust_name||"", photos:(M.chosho_photos||[]).length,
-      surveyDone:!!M.survey_done, touched:(M._touched!==false), sig,
+      surveyDone:!!M.survey_done, flow:flowOf(M), touched:(M._touched!==false), sig,
       rev:(M._rev|0), fileRev:(cur&&cur.fileRev)|0 };
     await idbPut(rec);
     localStorage.setItem(LS_LAST, key);
@@ -2895,7 +3172,7 @@ async function persistModel(m){
     m._touched=true; m._rev=(m._rev|0)+1;          // 写真やCSVが入った＝中身が変わった
     await idbPut({ key, model:m, savedAt:Date.now(), fileSavedAt:(prev&&prev.fileSavedAt)||0,
       mgmt:m.chosho_mgmt_no||"", cust:m.chosho_cust_name||"", photos:(m.chosho_photos||[]).length,
-      surveyDone:!!m.survey_done, touched:true, sig:stateSig(m),
+      surveyDone:!!m.survey_done, flow:flowOf(m), touched:true, sig:stateSig(m),
       rev:(m._rev|0), fileRev:(prev&&prev.fileRev)|0 });
   }catch(e){ console.warn("persistModel failed",e); }
 }
@@ -2983,14 +3260,46 @@ function receptionApplyToModel(m, row){
   set("chosho_cust_tel",  "tel",  false);
   set("chosho_date",      "date", true);   // 工事予定日はPCの台帳のもの。空にできないと直せない
   if(!String(m.chosho_note || "").trim() && row.note){ m.chosho_note = String(row.note); changed = true; }
+  // 工程（ビラ・工事・同意書・工事完了書）も同じ考え方で入れ直す。
+  // 下見だけはPCの受付台帳に無い（現場だけの印）ので触らない。
+  const rf = receptionFlowOf(row);
+  const sf = src ? receptionFlowOf(src) : null;
+  ["flyer", "work", "consent", "compdoc"].forEach(k => {
+    const st = flowStep(k); if(!st) return;
+    const v = !!rf[k], cur = !!m[st.flag];
+    if(cur === v) return;
+    if(sf){
+      if(!!sf[k] === v) return;      // 台帳は変わっていない＝現場が直した
+    } else if(!v){
+      return;                        // 控えが無い時は、○を消さない
+    }
+    m[st.flag] = v;
+    if(!v) m[st.at] = "";
+    // 工事はPCの「完了」＝ステータス completed と同じもの。一緒に動かす。
+    if(k === "work"){
+      if(v) m.chosho_status = "completed";
+      else if(m.chosho_status === "completed") m.chosho_status = "in_progress";
+    }
+    changed = true;
+  });
   m._rcSrc = rcSrcOf(row);
   return changed;
+}
+/* 受付台帳の行が持っている工程。ビラ・承諾書・完了書はPCの台帳が持ち主で、
+   工事は「状態＝完了」がその印（PCの受付台帳の「完了」列と同じ）。 */
+function receptionFlowOf(row){
+  return { flyer:   !!(row && row.flyer),
+           work:    String((row && row.status) || "") === "completed",
+           consent: !!(row && row.consent),
+           compdoc: !!(row && row.compdoc) };
 }
 /* いま台帳から受け取った内容の控え（次に「PCが直したか」を見分けるための基準） */
 function rcSrcOf(row){
   return { name:String((row&&row.name)||""), addr:String((row&&row.addr)||""),
            tel:String((row&&row.tel)||""),   date:String((row&&row.date)||""),
-           note:String((row&&row.note)||"") };
+           note:String((row&&row.note)||""),
+           flyer:!!(row&&row.flyer), consent:!!(row&&row.consent), compdoc:!!(row&&row.compdoc),
+           status:String((row&&row.status)||"") };
 }
 /* 管理番号のある下書きすべて（保存済みも含む）。「全部保存し直す」の対象。 */
 function allDraftTargets(){
@@ -3208,14 +3517,14 @@ function receptionRerender(){
 }
 /* 「開いただけ（まだ何も入力していない）」の下書きか */
 function isOpenedOnly(info){
-  return !!(info && info.has && !info.done && handoverOf(info) === "");
+  return !!(info && info.has && !flowAny(info.flow) && handoverOf(info) === "");
 }
 /* 1件を「触っていないことにする」 */
 async function untouchCase(row){
   if(!row) return;
   const no = String(row.mgmt_no||"").trim();
   const info = draftInfoOf(no);
-  if(!no || !info || !info.has || info.done) return;    // 対象は「入力中」の戸別だけ
+  if(!no || !info || !info.has || flowAny(info.flow)) return;   // 対象は「入力中」（工程がまだ1つも進んでいない）戸別だけ
   const who = no + (row.name ? ("　" + row.name) : "");
   const lost = [];
   if(info.photos) lost.push("写真" + info.photos + "枚");
@@ -3269,11 +3578,14 @@ async function openDraftModal(){
       const ts=`${t.getMonth()+1}/${t.getDate()} ${String(t.getHours()).padStart(2,"0")}:${String(t.getMinutes()).padStart(2,"0")}`;
       // 💾=JSON書出済で以後未編集 ／ ✏️=書出後に変更あり(再書出推奨) ／ 無印=未書出
       const badge = (d.fileSavedAt && d.fileSavedAt >= (d.savedAt||0)) ? "💾 " : (d.fileSavedAt ? "✏️ " : "");
-      return `<div class="draft">
+      // どこまで進んだか（下・ビ・工・完）。控えの無い古い下書きは中身から作る。
+      const f = (d.flow && typeof d.flow === "object") ? d.flow : flowOf(d.model||{});
+      const top = flowTopPhase(f);
+      return `<div class="draft${flowPhaseDone(f,"done")?" rc-done":(flowPhaseDone(f,"survey")?" rc-surv":"")}">
         <input type="checkbox" class="d-check" data-draftcheck="${esc(d.key)}">
         <div class="d-main" data-draftopen="${esc(d.key)}">
-          <div class="d-no">${badge}${esc(d.mgmt||"（番号なし）")}${d.cust?(" ／ "+esc(d.cust)):""}</div>
-          <div class="d-sub">更新 ${ts}・写真${d.photos||0}枚</div>
+          <div class="d-no">${flowDotsHtml(f)}${badge}${esc(d.mgmt||"（番号なし）")}${d.cust?(" ／ "+esc(d.cust)):""}</div>
+          <div class="d-sub">${top?(esc(top.badge)+"・"):""}更新 ${ts}・写真${d.photos||0}枚</div>
         </div>
         <button class="d-open" data-draftopen="${esc(d.key)}">開く</button>
       </div>`;
@@ -3363,7 +3675,7 @@ async function newCase(){
   toast("新規を作成しました");
 }
 document.getElementById("btn-save").addEventListener("click",saveJson);
-document.getElementById("btn-survey").addEventListener("click",toggleSurveyDone);
+document.getElementById("btn-flow").addEventListener("click",flowAdvance);
 document.getElementById("btn-save-top").addEventListener("click",saveJson);
 document.getElementById("btn-new").addEventListener("click",newCase);
 document.getElementById("btn-list2").addEventListener("click",openDraftModal);
@@ -3389,8 +3701,9 @@ function renderAppVer(){
 function openReceptionModal(){
   document.getElementById("reception-modal").classList.add("open");
   const s=document.getElementById("reception-search"); if(s) s.value="";
+  renderReceptionFilter();                       // 工程の絞り込みボタン
   renderReceptionList("");                       // まず今ある情報ですぐ出す
-  refreshDraftInfo().then(()=>{                  // 下見の状況を取り直して出し直す
+  refreshDraftInfo().then(()=>{                  // 工程の状況を取り直して出し直す
     const sv=document.getElementById("reception-search");
     renderReceptionList(sv?sv.value:"");
   });
@@ -3410,7 +3723,9 @@ async function refreshDraftInfo(){
       const done = (rec.surveyDone !== undefined) ? !!rec.surveyDone : !!(rec.model && rec.model.survey_done);
       const ph = (typeof rec.photos === "number") ? rec.photos
                : ((rec.model && rec.model.chosho_photos) ? rec.model.chosho_photos.length : 0);
-      map[no] = { done, photos: ph, has: true, touched: (rec.touched !== false),
+      // 工程（下見・ビラ・工事・同意書・工事完了書）。控えの無い古い下書きは中身から作る。
+      const flow = (rec.flow && typeof rec.flow === "object") ? rec.flow : flowOf(rec.model || {});
+      map[no] = { done, flow, photos: ph, has: true, touched: (rec.touched !== false),
                   fileAt: rec.fileSavedAt || 0, savedAt: rec.savedAt || 0,
                   rev: rec.rev | 0, fileRev: rec.fileRev | 0 };
     });
@@ -3421,14 +3736,14 @@ async function refreshDraftInfo(){
 function draftInfoOf(no){
   no = String(no||"").trim();
   if(no && no === String(M.chosho_mgmt_no||"").trim()){
-    return { done: !!M.survey_done, photos: (M.chosho_photos||[]).length, has: true,
+    return { done: !!M.survey_done, flow: flowOf(M), photos: (M.chosho_photos||[]).length, has: true,
              touched: (M._touched !== false),
              fileAt: _save.fileAt, stale: !!(saveStale() || _save.dirty) };
   }
   const d = _draftInfo[no];
   if(!d) return null;
   // 古い下書き（回数を持たない）は 0>0 で false ＝「保存済み」扱い。次に直せば 1>0 で変更ありになる。
-  return { done: d.done, photos: d.photos, has: true, touched: d.touched, fileAt: d.fileAt,
+  return { done: d.done, flow: d.flow, photos: d.photos, has: true, touched: d.touched, fileAt: d.fileAt,
            stale: !!(d.fileAt && (d.rev|0) > (d.fileRev|0)) };
 }
 /* この戸別をPCに渡せているか。
@@ -3437,9 +3752,49 @@ function draftInfoOf(no){
 function handoverOf(info){
   if(!info || !info.has) return "";
   // 台帳から開いただけ（まだ何も入力していない）は、渡すものが無いので何も出さない
-  if(!info.touched && !info.photos && !info.done && !info.fileAt) return "";
+  if(!info.touched && !info.photos && !flowAny(info.flow) && !info.fileAt) return "";
   if(!info.fileAt) return "none";
   return info.stale ? "stale" : "ok";
+}
+/* ---- 一覧を「いまの工程」で絞る ----
+   下見の日／ビラ配りの日／工事の日…と、その日にやる戸別だけを出せるようにする。
+   選んだ絞り込みはこの端末に覚えておく（次に開いた時も同じ絞り込みで出る）。 */
+const RC_FILTERS = [
+  { key:"all",    label:"すべて",   hit:()=>true },
+  { key:"survey", label:"下見待ち", hit:f=>!flowPhaseDone(f,"survey") },
+  { key:"flyer",  label:"ビラ待ち", hit:f=>!flowPhaseDone(f,"flyer") },
+  { key:"work",   label:"工事待ち", hit:f=>!flowPhaseDone(f,"work") },
+  { key:"doc",    label:"書類待ち", hit:f=>!flowPhaseDone(f,"done") },
+  { key:"done",   label:"完了",     hit:f=>flowPhaseDone(f,"done") },
+];
+const LS_RCFILTER = "field_reception_filter_v1";
+let _rcFilter = (()=>{ try{ const v=localStorage.getItem(LS_RCFILTER);
+  return RC_FILTERS.some(x=>x.key===v) ? v : "all"; }catch(_){ return "all"; } })();
+function rcFilterDef(){ return RC_FILTERS.find(x=>x.key===_rcFilter) || RC_FILTERS[0]; }
+function renderReceptionFilter(){
+  const host=document.getElementById("reception-filter"); if(!host) return;
+  host.innerHTML = RC_FILTERS.map(x =>
+    '<button type="button" data-rcf="'+esc(x.key)+'" class="'+(_rcFilter===x.key?"on":"")+'">'+esc(x.label)+"</button>").join("");
+  host.querySelectorAll("[data-rcf]").forEach(b=>b.addEventListener("click",()=>{
+    _rcFilter = b.getAttribute("data-rcf");
+    try{ localStorage.setItem(LS_RCFILTER, _rcFilter); }catch(_){}
+    renderReceptionFilter();
+    receptionRerender();
+  }));
+}
+/* 一覧の1行の工程。この端末の下書きが最優先で、まだ開いていない戸別はPCの受付台帳の行から作る。 */
+function rowFlowOf(row){
+  const info = draftInfoOf(row && row.mgmt_no);
+  if(info && info.flow) return info.flow;
+  const rf = receptionFlowOf(row);
+  return { survey:false, flyer:rf.flyer, work:rf.work, consent:rf.consent, compdoc:rf.compdoc };
+}
+/* 行の左に出す「下・ビ・工・完」の4つ並び。済んだ工程だけ色が付く。 */
+function flowDotsHtml(f){
+  return '<span class="rc-flow">' + FLOW_PHASES.map(ph=>{
+    const on = flowPhaseDone(f, ph.key);
+    return '<i class="'+(on?"on":"")+'"'+(on?(' style="background:'+ph.color+'"'):'')+' title="'+esc(ph.name)+'">'+ph.ch+"</i>";
+  }).join("") + "</span>";
 }
 function renderReceptionList(q){
   const host=document.getElementById("reception-list"); if(!host) return;
@@ -3456,8 +3811,20 @@ function renderReceptionList(q){
   }
   if(!rows.length){ host.innerHTML=`<div class="info" style="text-align:center">受付台帳はまだ取り込まれていません。<br>上のボタンから <b class="fname">現場用_….json</b> を選んでください。</div>`; return; }
   const kw=(q||"").trim().toLowerCase();
-  const filtered=kw ? rows.filter(r=>((r.mgmt_no||"")+" "+(r.name||"")+" "+(r.addr||"")+" "+(r.tel||"")).toLowerCase().includes(kw)) : rows;
-  if(!filtered.length){ host.innerHTML=`<div class="info" style="text-align:center">該当なし</div>`; return; }
+  const byKw=kw ? rows.filter(r=>((r.mgmt_no||"")+" "+(r.name||"")+" "+(r.addr||"")+" "+(r.tel||"")).toLowerCase().includes(kw)) : rows;
+  // いまの工程で絞る（「今日はビラ配り」の日に、ビラの済んでいない戸別だけ出す）
+  const flt=rcFilterDef();
+  const filtered=(flt.key==="all") ? byKw : byKw.filter(r=>flt.hit(rowFlowOf(r)));
+  // いま何件出しているか（絞り込んでいる時は、絞り込みの名前も添える）
+  if(meta && meta.style.display!=="none" && flt.key!=="all"){
+    meta.textContent += "／" + flt.label + " " + filtered.length + "件";
+  }
+  if(!filtered.length){
+    host.innerHTML=`<div class="info" style="text-align:center">該当なし`
+      + (flt.key!=="all" ? `<br><b>「${esc(flt.label)}」で絞り込んでいます。</b><br>上の<b>「すべて」</b>を押すと全部出ます。` : "")
+      + `</div>`;
+    return;
+  }
   // 「まだPCに渡していない戸別」の数。ここで数えないと、書き出し忘れがそのまま埋もれる。
   const notHanded = unsavedTargets().length;
   const dirName = saveDirName();
@@ -3491,13 +3858,15 @@ function renderReceptionList(q){
     const idx=rows.indexOf(r);
     const info=draftInfoOf(r.mgmt_no);
     const sub=[r.addr, r.date?("予定 "+r.date):"", r.contractor].filter(Boolean).map(esc).join("・");
-    const badge = r.status==="completed" ? '<span class="rc-badge done">完了</span>'
-                : r.status==="provisional" ? '<span class="rc-badge prov">仮</span>' : '';
-    // 保留は状態（完了/仮）とは別枠。PCで保留にした戸別は現場でも一目で分かるようにする
+    const badge = r.status==="provisional" ? '<span class="rc-badge prov">仮</span>' : '';
+    // 保留は工程とは別枠。PCで保留にした戸別は現場でも一目で分かるようにする
     const hold = r.hold ? '<span class="rc-badge hold">保留</span>' : '';
-    // この端末で下見を終えた戸別は、行ごと色を変えて一目で分かるようにする
-    const surv = (info&&info.done) ? '<span class="rc-badge surv">下見済</span>' : '';
-    const started = (info&&!info.done&&info.has) ? '<span class="rc-badge open">入力中</span>' : '';
+    // いまどこまで進んだか。下・ビ・工・完 の4つ並び＋いちばん進んだ工程のバッジ。
+    const rf = rowFlowOf(r);
+    const top = flowTopPhase(rf);
+    const dots = flowDotsHtml(rf);
+    const phase = top ? `<span class="rc-badge ph-${top.key}">${esc(top.badge)}</span>` : '';
+    const started = (info&&info.has&&!flowAny(rf)) ? '<span class="rc-badge open">入力中</span>' : '';
     const ph = (info&&info.photos) ? ('<span class="rc-ph">写真'+info.photos+'枚</span>') : '';
     // 戸別ファイルに書き出したか。写真以外はこの書き出しでしかPCへ渡らないので、一覧にも出す。
     const hand = handoverOf(info);
@@ -3505,12 +3874,14 @@ function renderReceptionList(q){
     const fileNote = hand==="none" ? '<span class="rc-file ng">まだ保存していません</span>'
                    : hand==="stale" ? '<span class="rc-file ng">保存後に変更あり</span>'
                    : hand==="ok" ? ('<span class="rc-file ok">保存済 '+esc(_hhmm(info.fileAt))+'</span>') : '';
-    const cls = (info&&info.done) ? " rc-surv" : (r.hold ? " rc-hold" : "");
+    const cls = flowPhaseDone(rf,"done") ? " rc-done"
+              : flowPhaseDone(rf,"survey") ? " rc-surv"
+              : (r.hold ? " rc-hold" : "");
     // 備考はPCと共通の欄。事務所が書いた内容を現場でも読めるように行に出す。
     const note = String(r.note||"").replace(/\s+/g," ").trim();
     const noteHtml = note ? `<div class="rc-note">${esc(note)}</div>` : "";
     // 「入力中」の戸別は、触っていないことにして取り込み直後の状態へ戻せる
-    const canUndo = !!(info && info.has && !info.done);
+    const canUndo = !!(info && info.has && !flowAny(rf));
     // 一覧からそのまま地図へ飛べる（戸別は開かない。地図を閉じればこの一覧に戻る）
     const onMap = !!(_mapPack && mapFindMark(r.mgmt_no));
     const mapBtn = _mapPack
@@ -3523,9 +3894,10 @@ function renderReceptionList(q){
         + (canUndo ? `<button class="d-undo" data-recundo="${idx}">取消</button>` : "")
         + `</div>`
       : "";
-    const act = `<div class="d-act"><button class="d-open" data-recopen="${idx}">${(info&&info.done)?"見直す":"開く"}</button>${act2}</div>`;
+    // この端末で工程を進めた戸別だけ「見直す」（PCの台帳で済んでいるだけの戸別は「開く」）
+    const act = `<div class="d-act"><button class="d-open" data-recopen="${idx}">${(info&&flowAny(info.flow))?"見直す":"開く"}</button>${act2}</div>`;
     return `<div class="draft${cls}${unsaved?" rc-unsaved":""}"><div class="d-main" data-recopen="${idx}">
-      <div class="d-no">${surv}${started}${unsaved}${hold}${badge}${esc(r.mgmt_no||"（番号なし）")}${r.name?(" ／ "+esc(r.name)):""}</div>
+      <div class="d-no">${dots}${phase}${started}${unsaved}${hold}${badge}${esc(r.mgmt_no||"（番号なし）")}${r.name?(" ／ "+esc(r.name)):""}</div>
       <div class="d-sub">${sub}${ph}${fileNote}</div>${noteHtml}</div>${act}</div>`;
   }).join("");
   const sa = document.getElementById("rc-saveall");
@@ -3572,6 +3944,14 @@ async function openFromReception(row){
   m.chosho_cust_addr=row.addr||"";
   m.chosho_cust_tel=row.tel||"";
   if(row.date) m.chosho_date=row.date;
+  if(row.status) m.chosho_status=String(row.status);
+  // PCの受付台帳で既に済んでいる工程（ビラ・工事・承諾書・完了書）を引き継ぐ。
+  // いつ済んだかは台帳に無いので、日付は空のまま（画面には「済」とだけ出る）。
+  { const rf=receptionFlowOf(row);
+    ["flyer","work","consent","compdoc"].forEach(k=>{
+      if(!rf[k]) return;
+      const st=flowStep(k); if(st) m[st.flag]=true;
+    }); }
   if(mgmt){ delete m._draftId; m._lastDraftKey="no:"+mgmt; }
   if(row.note) m.chosho_note = String(row.note);  // 備考はPCと共通の欄。台帳の内容から始める
   m._rcSrc = rcSrcOf(row);                        // 次に「PCが直したか」を見分けるための控え
@@ -3595,6 +3975,10 @@ function receptionSaveRows(src){
     status:String(x.status||x.chosho_status||""),
     contractor:String(x.contractor||""),
     hold:!!x.hold,                      // 保留（古い書き出しファイルには無いので false 扱い）
+    // 工程（PCの受付台帳が持っている分）。古い書き出しファイルには無いので false 扱い。
+    flyer:!!x.flyer,                    // ビラ配布済み
+    consent:!!x.consent,                // 承諾書（現場では「同意書」）受領済み
+    compdoc:!!x.compdoc,                // 完了書（現場では「工事完了書」）受領済み
     note:String(x.note||"")
   })).filter(x=>x.mgmt_no||x.name||x.addr);
   localStorage.setItem(LS_RECEPTION, JSON.stringify({ type:"antenna_reception_ledger",
@@ -3688,6 +4072,7 @@ window.addEventListener("pagehide", flushPersist);
 (async function boot(){
   M=freshModel(); render();  // まず即描画（IDB読込を待たせない）
   try{ renderAppVer(); }catch(_){}   // 画面下部の版表記
+  try{ renderReceptionFilter(); }catch(_){}   // 受付台帳の「工程で絞る」ボタン（地図から台帳を入れた時にも出るように）
   try{
     const lastKey=localStorage.getItem(LS_LAST);
     if(lastKey){
