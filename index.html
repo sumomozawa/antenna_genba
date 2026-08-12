@@ -290,7 +290,9 @@
     background-repeat:no-repeat; background-position:right 9px center;}
   #map-stage{flex:1; position:relative; overflow:hidden; background:#fff; touch-action:none; overscroll-behavior:none;}
   /* 拡大縮小のボタン（つまむ操作が苦手でも押すだけで寄れる） */
-  #map-modal .mzoom{position:absolute; right:12px; bottom:96px; display:flex; flex-direction:column; gap:10px; z-index:5;}
+  #map-modal .mzoom{position:absolute; right:12px; bottom:96px; display:flex; flex-direction:column; gap:10px; z-index:5;
+    transition:bottom var(--t-med) var(--ease);}
+  /* 拡大縮小のボタンの高さは mapLayoutZoom() が下の帯の高さから決める（重ならないように） */
   #map-modal .mzoom button{
     width:56px; height:56px; border-radius:28px; border:0; background:rgba(255,255,255,.96);
     color:var(--accent); font-size:28px; font-weight:700; line-height:1;
@@ -315,6 +317,35 @@
   #map-modal .mchips .mkchip-bg{margin-right:8px;}
   #map-modal .mchips .mkchip-bg.on{background:#455a64; border-color:#455a64; color:#fff;}
   #map-modal .mchips .mkchip:active{transform:scale(.92);}
+  /* 地図で建物をタップしたときに出る詳細（下から出て、そのまま入力へ入れる） */
+  #map-modal .mcard{
+    background:#fff; border-top:1px solid var(--line); padding:10px 12px 8px;
+    box-shadow:0 -6px 18px rgba(20,30,45,.10);
+    animation:mcardIn .16s var(--ease-out) both;
+  }
+  @keyframes mcardIn{ from{ opacity:0; transform:translateY(10px);} to{ opacity:1; transform:none;} }
+  #map-modal .mcard-h{display:flex; align-items:center; gap:8px; margin-bottom:2px;}
+  #map-modal .mcard-no{font-size:17px; font-weight:800; color:var(--ink); letter-spacing:.2px;}
+  #map-modal .mcard-nm{font-size:15px; font-weight:700; color:var(--ink); flex:1 1 auto;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  #map-modal .mcard-x{flex:none; width:34px; height:34px; border:0; border-radius:9px;
+    background:#eef2f7; color:var(--sub); font-size:15px; font-weight:700;}
+  #map-modal .mcard-sub{font-size:12.5px; color:var(--sub); line-height:1.65;}
+  #map-modal .mcard-note{margin-top:4px; font-size:12.5px; color:#5b4a1f; background:#fff8e1;
+    border:1px solid #ffe0a3; border-radius:8px; padding:5px 8px; line-height:1.6;
+    max-height:66px; overflow:auto;}
+  #map-modal .mcard-row{display:flex; align-items:center; gap:8px; margin-top:7px;}
+  #map-modal .mcard-open{flex:1 1 auto; min-height:48px; border:0; border-radius:11px;
+    background:var(--accent); color:#fff; font-weight:700; font-size:15px; font-family:inherit;
+    transition:transform var(--t-fast) var(--ease);}
+  #map-modal .mcard-open:active{transform:scale(.96);}
+  #map-modal .mcard-tel{flex:none; min-height:48px; padding:0 14px; border:0; border-radius:11px;
+    background:#eef2f7; color:var(--accent); font-weight:700; font-size:14px; font-family:inherit;
+    text-decoration:none; display:flex; align-items:center;}
+  #map-modal .mcard-miss{font-size:12.5px; color:var(--warn); font-weight:700;}
+  /* タップで選んだ建物の枠 */
+  #map-svg #map-sel{fill:none; stroke:#0d47a1; stroke-width:2.5; vector-effect:non-scaling-stroke;
+    stroke-dasharray:5 3; animation:hlPulse 1.6s var(--ease) infinite;}
   #map-modal .mbot{
     display:flex; gap:8px; padding:8px 10px calc(env(safe-area-inset-bottom) + 8px);
     background:rgba(255,255,255,.95); border-top:1px solid var(--line);
@@ -608,6 +639,7 @@
     <button id="map-zout" aria-label="縮小">−</button>
   </div>
   <div class="mchips" id="map-chips"></div>
+  <div id="map-card"></div>
   <div class="mbot" id="map-bot">
     <button id="map-here" class="pri">この家</button>
     <button id="map-all">全体</button>
@@ -2533,6 +2565,7 @@ function updateMapBtns(){
 }
 function openMapView(no){
   _mapTarget = String(no || M.chosho_mgmt_no || "").trim();
+  mapSelect(null);                    // 前に開いたときの選択は持ち越さない
   const modal = document.getElementById("map-modal");
   const stage = document.getElementById("map-stage");
   const bot = document.getElementById("map-bot");
@@ -2577,7 +2610,12 @@ function openMapView(no){
   document.getElementById("map-here").disabled = !hit;
   document.getElementById("map-here").style.opacity = hit ? "1" : ".45";
 }
-function closeMapView(){ document.getElementById("map-modal").classList.remove("open"); }
+function closeMapView(){
+  _mapSel = null;
+  const c = document.getElementById("map-card"); if(c) c.innerHTML = "";
+  const m = document.getElementById("map-modal");
+  m.classList.remove("has-card"); m.classList.remove("open");
+}
 
 /* ---- 地図に出す状態の印 ----
    建物の上に 保／下／ビ／工／完／未 を出す。工程の色は「🚩 工程」の帯と同じ。
@@ -2712,6 +2750,8 @@ function mapRenderSheet(){
     + '<g id="map-vp">' + bg + sh.svg + hl + "</g></svg>";
   mapThinStrokes(vb);                 // 線を細くしてから
   mapRefreshMarks();                  // 印を重ねる（細くする処理に巻き込まれないよう後で足す）
+  mapSelLayer();                      // 選んでいる建物の枠も出し直す
+  mapLayoutZoom();                    // 拡大縮小のボタンを下の帯の上へ
   renderMapMarkChips();
   // 図面が2枚以上ある物件は切り替えられるようにする
   const sel = document.getElementById("map-sheet");
@@ -2855,6 +2895,103 @@ function mapZoomStep(mul){
 }
 /* 指の操作：1本でなぞる＝移動、2本でつまむ＝その間を中心に拡大縮小、
    素早く2回叩く＝叩いた場所を中心に拡大。 */
+/* ---- 地図で建物をタップしたときの詳細 ----
+   タップした点に重なっている建物を探し、その管理番号の中身（名前・住所・電話・
+   工事予定・工程・備考）を下に出す。「この戸別を開く」で入力へ入れる。
+   いきなり切り替えず一度見せるのは、地図をなぞっている途中の指の当たりで
+   別の戸別へ飛んでしまわないようにするため。 */
+let _mapSel = null;                 // いま選んでいる管理番号
+/* 画面の点に重なっている建物を探す。重なっていたら小さい方（より細かい方）を採る。 */
+function mapHitAt(clientX, clientY){
+  if(!_mapPack) return null;
+  const sh = _mapPack.sheets[_mapSheetIdx]; if(!sh || !sh.marks) return null;
+  const p = mapPt(clientX, clientY);
+  const wx = (p.x - mapView.tx) / mapView.s, wy = (p.y - mapView.ty) / mapView.s;
+  let best = null;
+  Object.keys(sh.marks).forEach(no => {
+    const m = sh.marks[no]; if(!m) return;
+    const hw = Math.abs(m.w) / 2, hh = Math.abs(m.h) / 2;
+    if(Math.abs(wx - m.cx) > hw || Math.abs(wy - m.cy) > hh) return;
+    const area = hw * hh;
+    if(!best || area < best.area) best = { no: no, mark: m, area: area };
+  });
+  return best;
+}
+/* 選んだ建物に枠を出す（工程の印と同じで、図面には焼き込まずその場で重ねる） */
+function mapSelLayer(){
+  const vp = document.getElementById("map-vp"); if(!vp) return;
+  const old = document.getElementById("map-sel"); if(old) old.remove();
+  if(!_mapSel || !_mapPack) return;
+  const sh = _mapPack.sheets[_mapSheetIdx];
+  const m = sh && sh.marks && sh.marks[_mapSel]; if(!m) return;
+  const pad = Math.min(Math.abs(m.w), Math.abs(m.h)) * 0.14;
+  vp.insertAdjacentHTML("beforeend",
+    '<rect id="map-sel" x="' + (m.cx - m.w / 2 - pad) + '" y="' + (m.cy - m.h / 2 - pad)
+    + '" width="' + (Math.abs(m.w) + pad * 2) + '" height="' + (Math.abs(m.h) + pad * 2)
+    + '" rx="' + (Math.min(Math.abs(m.w), Math.abs(m.h)) * 0.16) + '"></rect>');
+}
+/* 選んだ建物の詳細を下に出す。受付台帳に無い番号でも、番号だけで始められるようにする。 */
+function renderMapCard(){
+  const host = document.getElementById("map-card"); if(!host) return;
+  const modal = document.getElementById("map-modal");
+  if(!_mapSel){ host.innerHTML = ""; if(modal) modal.classList.remove("has-card"); return; }
+  if(modal) modal.classList.add("has-card");
+  const no = _mapSel;
+  const row = (mapRowIndex() || {})[no] || null;
+  const f = rowFlowOf(row || { mgmt_no: no });
+  const top = flowTopPhase(f);
+  const sub = row
+    ? [row.addr, row.date ? ("予定 " + row.date) : "", row.contractor].filter(Boolean).map(esc).join("・")
+    : "";
+  const badges = row
+    ? ((row.status === "provisional" ? '<span class="rc-badge prov">仮</span>' : "")
+       + (row.hold ? '<span class="rc-badge hold">保留</span>' : "")
+       + (top ? '<span class="rc-badge ph-' + top.key + '">' + esc(top.badge) + "</span>" : ""))
+    : "";
+  const note = row ? String(row.note || "").replace(/\s+/g, " ").trim() : "";
+  const tel = row ? String(row.tel || "").trim() : "";
+  host.innerHTML = '<div class="mcard">'
+    + '<div class="mcard-h"><span class="mcard-no">' + esc(no) + "</span>"
+    +   '<span class="mcard-nm">' + esc(row ? (row.name || "") : "") + "</span>"
+    +   '<button type="button" class="mcard-x" id="mcard-x" aria-label="閉じる">✕</button></div>'
+    + (row
+        ? ('<div class="mcard-sub">' + flowDotsHtml(f) + " " + badges + (sub ? ("<br>" + sub) : "") + "</div>")
+        : '<div class="mcard-miss">受付台帳にこの番号がありません（番号だけで始められます）</div>')
+    + (note ? ('<div class="mcard-note">' + esc(note) + "</div>") : "")
+    + '<div class="mcard-row">'
+    +   '<button type="button" class="mcard-open" id="mcard-open">この戸別を開く</button>'
+    +   (tel ? ('<a class="mcard-tel" href="tel:' + esc(tel.replace(/[^0-9+\-]/g, "")) + '">📞 電話</a>') : "")
+    + "</div></div>";
+  const x = document.getElementById("mcard-x");
+  if(x) x.addEventListener("click", () => mapSelect(null));
+  const op = document.getElementById("mcard-open");
+  if(op) op.addEventListener("click", async () => {
+    const r = row || { mgmt_no: no };
+    if(r.hold && !await uiConfirm("この戸別はPCの受付台帳で【保留】になっています。\n\n"
+        + (r.mgmt_no || "（番号なし）") + (r.name ? ("　" + r.name) : "") + "\n\n入力を開始しますか？")) return;
+    mapSelect(null);
+    closeMapView();
+    await openFromReception(r);      // 下書きがあれば続きから、無ければ台帳の値で新規
+  });
+}
+/* 拡大縮小のボタンを、下の帯（印のチップ・詳細・ボタン）の上へ置く。
+   詳細の高さは中身（備考の有無）で変わるので、そのつど測って決める。 */
+function mapLayoutZoom(){
+  const z = document.querySelector("#map-modal .mzoom"); if(!z) return;
+  let h = 0;
+  ["map-chips", "map-card", "map-bot"].forEach(id => {
+    const el = document.getElementById(id);
+    if(el && el.offsetParent !== null) h += el.offsetHeight;
+  });
+  z.style.bottom = (h + 14) + "px";
+}
+/* 選び直す（null で選択を外す） */
+function mapSelect(no){
+  _mapSel = no || null;
+  mapSelLayer();
+  renderMapCard();
+  mapLayoutZoom();
+}
 function mapBindGestures(){
   const stage = document.getElementById("map-stage");
   if(!stage || stage._bound) return;
@@ -2911,10 +3048,17 @@ function mapBindGestures(){
     }
   });
   const up = e => {
+    const wasOne = (pts.size === 1);
     pts.delete(e.pointerId);
     if(pts.size < 2) pinch = null;
     last = pts.size ? [...pts.values()][0] : null;
     if(moved > 12){ lastTap = 0; lastTapPt = null; }   // なぞった後は2回叩き扱いにしない
+    // 指1本で軽く叩いたら、そこに建物があれば選ぶ（無ければ選択を外す）。
+    // 見せるだけなので、2回叩いての拡大とぶつかっても困らない。
+    if(wasOne && !pts.size && moved <= 12){
+      const hit = mapHitAt(e.clientX, e.clientY);
+      mapSelect(hit ? hit.no : null);
+    }
   };
   stage.addEventListener("pointerup", up);
   stage.addEventListener("pointercancel", up);
@@ -4182,6 +4326,7 @@ document.getElementById("map-google").addEventListener("click",()=>{
 });
 document.getElementById("map-sheet").addEventListener("change",function(){
   _mapSheetIdx=parseInt(this.value,10)||0;
+  mapSelect(null);                    // 図面が変われば選んでいた建物も外す
   mapRenderSheet(); mapFitAll(true);
   document.getElementById("map-sub").textContent=_mapPack.sheets[_mapSheetIdx].name||"";
 });
