@@ -311,6 +311,9 @@
     color:#7b8794; border-radius:9px; font-weight:700; font-size:14px; font-family:inherit;
     transition:transform var(--t-fast) var(--ease), background var(--t-fast) var(--ease);}
   #map-modal .mchips .mkchip.on{color:#fff;}
+  /* 下地の表示切替。工程の印とは役割が違うので、色を分けて少し離す */
+  #map-modal .mchips .mkchip-bg{margin-right:8px;}
+  #map-modal .mchips .mkchip-bg.on{background:#455a64; border-color:#455a64; color:#fff;}
   #map-modal .mchips .mkchip:active{transform:scale(.92);}
   #map-modal .mbot{
     display:flex; gap:8px; padding:8px 10px calc(env(safe-area-inset-bottom) + 8px);
@@ -445,6 +448,15 @@
     transition:transform var(--t-fast) var(--ease), background var(--t-med) var(--ease), color var(--t-med) var(--ease);}
   .rc-filter button:active{transform:scale(.93);}
   .rc-filter button.on{background:var(--accent); border-color:var(--accent); color:#fff;}
+  /* 並び替え（絞り込みの下に置く小さな一列） */
+  .rc-sort{display:flex; align-items:center; gap:6px; padding:0 0 10px; font-size:12.5px; color:var(--sub);}
+  .rc-sort select{flex:1 1 auto; min-width:0; min-height:38px; padding:0 10px; border:1.5px solid #cdd3da;
+    border-radius:10px; background:#fff; color:var(--ink); font-family:inherit; font-size:13.5px; font-weight:700;}
+  .rc-sort button{flex:none; min-width:44px; min-height:38px; border-radius:10px; font-family:inherit;
+    border:1.5px solid #cdd3da; background:#fff; color:#5b6673; font-weight:700; font-size:14px;
+    transition:transform var(--t-fast) var(--ease), background var(--t-med) var(--ease), color var(--t-med) var(--ease);}
+  .rc-sort button:active{transform:scale(.93);}
+  .rc-sort button.on{background:var(--accent); border-color:var(--accent); color:#fff;}
   .rc-ph{display:inline-block; margin-left:8px; font-size:11.5px; font-weight:700; color:#00695c;
     background:#e0f2f1; border-radius:9px; padding:1px 8px;}
   /* まだPCに渡していない（戸別ファイルに書き出していない）戸別。
@@ -632,6 +644,11 @@
     <input type="file" id="reception-file" accept=".json,application/json,*/*" style="display:none;">
     <input type="search" id="reception-search" placeholder="管理番号・氏名・住所で絞り込み" style="width:100%; box-sizing:border-box; padding:11px 12px; border:1px solid #cdd3da; border-radius:10px; font-size:15px; margin-bottom:10px;">
     <div class="rc-filter" id="reception-filter"></div>
+    <div class="rc-sort" id="reception-sort-bar" style="display:none;">
+      <span>並び</span>
+      <select id="reception-sort"></select>
+      <button type="button" id="reception-sortdir" title="小さい順・大きい順を入れ替えます">↑</button>
+    </div>
     <div id="reception-meta" class="info" style="display:none;"></div>
     <div id="reception-list"></div>
     <button class="closebtn" id="reception-close">閉じる</button>
@@ -2575,6 +2592,9 @@ const MAPMK = [
   { key:"done",   ch:"完", color:"#1b5e20", label:"完了（書類まで）", def:true  },
   { key:"undone", ch:"未", color:"#90a4ae", label:"未完了", def:false },
 ];
+/* 下地（PCで登録した住宅地図など）を出すかどうか。印が見えにくいときは消せる。 */
+const LS_MAPBG = "field_map_bg_v1";
+let _mapBgOn = (()=>{ try{ return localStorage.getItem(LS_MAPBG) !== "0"; }catch(_){ return true; } })();
 const _mapMkOn = {};
 MAPMK.forEach(m => {
   _mapMkOn[m.key] = m.def;
@@ -2635,10 +2655,22 @@ function mapMarkLayer(sh){
 /* 印の切り替え（地図の下のバー）。押すたびに描き直す。 */
 function renderMapMarkChips(){
   const host = document.getElementById("map-chips"); if(!host) return;
-  host.innerHTML = MAPMK.map(m =>
+  const sh = _mapPack && _mapPack.sheets[_mapSheetIdx];
+  const bgChip = (sh && sh.bg)
+    ? '<button type="button" data-mkbg="1" class="mkchip mkchip-bg' + (_mapBgOn ? " on" : "") + '"'
+      + ' title="下地（PCで登録した住宅地図など）を出す・消す">図</button>'
+    : "";
+  host.innerHTML = bgChip + MAPMK.map(m =>
     '<button type="button" data-mk="' + m.key + '" class="mkchip' + (_mapMkOn[m.key] ? " on" : "") + '"'
     + ' style="' + (_mapMkOn[m.key] ? ("background:" + m.color + ";border-color:" + m.color + ";") : "") + '"'
     + ' title="' + esc(m.label) + '">' + m.ch + "</button>").join("");
+  const bgBtn = host.querySelector("[data-mkbg]");
+  if(bgBtn) bgBtn.addEventListener("click", () => {
+    _mapBgOn = !_mapBgOn;
+    try{ localStorage.setItem(LS_MAPBG, _mapBgOn ? "1" : "0"); }catch(_){}
+    mapRenderSheet();                  // 下地は図面と一緒に描いているので描き直す
+    mapApply(false);                   // いま見ている場所はそのまま
+  });
   host.querySelectorAll("[data-mk]").forEach(b => b.addEventListener("click", () => {
     const k = b.getAttribute("data-mk");
     _mapMkOn[k] = !_mapMkOn[k];
@@ -2667,9 +2699,15 @@ function mapRenderSheet(){
       + '" width="' + (hit.mark.w * 1.24) + '" height="' + (hit.mark.h * 1.24)
       + '" rx="' + (Math.min(hit.mark.w, hit.mark.h) * 0.18) + '"></rect>'
     : "";
+  // PCで登録した下地（住宅地図など）。線や管理番号より下に敷く
+  const bg = (sh.bg && _mapBgOn)
+    ? '<image x="' + vb.x + '" y="' + vb.y + '" width="' + vb.w + '" height="' + vb.h + '"'
+      + ' preserveAspectRatio="none" href="' + sh.bg + '" xlink:href="' + sh.bg + '"></image>'
+    : "";
   stage.innerHTML = '<svg id="map-svg" viewBox="' + vb.x + " " + vb.y + " " + vb.w + " " + vb.h
-    + '" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg">'
-    + '<g id="map-vp">' + sh.svg + hl + "</g></svg>";
+    + '" preserveAspectRatio="xMidYMid meet" xmlns="http://www.w3.org/2000/svg"'
+    + ' xmlns:xlink="http://www.w3.org/1999/xlink">'
+    + '<g id="map-vp">' + bg + sh.svg + hl + "</g></svg>";
   mapThinStrokes(vb);                 // 線を細くしてから
   mapRefreshMarks();                  // 印を重ねる（細くする処理に巻き込まれないよう後で足す）
   renderMapMarkChips();
@@ -3708,6 +3746,7 @@ function openReceptionModal(){
   document.getElementById("reception-modal").classList.add("open");
   const s=document.getElementById("reception-search"); if(s) s.value="";
   renderReceptionFilter();                       // 工程の絞り込みボタン
+  renderReceptionSort();                         // 並び替えの一列
   renderReceptionList("");                       // まず今ある情報ですぐ出す
   refreshDraftInfo().then(()=>{                  // 工程の状況を取り直して出し直す
     const sv=document.getElementById("reception-search");
@@ -3788,6 +3827,57 @@ function renderReceptionFilter(){
     receptionRerender();
   }));
 }
+/* ---- 一覧の並び替え ----
+   台帳の順（PCのまま）のほか、管理番号・名前・住所・工事日程・工程で並べ替えられる。
+   空欄はどちらの向きでも最後にまとめる（工事日程が未定の戸別が先頭を埋めないように）。
+   選んだ並びはこの端末に覚えておく。 */
+function flowRankOf(f){
+  const top = flowTopPhase(f);
+  const i = top ? FLOW_PHASES.findIndex(p => p.key === top.key) : -1;
+  return i + 1;                        // 0＝まだ何もしていない／1＝下見…4＝完了
+}
+const RC_SORTS = [
+  { key:"file", label:"台帳の順（PCのまま）", val:null },
+  { key:"mgmt", label:"管理番号",   val:r => String((r && r.mgmt_no) || "") },
+  { key:"name", label:"名前",       val:r => String((r && r.name) || "") },
+  { key:"addr", label:"住所",       val:r => String((r && r.addr) || "") },
+  { key:"date", label:"工事日程",   val:r => String((r && r.date) || "") },
+  { key:"flow", label:"工程の進み", val:r => flowRankOf(rowFlowOf(r)) },
+];
+const LS_RCSORT = "field_reception_sort_v1";
+const LS_RCSORTDIR = "field_reception_sortdir_v1";
+let _rcSort = (()=>{ try{ const v=localStorage.getItem(LS_RCSORT);
+  return RC_SORTS.some(x=>x.key===v) ? v : "file"; }catch(_){ return "file"; } })();
+let _rcSortAsc = (()=>{ try{ return localStorage.getItem(LS_RCSORTDIR) !== "desc"; }catch(_){ return true; } })();
+function rcSortDef(){ return RC_SORTS.find(x=>x.key===_rcSort) || RC_SORTS[0]; }
+/* 並べ替えた新しい配列を返す（元の配列は触らない）。同じ値のときは台帳の順を保つ。 */
+function rcSortRows(rows){
+  const def = rcSortDef();
+  if(!def.val) return rows;                       // 台帳の順＝そのまま
+  const dir = _rcSortAsc ? 1 : -1;
+  const isNum = (_rcSort === "flow");
+  return rows.map((r,i)=>({ r, i, v: def.val(r) })).sort((a,b)=>{
+    if(!isNum){                                   // 空欄は向きに関わらず最後
+      const ea = !String(a.v).trim(), eb = !String(b.v).trim();
+      if(ea !== eb) return ea ? 1 : -1;
+      if(ea && eb) return a.i - b.i;
+    }
+    const c = isNum ? (a.v - b.v)
+                    : String(a.v).localeCompare(String(b.v), "ja", { numeric:true });
+    return c !== 0 ? c * dir : a.i - b.i;
+  }).map(x=>x.r);
+}
+function renderReceptionSort(){
+  const bar=document.getElementById("reception-sort-bar"); if(!bar) return;
+  const sel=document.getElementById("reception-sort"), btn=document.getElementById("reception-sortdir");
+  bar.style.display = getReceptionRows().length ? "" : "none";
+  sel.innerHTML = RC_SORTS.map(x =>
+    '<option value="'+esc(x.key)+'"'+(_rcSort===x.key?" selected":"")+">"+esc(x.label)+"</option>").join("");
+  btn.textContent = _rcSortAsc ? "↑" : "↓";
+  btn.classList.toggle("on", _rcSort !== "file");
+  btn.disabled = (_rcSort === "file");            // 台帳の順は向きを変えても同じ
+  btn.style.opacity = btn.disabled ? ".45" : "";
+}
 /* 一覧の1行の工程。この端末の下書きが最優先で、まだ開いていない戸別はPCの受付台帳の行から作る。 */
 function rowFlowOf(row){
   const info = draftInfoOf(row && row.mgmt_no);
@@ -3820,7 +3910,7 @@ function renderReceptionList(q){
   const byKw=kw ? rows.filter(r=>((r.mgmt_no||"")+" "+(r.name||"")+" "+(r.addr||"")+" "+(r.tel||"")).toLowerCase().includes(kw)) : rows;
   // いまの工程で絞る（「今日はビラ配り」の日に、ビラの済んでいない戸別だけ出す）
   const flt=rcFilterDef();
-  const filtered=(flt.key==="all") ? byKw : byKw.filter(r=>flt.hit(rowFlowOf(r)));
+  const filtered=rcSortRows((flt.key==="all") ? byKw : byKw.filter(r=>flt.hit(rowFlowOf(r))));
   // いま何件出しているか（絞り込んでいる時は、絞り込みの名前も添える）
   if(meta && meta.style.display!=="none" && flt.key!=="all"){
     meta.textContent += "／" + flt.label + " " + filtered.length + "件";
@@ -3990,6 +4080,7 @@ function receptionSaveRows(src){
   localStorage.setItem(LS_RECEPTION, JSON.stringify({ type:"antenna_reception_ledger",
     importedAt:Date.now(), exportedAt:(src&&src.exportedAt)||"", project:(src&&src.project)||"",
     mainVersion:(src&&src.appVersion)||"", rows:norm }));
+  try{ renderReceptionSort(); }catch(_){}
   try{ renderReceptionList(document.getElementById("reception-search").value||""); }catch(_){}
   try{ renderAppVer(); }catch(_){}
   return norm.length;
@@ -4029,6 +4120,16 @@ document.getElementById("reception-file").addEventListener("change",e=>{
 });
 document.getElementById("btn-reception-import").addEventListener("click",()=>document.getElementById("reception-file").click());
 document.getElementById("reception-search").addEventListener("input",e=>renderReceptionList(e.target.value));
+document.getElementById("reception-sort").addEventListener("change",e=>{
+  _rcSort = e.target.value;
+  try{ localStorage.setItem(LS_RCSORT, _rcSort); }catch(_){}
+  renderReceptionSort(); receptionRerender();
+});
+document.getElementById("reception-sortdir").addEventListener("click",()=>{
+  _rcSortAsc = !_rcSortAsc;
+  try{ localStorage.setItem(LS_RCSORTDIR, _rcSortAsc ? "asc" : "desc"); }catch(_){}
+  renderReceptionSort(); receptionRerender();
+});
 document.getElementById("reception-close").addEventListener("click",closeReceptionModal);
 document.getElementById("btn-reception2").addEventListener("click",openReceptionModal);
 /* --- 地図 --- */
@@ -4079,6 +4180,7 @@ window.addEventListener("pagehide", flushPersist);
   M=freshModel(); render();  // まず即描画（IDB読込を待たせない）
   try{ renderAppVer(); }catch(_){}   // 画面下部の版表記
   try{ renderReceptionFilter(); }catch(_){}   // 受付台帳の「工程で絞る」ボタン（地図から台帳を入れた時にも出るように）
+  try{ renderReceptionSort(); }catch(_){}     // 受付台帳の「並び」
   try{
     const lastKey=localStorage.getItem(LS_LAST);
     if(lastKey){
