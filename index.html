@@ -667,8 +667,8 @@
 <div class="modal" id="draft-modal">
   <div class="sheet">
     <h3>📋 履歴・読込</h3>
-    <div class="info">現場で入力した内容は自動的にこの端末へ保存され、下に一覧表示されます（<b>💾</b>＝JSON書出済 ／ <b>✏️</b>＝書出後に変更あり＝再書出推奨 ／ 無印＝未書出）。<b>PCや他の端末で保存した「管理番号.json」を読み込んで続きを編集</b>したい時は、下のボタンから開けます。<br>
-    <b>他の端末で進めた工程の印（チェック）だけ</b>をまとめて引き継ぎたい時は、その下の <b>「📥 他の端末の保存からチェックを引き継ぐ」</b> を使ってください。保存済みの <b class="fname">管理番号.json</b> をまとめて読み、<b>下・ビ・工・完</b> の印だけを取り込みます（写真・測定値・部材は取り込みません）。</div>
+    <div class="info">入力した内容は、この端末に自動で控えます（<b>💾</b>＝保存済 ／ <b>✏️</b>＝保存後に変更あり ／ 無印＝未保存）。<br>
+    下のボタンで、PCや他の端末の <b class="fname">管理番号.json</b> を読めます。<b>📂</b>＝その戸別の続きを編集／<b>📥</b>＝工程の印だけを引き継ぐ（写真や測定値は取り込みません）。</div>
     <button id="btn-import" style="width:100%; padding:15px; border:0; border-radius:11px; background:#455a64; color:#fff; font-weight:700; font-size:15px; margin-bottom:10px;">📂 保存済みJSONを開いて続きを編集</button>
     <input type="file" id="import-file" accept=".json,application/json,*/*" style="display:none;">
     <button id="btn-flowshare" data-label="📥 他の端末の保存からチェックを引き継ぐ" style="width:100%; padding:15px; border:0; border-radius:11px; background:#1565c0; color:#fff; font-weight:700; font-size:15px; margin-bottom:12px;">📥 他の端末の保存からチェックを引き継ぐ</button>
@@ -682,18 +682,11 @@
 <div class="modal" id="reception-modal">
   <div class="sheet">
     <h3>🗒 受付台帳から開く</h3>
-    <div class="info">PCの受付台帳で <b>「📦 現場用」</b> を押すと <b class="fname">現場用_物件名_日付.json</b> ができます。下のボタンから<b>そのファイル</b>を選んでください。<br>受付台帳と地図が一緒に入っているので、これ1つで両方そろいます。<br>
-    取り込むと下に一覧が出ます。タップすると<b>管理番号・氏名・住所が入った状態</b>で入力を開始できます（同じ管理番号の下書きがあれば続きから開きます）。<b>下見完了にした戸別は緑色</b>になり、撮った写真の枚数も出ます。<br>
-    行の左に出る <b class="rc-flow"><i class="on" style="background:#00838f">下</i><i>ビ</i><i>工</i><i>完</i></b> は<b>工程</b>です（下＝下見／ビ＝ビラ配り／工＝工事／完＝完了＝同意書と工事完了書を受け取った）。<b>上のボタンで「いまやる工程」だけに絞り込め</b>ます。<br>
-    その下の<b>「並び」</b>で並べ替えられます（右の <b>↑↓</b> で逆順）。<b>下三桁</b>・<b>施工会社</b>で並べたときは、その中が管理番号順になります。<br>
-    <b>備考</b>はPCの受付台帳の備考と同じ欄です。事務所が書いた内容が行に出るので、そのまま直せます。<br>
-    行の<b>「地図」</b>を押すと、その戸別の建物を地図で見られます（戸別は開きません。地図を閉じればこの一覧に戻ります）。<br>
-    開いてみただけの戸別は、右の<b>「取消」</b>で<b>触っていないことに戻せます</b>（「入力中」の印が消えます）。<br>
-    入力したのにまだPCへ渡していない戸別には <b class="unsaved-ex">未保存</b> が付きます。その戸別を開いて<b>「保存」</b>を押すと <b class="fname">管理番号.json</b> ができるので、それをPCへ渡してください（写真はフォルダごと渡します）。<br>
-    <b>「まとめて保存」</b>を押せば、未保存の戸別を<b>一度に同じ場所へ</b>書き出せます。保存先は覚えているので、2回目からは選び直す必要がありません。<br>
-    何台かの端末で分けて回るときは、<b>「📥 他の端末の保存を読み込む」</b>で、保存済みの <b class="fname">管理番号.json</b> から<b>工程の印（チェック）</b>を引き継げます。読んだ戸別には <b class="rc-ex-other">他端末</b> が付きます。印は<b>「付いている方」</b>を採るので、済みが消えることはありません（取り消しは、その戸別を持っている端末の「🚩 工程」から）。<br>
-    PCで台帳を直して<b>この受付台帳を入れ直したとき</b>は、<b>「全部保存し直す」</b>を押してください。直した内容を戸別ファイルへ入れ直します（押さないと、メインでフォルダを読み直したときに<b>直す前の内容に戻ります</b>）。<br>
-    <span class="sub">※ 地図の入っていない <b class="fname">受付台帳_….json</b> でも取り込めます。</span></div>
+    <div class="info">PCの受付台帳で <b>「📦 現場用」</b> を押してできる <b class="fname">現場用_….json</b> を、下のボタンから選んでください（受付台帳と地図が一緒に入っています）。<br>
+    <b>行をタップ</b>すると、管理番号・氏名・住所が入った状態で入力を始められます（下書きがあれば続きから）。<br>
+    行の左の <b class="rc-flow"><i class="on" style="background:#00838f">下</i><i>ビ</i><i>工</i><i>完</i></b> は<b>工程</b>です（下＝下見／ビ＝ビラ配り／工＝工事／完＝同意書と工事完了書）。上のボタンで<b>いまやる工程だけに絞れます</b>。<br>
+    入力しただけではPCに渡りません。<b class="unsaved-ex">未保存</b> の戸別を開いて<b>「保存」</b>を押すと <b class="fname">管理番号.json</b> ができます。<br>
+    <span class="sub">※ 「まとめて保存」などの説明は、一覧の上にそれぞれ出ます。地図の無い <b class="fname">受付台帳_….json</b> でも取り込めます。</span></div>
     <button id="btn-reception-import" style="width:100%; padding:15px; border:0; border-radius:11px; background:#00695c; color:#fff; font-weight:700; font-size:15px; margin-bottom:10px;">現場用_….json を選ぶ</button>
     <input type="file" id="reception-file" accept=".json,application/json,*/*" style="display:none;">
     <input type="search" id="reception-search" placeholder="管理番号・氏名・住所で絞り込み" style="width:100%; box-sizing:border-box; padding:11px 12px; border:1px solid #cdd3da; border-radius:10px; font-size:15px; margin-bottom:10px;">
@@ -1945,10 +1938,9 @@ function renderFlow(){
     steps.forEach(s=>{ rows += rowOf(s, ph, ""); });
   });
   return strip + rows
-    + '<div class="flowhint">下見 → ビラ配り → 工事 → 完了 の順に進みます。'
-    + '下のバーの<b>オレンジのボタン</b>でも、次の工程をひとつずつ進められます。<br>'
-    + '「完了」は<b>同意書と工事完了書の両方</b>を受け取った状態です。<br>'
-    + 'PCの受付台帳では、ビラ配り＝「ビラ」／工事＝「完了」／同意書＝「承諾書」／工事完了書＝「完了書」の欄になります。</div>';
+    + '<div class="flowhint">上から順に進みます。下のバーの<b>オレンジのボタン</b>でも、'
+    + '次の工程をひとつずつ進められます。<br>'
+    + '「完了」は<b>同意書と工事完了書の両方</b>を受け取った状態です。</div>';
 }
 
 // ---- TV各室 ----
@@ -4461,23 +4453,21 @@ function renderReceptionList(q){
   const notHanded = unsavedTargets().length;
   const dirName = saveDirName();
   const warn = notHanded
-    ? `<div class="rc-warn">まだ保存していない戸別が <b>${notHanded}件</b> あります。<br>`
-      + `その戸別を開いて<b>「保存」</b>を押すと <b class="fname">管理番号.json</b> ができます。`
-      + `これをPCに渡さないと、写真以外の入力はメインに取り込めません。`
+    ? `<div class="rc-warn">まだ保存していない戸別が <b>${notHanded}件</b> あります。`
+      + `保存しないと、写真以外の入力はPCへ渡りません。`
       + `<button id="rc-saveall" class="rc-saveall" data-label="まとめて保存（${notHanded}件）">まとめて保存（${notHanded}件）</button>`
       + (dirName ? `<div class="rc-warn-sub">前回のフォルダ「<b>${esc(dirName)}</b>」に入れます</div>`
-                 : `<div class="rc-warn-sub">保存先をひとつ選ぶと、次からは同じ場所にまとめて入ります</div>`)
+                 : `<div class="rc-warn-sub">保存先は1回選べば、次から同じ場所に入ります</div>`)
       + `</div>`
     : "";
   // PCで台帳を直したあとは、戸別ファイルも作り直さないと、メインでフォルダを読み直したときに
   // 直す前の内容へ戻ってしまう（メインは戸別ファイルの中身を見るため）。ここから一気に作り直せる。
   const redoCnt = allDraftTargets().length;
   const redoBar = redoCnt
-    ? `<div class="rc-redo">PCで台帳を直したときは、<b>全部保存し直して</b>ください。`
-      + `押さないと、メインでフォルダを読み直したときに<b>直す前の内容に戻ります</b>。`
+    ? `<div class="rc-redo">PCで台帳を直して<b>取り込み直したとき</b>は、<b>全部保存し直して</b>ください。`
       + `<button id="rc-saveall2" data-label="全部保存し直す（${redoCnt}件）">全部保存し直す（${redoCnt}件）</button>`
-      + `<div class="rc-redo-sub">受付台帳の最新（名前・住所・電話・工事予定日・備考）を入れ直してから、${redoCnt}件を上書きします。`
-      + `現場で入力したもの（アンテナ・部材・測定・写真）はそのままです。</div>`
+      + `<div class="rc-redo-sub">台帳の最新（名前・住所・電話・予定日・備考）を入れ直して上書きします。`
+      + `現場で入力したものはそのままです。</div>`
       + `</div>`
     : "";
   // 開いただけ（何も入力していない）の戸別。たまると「入力中」だらけになるのでまとめて戻せる。
@@ -4489,14 +4479,13 @@ function renderReceptionList(q){
   // 他の端末で進めた分の引き継ぎ。保存した戸別ファイルをそのまま印の控えとして読む。
   const shareCnt = flowShareCount();
   const shareDir = saveDirName();
-  const shareBar = `<div class="rc-share">何台かで分けて回るときは、`
-    + `<b>保存した「管理番号.json」を読む</b>と、他の端末で進めた<b>工程の印</b>を引き継げます。`
+  const shareBar = `<div class="rc-share">他の端末で進めた<b>工程の印</b>は、`
+    + `保存した <b class="fname">管理番号.json</b> から引き継げます。`
     + `<button id="rc-share-btn" data-label="📥 他の端末の保存を読み込む">📥 他の端末の保存を読み込む</button>`
     + `<div class="rc-share-sub">`
-    + (shareDir ? `「<b>${esc(shareDir)}</b>」フォルダを丸ごと読みます。`
-                : `<b class="fname">管理番号.json</b> をまとめて選んでください（いくつでも選べます）。`)
-    + `印は「付いている方」を採ります。写真・測定値・部材は取り込みません。`
-    + (shareCnt ? ` 引き継ぎ済み <b>${shareCnt}件</b> <button type="button" id="rc-share-clear" class="rc-share-clear">引き継ぎを消す</button>` : "")
+    + (shareDir ? `「<b>${esc(shareDir)}</b>」フォルダを丸ごと読みます。` : `ファイルはまとめて選べます。`)
+    + `印だけを読み、済みは消しません。`
+    + (shareCnt ? ` 引き継ぎ済み <b>${shareCnt}件</b> <button type="button" id="rc-share-clear" class="rc-share-clear">消す</button>` : "")
     + `</div></div>`;
   host.innerHTML=warn+redoBar+undoBar+shareBar+filtered.map(r=>{
     const idx=rows.indexOf(r);
@@ -4542,7 +4531,7 @@ function renderReceptionList(q){
       : "";
     const act2 = (mapBtn || canUndo)
       ? `<div class="d-act2">${mapBtn}`
-        + (canUndo ? `<button class="d-undo" data-recundo="${idx}">取消</button>` : "")
+        + (canUndo ? `<button class="d-undo" data-recundo="${idx}" title="開いただけの戸別を「触っていない」状態に戻します（「入力中」の印が消えます）">取消</button>` : "")
         + `</div>`
       : "";
     // この端末で工程を進めた戸別だけ「見直す」（PCの台帳で済んでいるだけの戸別は「開く」）
