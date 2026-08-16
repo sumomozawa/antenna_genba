@@ -453,6 +453,8 @@
   /* 下見が終わった戸別（この端末で「下見完了」を押したもの） */
   .rc-badge.surv{background:#1b7a3d;}
   .rc-badge.open{background:#1565c0;}
+  /* 他の端末が保存した戸別ファイルから引き継いだ印が付いている戸別 */
+  .rc-badge.other{background:#455a64;}
   .draft.rc-surv{background:#e9f6ec; border-left:4px solid #1b7a3d; padding-left:8px;}
   .draft.rc-surv .d-no{color:#1b5e20;}
   .draft.rc-surv .d-open{background:#1b7a3d;}
@@ -530,7 +532,21 @@
   .rc-redo button:active{transform:scale(.96); filter:brightness(.92);}
   .rc-redo button:disabled{background:#c3b391;}
   .rc-redo .rc-redo-sub{margin-top:6px; font-size:11.5px; font-weight:600; color:#8a7a55;}
+  /* 他の端末の保存ファイルから工程の印を引き継ぐ */
+  .rc-share{margin:0 0 12px; padding:9px 12px; border-radius:11px; background:#e8f1fb; color:#28456b;
+    font-size:12px; line-height:1.6; border:1px solid #c3d8f0;}
+  .rc-share b{color:#0d47a1;}
+  .rc-share button{display:block; width:100%; margin-top:8px; min-height:46px; border:0; border-radius:10px;
+    background:#1565c0; color:#fff; font-weight:700; font-size:14px; cursor:pointer;
+    transition:transform var(--t-fast) var(--ease), filter var(--t-fast) var(--ease);}
+  .rc-share button:active{transform:scale(.96); filter:brightness(.92);}
+  .rc-share button:disabled{background:#9db8d6;}
+  .rc-share .rc-share-sub{margin-top:6px; font-size:11.5px; font-weight:600; color:#4a6485;}
+  .rc-share .rc-share-clear{display:inline-block; width:auto; margin:0 0 0 2px; min-height:0; padding:1px 9px;
+    background:#fff; color:#28456b; border:1px solid #a9c4e4; border-radius:8px; font-size:11px;}
   .unsaved-ex{display:inline-block; background:#d32f2f; color:#fff; font-size:10px; font-weight:700;
+    padding:0 6px; border-radius:8px; line-height:17px; vertical-align:1px;}
+  .rc-ex-other{display:inline-block; background:#455a64; color:#fff; font-size:10px; font-weight:700;
     padding:0 6px; border-radius:8px; line-height:17px; vertical-align:1px;}
   /* 複数選択削除のアクションバー */
   .draft-actions{display:flex; align-items:center; justify-content:space-between; gap:10px; padding:6px 2px 12px; position:sticky; top:0; background:#fff; z-index:2;}
@@ -651,9 +667,12 @@
 <div class="modal" id="draft-modal">
   <div class="sheet">
     <h3>📋 履歴・読込</h3>
-    <div class="info">現場で入力した内容は自動的にこの端末へ保存され、下に一覧表示されます（<b>💾</b>＝JSON書出済 ／ <b>✏️</b>＝書出後に変更あり＝再書出推奨 ／ 無印＝未書出）。<b>PCや他の端末で保存した「管理番号.json」を読み込んで続きを編集</b>したい時は、下のボタンから開けます。</div>
-    <button id="btn-import" style="width:100%; padding:15px; border:0; border-radius:11px; background:#455a64; color:#fff; font-weight:700; font-size:15px; margin-bottom:12px;">📂 保存済みJSONを開いて続きを編集</button>
+    <div class="info">現場で入力した内容は自動的にこの端末へ保存され、下に一覧表示されます（<b>💾</b>＝JSON書出済 ／ <b>✏️</b>＝書出後に変更あり＝再書出推奨 ／ 無印＝未書出）。<b>PCや他の端末で保存した「管理番号.json」を読み込んで続きを編集</b>したい時は、下のボタンから開けます。<br>
+    <b>他の端末で進めた工程の印（チェック）だけ</b>をまとめて引き継ぎたい時は、その下の <b>「📥 他の端末の保存からチェックを引き継ぐ」</b> を使ってください。保存済みの <b class="fname">管理番号.json</b> をまとめて読み、<b>下・ビ・工・完</b> の印だけを取り込みます（写真・測定値・部材は取り込みません）。</div>
+    <button id="btn-import" style="width:100%; padding:15px; border:0; border-radius:11px; background:#455a64; color:#fff; font-weight:700; font-size:15px; margin-bottom:10px;">📂 保存済みJSONを開いて続きを編集</button>
     <input type="file" id="import-file" accept=".json,application/json,*/*" style="display:none;">
+    <button id="btn-flowshare" data-label="📥 他の端末の保存からチェックを引き継ぐ" style="width:100%; padding:15px; border:0; border-radius:11px; background:#1565c0; color:#fff; font-weight:700; font-size:15px; margin-bottom:12px;">📥 他の端末の保存からチェックを引き継ぐ</button>
+    <input type="file" id="flowshare-file" accept=".json,application/json,*/*" multiple style="display:none;">
     <div id="draft-list"></div>
     <button class="closebtn" id="draft-close">閉じる</button>
   </div>
@@ -672,6 +691,7 @@
     開いてみただけの戸別は、右の<b>「取消」</b>で<b>触っていないことに戻せます</b>（「入力中」の印が消えます）。<br>
     入力したのにまだPCへ渡していない戸別には <b class="unsaved-ex">未保存</b> が付きます。その戸別を開いて<b>「保存」</b>を押すと <b class="fname">管理番号.json</b> ができるので、それをPCへ渡してください（写真はフォルダごと渡します）。<br>
     <b>「まとめて保存」</b>を押せば、未保存の戸別を<b>一度に同じ場所へ</b>書き出せます。保存先は覚えているので、2回目からは選び直す必要がありません。<br>
+    何台かの端末で分けて回るときは、<b>「📥 他の端末の保存を読み込む」</b>で、保存済みの <b class="fname">管理番号.json</b> から<b>工程の印（チェック）</b>を引き継げます。読んだ戸別には <b class="rc-ex-other">他端末</b> が付きます。印は<b>「付いている方」</b>を採るので、済みが消えることはありません（取り消しは、その戸別を持っている端末の「🚩 工程」から）。<br>
     PCで台帳を直して<b>この受付台帳を入れ直したとき</b>は、<b>「全部保存し直す」</b>を押してください。直した内容を戸別ファイルへ入れ直します（押さないと、メインでフォルダを読み直したときに<b>直す前の内容に戻ります</b>）。<br>
     <span class="sub">※ 地図の入っていない <b class="fname">受付台帳_….json</b> でも取り込めます。</span></div>
     <button id="btn-reception-import" style="width:100%; padding:15px; border:0; border-radius:11px; background:#00695c; color:#fff; font-weight:700; font-size:15px; margin-bottom:10px;">現場用_….json を選ぶ</button>
@@ -818,7 +838,7 @@ const GENBA_SCHEMA_VER = 1;
    （PC側で「現場入力アプリの版」を確認でき、メインとの食い違いに気付ける）。
    ★更新したらこの2行を書き換える。 */
 const APP_NAME_SHORT = "現場入力";
-const APP_VERSION = "2026.08.12";
+const APP_VERSION = "2026.08.16";
 function photoContentId(dataUri){
   if(!dataUri || typeof dataUri !== "string") return "";
   let a = 5381, b = 0;
@@ -850,7 +870,7 @@ const GENBA_KNOWN_KEYS = new Set([
   "tv_rooms","tv_bd","tv_sp","tv_term",
   "wire_overrides","qty_overrides","node_offsets","meas_transforms","node_existing_overrides",
   "text_annotations","measurements","chosho_photos","asbestos","antenna_guide",
-  "_origin","_schemaVer","editedAt","_draftId","_passthrough",
+  "_origin","_schemaVer","editedAt","_draftId","_passthrough","_otherFile",
   "chosho_photos_thumb","chosho_photo_count"   // PC物件スナップショット専用メタは再emitしない
 ]);
 
@@ -3107,6 +3127,8 @@ async function saveJson(){
   if(!M.chosho_mgmt_no){
     if(!(await uiConfirm("管理番号が未入力です。このまま保存しますか？（ファイル名が「戸別」になります）"))) return;
   }
+  // 他の端末が保存したファイルを置き換えることになる時は、一度確かめる
+  if(!(await flowShareConfirmOverwrite(M))) return;
   const state=buildState();
   const json=JSON.stringify(state);
   const blob=new Blob([json],{type:"application/json"});
@@ -3341,6 +3363,7 @@ async function persistDraft(){
     const rec={ key, model:M, savedAt:Date.now(), fileSavedAt:(cur&&cur.fileSavedAt)||0,
       mgmt:M.chosho_mgmt_no||"", cust:M.chosho_cust_name||"", photos:(M.chosho_photos||[]).length,
       surveyDone:!!M.survey_done, flow:flowOf(M), touched:(M._touched!==false), sig,
+      other:M._otherFile||"",                       // その戸別のファイルを他の端末が持っている時のファイル名
       rev:(M._rev|0), fileRev:(cur&&cur.fileRev)|0 };
     await idbPut(rec);
     localStorage.setItem(LS_LAST, key);
@@ -3363,6 +3386,7 @@ async function persistModel(m){
     await idbPut({ key, model:m, savedAt:Date.now(), fileSavedAt:(prev&&prev.fileSavedAt)||0,
       mgmt:m.chosho_mgmt_no||"", cust:m.chosho_cust_name||"", photos:(m.chosho_photos||[]).length,
       surveyDone:!!m.survey_done, flow:flowOf(m), touched:true, sig:stateSig(m),
+      other:m._otherFile||"",
       rev:(m._rev|0), fileRev:(prev&&prev.fileRev)|0 });
   }catch(e){ console.warn("persistModel failed",e); }
 }
@@ -3370,7 +3394,11 @@ async function markDraftSaved(){
   try{
     const key = M._lastDraftKey || (M.chosho_mgmt_no ? ("no:"+M.chosho_mgmt_no) : (M._draftId||""));
     const rec=await idbGet(key);
-    if(rec){ rec.fileSavedAt=Date.now(); rec.fileRev=(rec.rev|0); await idbPut(rec); }
+    // 保存できた時点で、そのファイルの中身はこの端末のものになった（上書きの確認はもう出さない）
+    delete M._otherFile;
+    if(rec){ rec.fileSavedAt=Date.now(); rec.fileRev=(rec.rev|0); rec.other="";
+             if(rec.model) delete rec.model._otherFile;
+             await idbPut(rec); }
   }catch(e){ console.warn("markDraftSaved failed",e); }
 }
 /* ============================================================================
@@ -3521,8 +3549,10 @@ function unsavedTargets(){
 async function markDraftSavedFor(key){
   try{
     const rec = await idbGet(key);
-    if(rec){ rec.fileSavedAt = Date.now(); rec.fileRev = (rec.rev|0); await idbPut(rec); }
-    if(M._lastDraftKey === key || draftKey() === key) saveStateFile();
+    if(rec){ rec.fileSavedAt = Date.now(); rec.fileRev = (rec.rev|0); rec.other = "";
+             if(rec.model) delete rec.model._otherFile;      // 保存できた＝この端末の内容になった
+             await idbPut(rec); }
+    if(M._lastDraftKey === key || draftKey() === key){ delete M._otherFile; saveStateFile(); }
   }catch(e){ console.warn("markDraftSavedFor failed", e); }
 }
 function saveAllUnsaved(){ return saveAllDrafts("unsaved"); }
@@ -3584,7 +3614,8 @@ async function saveAllDrafts(mode){
     const rec = byNo[no];
     if(!rec || !rec.model) return;
     files.push({ no, key: rec.key, name: sanitizeFilename(no) + ".json",
-                 text: JSON.stringify(buildStateOf(rec.model)) });
+                 text: JSON.stringify(buildStateOf(rec.model)),
+                 other: (rec.model && rec.model._otherFile) || "" });
   });
   if(!files.length){ await uiAlert("まとめて保存できる戸別はありません。"); return; }
   const listTxt = files.slice(0, 8).map(f => "・" + f.name).join("\n")
@@ -3595,7 +3626,13 @@ async function saveAllDrafts(mode){
        + "現場で入力したもの（アンテナ・部材・測定・写真）はそのままです。"
        + (applied ? ("\n\n台帳の内容を入れ直した戸別： " + applied + "件") : "") + "\n\n")
     : (files.length + "件をまとめて保存します。\n\n");
-  if(!(await uiConfirm(head + listTxt
+  // 他の端末が保存したファイルを上書きする分は、件数を添えて知らせる
+  const otherCnt = files.filter(f => f.other).length;
+  const otherTxt = otherCnt
+    ? ("\n\n※ このうち " + otherCnt + "件は、他の端末が保存したファイルです。\n"
+       + "上書きすると、その端末で撮った写真などはファイルから消えます。")
+    : "";
+  if(!(await uiConfirm(head + listTxt + otherTxt
       + (noNum && !isAll ? ("\n\n※ 管理番号の無い下書き " + noNum + " 件は対象外です") : "")))) return;
 
   setBusy(true);
@@ -3656,6 +3693,311 @@ async function saveAllDrafts(mode){
 }
 
 /* ============================================================================
+   保存したファイルから「チェック（工程）」を引き継ぐ
+   ----------------------------------------------------------------------------
+   1つの物件を何台かの端末で分けて回ると、自分の端末には自分が触った戸別の印しか
+   出ない（下見はこの端末、ビラ配りは別の端末…）。かといって印だけを送り合う道を
+   別に作ると、どれが本当なのか分からなくなる。
+
+   そこで、すでに保存している戸別ファイル（管理番号.json）を、そのまま印の控えとして
+   使う。ファイルには工程の印（下見・ビラ配り・工事・同意書・工事完了書）が入っている
+   ので、同じ場所（共有フォルダなど）に集まったファイルを読めば、他の端末で進めた分が
+   そのまま一覧・地図に出る。PCを通さなくても、端末どうしで足並みがそろう。
+
+   決めごと
+   ・印は「付いている方」を採る（済みは消さない）。取り消しは、その戸別を持っている
+     端末の「🚩 工程」から行う。
+   ・読むのは印だけ。写真・測定値・部材は取り込まない（端末が写真であふれるため）。
+   ・この端末に下書きがある戸別は、その下書きへ印を足す（見るもとを1つに保つ）。
+   ・下書きが無い戸別は、この控えだけを持つ。あとで開いたときに印を引き継ぎ、
+     「その戸別のファイルは他の端末のもの」も覚えておく（うっかり上書きしないため）。
+   ============================================================================ */
+const LS_FLOWSHARE = "field_flow_shared_v1";   // 引き継いだ印の控え（文字だけ・localStorage）
+/* 控えの形
+     { v:1, updatedAt:<ms>,
+       rows:  { "<管理番号>": { flow:{survey…}, at:{survey:"<ISO>"…},
+                                editedAt:"<ISO>", from:"<ファイル名>", got:<ms> } },
+       files: { "<ファイル名>": "<更新日時>:<大きさ>" } }   ← 前と同じファイルは開き直さない */
+function flowShareLoad(){
+  try{
+    const j = JSON.parse(localStorage.getItem(LS_FLOWSHARE) || "null");
+    if(j && j.rows && typeof j.rows === "object"){
+      if(!j.files || typeof j.files !== "object") j.files = {};
+      return j;
+    }
+  }catch(_){}
+  return { v:1, updatedAt:0, rows:{}, files:{} };
+}
+let _flowShare = flowShareLoad();
+function flowShareSave(){
+  try{ _flowShare.updatedAt = Date.now(); localStorage.setItem(LS_FLOWSHARE, JSON.stringify(_flowShare)); return true; }
+  catch(e){ console.warn("引き継いだ印を控えられませんでした", e); return false; }
+}
+/* その管理番号の控え（無ければ null） */
+function flowShareOf(no){
+  no = String(no || "").trim(); if(!no) return null;
+  const r = _flowShare.rows[no];
+  return (r && r.flow) ? r : null;
+}
+function flowShareCount(){ try{ return Object.keys(_flowShare.rows || {}).length; }catch(_){ return 0; } }
+function flowShareClear(){ _flowShare = { v:1, updatedAt:0, rows:{}, files:{} }; flowShareSave(); }
+/* 2つの印を「付いている方」で合わせる */
+function flowMerge(a, b){
+  const o = {};
+  FLOW_STEPS.forEach(s => { o[s.key] = !!(a && a[s.key]) || !!(b && b[s.key]); });
+  return o;
+}
+/* 控えの印を、この端末の戸別（モデル）へ足す。済みは消さない。足したら true。 */
+function flowApplyShared(m, rec){
+  if(!m || !rec || !rec.flow) return false;
+  let changed = false;
+  FLOW_STEPS.forEach(st => {
+    if(!rec.flow[st.key] || m[st.flag]) return;
+    m[st.flag] = true;
+    if(!String(m[st.at] || "")) m[st.at] = String((rec.at && rec.at[st.key]) || "");
+    // 工事はPCの受付台帳の「完了」＝ステータス completed と同じもの。一緒に動かす。
+    if(st.key === "work") m.chosho_status = "completed";
+    changed = true;
+  });
+  if(changed){ m._touched = true; m._rev = (m._rev | 0) + 1; }
+  return changed;
+}
+/* 管理番号 → 受付台帳の行（無ければ null） */
+function rcRowOf(no){
+  no = String(no || "").trim(); if(!no) return null;
+  const rows = getReceptionRows();
+  for(const r of rows){ if(String((r && r.mgmt_no) || "").trim() === no) return r; }
+  return null;
+}
+/* 戸別ファイル（管理番号.json）かどうか。受付台帳・現場用（ひとまとめ）・地図は対象外。 */
+function flowShareIsCase(data){
+  if(!data || typeof data !== "object" || Array.isArray(data)) return false;
+  if(data.type === "antenna_genba_set" || data.type === "antenna_reception_ledger") return false;
+  if(Array.isArray(data.sheets) || Array.isArray(data.rows)) return false;
+  return !!(data.chosho_mgmt_no || data.work_type);
+}
+/* 読み込んだ戸別ファイル1つ分から、印の控えを作る（管理番号が無いファイルは対象外） */
+function flowShareRecOf(data, fname){
+  const no = String((data && data.chosho_mgmt_no) || "").trim();
+  if(!no) return null;
+  const at = {};
+  FLOW_STEPS.forEach(st => { at[st.key] = String((data && data[st.at]) || ""); });
+  return { no, rec: { flow: flowOf(data), at, editedAt: String((data && data.editedAt) || ""),
+                      photos: (Array.isArray(data && data.chosho_photos) ? data.chosho_photos.length : 0),
+                      from: String(fname || ""), got: Date.now() } };
+}
+/* 前の控えと新しい控えを合わせる（印は付いている方、日時は先に入っている方を残す） */
+function flowShareMergeRec(prev, next){
+  if(!prev) return next;
+  const at = {};
+  FLOW_STEPS.forEach(st => {
+    at[st.key] = String((prev.at && prev.at[st.key]) || "") || String((next.at && next.at[st.key]) || "");
+  });
+  return { flow: flowMerge(prev.flow, next.flow), at,
+           editedAt: next.editedAt || prev.editedAt || "",
+           photos: (next.photos !== undefined) ? next.photos : (prev.photos || 0),
+           from: next.from || prev.from || "", got: next.got || prev.got || 0 };
+}
+function readTextFile(file){
+  return new Promise((res, rej) => {
+    const r = new FileReader();
+    r.onload = () => res(String(r.result || ""));
+    r.onerror = () => rej(r.error);
+    r.readAsText(file);
+  });
+}
+/* 読み込みボタンの表示（受付台帳の帯と履歴の両方にあるので、まとめて面倒を見る） */
+let _flowShareBusy = false;
+function flowShareBtnBusy(on, txt){
+  ["rc-share-btn", "btn-flowshare"].forEach(id => {
+    const b = document.getElementById(id); if(!b) return;
+    b.disabled = !!on;
+    b.textContent = on ? (txt || "読み込み中…") : (b.dataset.label || b.textContent);
+  });
+}
+/* 保存先フォルダを覚えている端末（PCのChrome/Edge）は、そのフォルダを丸ごと見る。
+   覚えていない・許可が下りない端末では null を返し、ファイルを選んでもらう。 */
+async function flowShareDirFiles(){
+  let dir = await saveDirGet();
+  if(!dir || !dir.values) return null;
+  if(!(await saveDirOk(dir, true))) return null;
+  const out = [];
+  try{
+    for await (const h of dir.values()){
+      if(!h || h.kind !== "file" || !/\.json$/i.test(h.name)) continue;
+      out.push({ name: h.name, handle: h });
+    }
+  }catch(e){ console.warn("保存先フォルダを読めませんでした", e); return null; }
+  return out;
+}
+/* 「📥 他の端末の保存を読み込む」の入口 */
+async function flowShareStart(){
+  if(_flowShareBusy) return;
+  let files = null;
+  try{ files = await flowShareDirFiles(); }catch(e){ console.warn("フォルダの読み取りに失敗", e); files = null; }
+  if(!files || !files.length){
+    const inp = document.getElementById("flowshare-file");
+    if(inp){ inp.value = ""; inp.click(); }        // 選ばれたら change から flowShareRead へ入る
+    return;
+  }
+  await flowShareRead(files, true);
+}
+/* 読み込み本体。
+   list … [{ name, handle }]（フォルダ） または [{ name, file }]（選んでもらったファイル）
+   fromDir … フォルダを丸ごと読んでいるか（前と変わっていないファイルを飛ばしてよいか） */
+async function flowShareRead(list, fromDir){
+  if(_flowShareBusy) return;
+  list = (list || []).filter(Boolean);
+  if(!list.length){ await uiAlert("読み込むファイルがありませんでした。"); return; }
+  _flowShareBusy = true;
+  flowShareBtnBusy(true, "読み込み中… 0/" + list.length);
+  try{
+    if(!_flowShare.files || typeof _flowShare.files !== "object") _flowShare.files = {};
+    const items = [], byItem = {};
+    let skipped = 0, ngRead = 0, notCase = 0;
+    for(let i = 0; i < list.length; i++){
+      flowShareBtnBusy(true, "読み込み中… " + (i + 1) + "/" + list.length);
+      const it = list[i];
+      let file = it.file || null;
+      try{ if(!file && it.handle) file = await it.handle.getFile(); }catch(_){ file = null; }
+      if(!file){ ngRead++; continue; }
+      const stamp = String(file.lastModified || 0) + ":" + String(file.size || 0);
+      // フォルダを丸ごと読むときは、前に読んだときから変わっていないファイルは開かない
+      if(fromDir && _flowShare.files[it.name] === stamp){ skipped++; continue; }
+      let data = null;
+      try{ data = JSON.parse(await readTextFile(file)); }
+      catch(_){ ngRead++; continue; }
+      _flowShare.files[it.name] = stamp;                 // 読めたファイルは控える（次は飛ばせる）
+      if(!flowShareIsCase(data)){ notCase++; continue; } // 受付台帳・地図などは対象外
+      const r = flowShareRecOf(data, it.name);
+      if(!r){ notCase++; continue; }
+      const cur = byItem[r.no];
+      // 同じ管理番号が2つ以上あったら、あとから直した方（editedAt が新しい方）を採る
+      if(cur){ if(String(r.rec.editedAt || "") >= String(cur.rec.editedAt || "")) cur.rec = flowShareMergeRec(cur.rec, r.rec); }
+      else { byItem[r.no] = r; items.push(r); }
+    }
+    if(!items.length){
+      flowShareSave();
+      await uiAlert(skipped
+        ? ("読み込みました。\n\n前に読んだときから変わったファイルはありません（" + skipped + "件はそのまま）。")
+        : ("戸別ファイル（管理番号.json）が見つかりませんでした。\n\n"
+           + (notCase ? ("選ばれた " + notCase + "件は受付台帳や地図のファイルです。\n") : "")
+           + (ngRead ? ("読めなかったファイル： " + ngRead + "件\n") : "")
+           + "「保存」でできる 管理番号.json を選んでください。"));
+      return;
+    }
+    // ---- 何が増えるか調べる（読み込む前に見せて、納得してから反映する） ----
+    await refreshDraftInfo();
+    const all = await idbGetAll();
+    const byNo = {};
+    (all || []).forEach(r => { const k = String((r && r.mgmt) || "").trim(); if(k) byNo[k] = r; });
+    const openNo = String(M.chosho_mgmt_no || "").trim();
+    const adds = [];
+    let mineCnt = 0, otherCnt = 0;
+    items.forEach(it => {
+      const mine = (it.no === openNo) ? M : ((byNo[it.no] && byNo[it.no].model) || null);
+      const cur = mine ? flowOf(mine)
+                       : flowMerge((flowShareOf(it.no) || {}).flow, rowFlowOf(rcRowOf(it.no) || { mgmt_no: it.no }));
+      const gain = FLOW_STEPS.filter(st => !!it.rec.flow[st.key] && !cur[st.key]).map(st => st.name);
+      if(gain.length){
+        adds.push({ no: it.no, names: gain });
+        if(mine) mineCnt++;
+      }
+      if(!mine) otherCnt++;
+    });
+    if(!adds.length){
+      flowShareItemsApply(items, byNo, openNo);
+      flowShareSave();
+      await flowShareAfter();
+      await uiAlert(items.length + "件の戸別ファイルを読みました。\n\n新しく付く印はありませんでした。");
+      return;
+    }
+    const listTxt = adds.slice(0, 8).map(a => "・" + a.no + "（" + a.names.join("・") + "）").join("\n")
+      + (adds.length > 8 ? ("\n・ほか " + (adds.length - 8) + " 件") : "");
+    if(!(await uiConfirm(items.length + "件の戸別ファイルを読みました。\n\n"
+        + adds.length + "件の戸別に印が増えます。\n\n" + listTxt
+        + "\n\n印は「付いている方」を採ります（済みは消しません）。\n"
+        + "写真・測定値・部材は取り込みません。"
+        + (mineCnt ? ("\n\n※ このうち " + mineCnt + "件は、この端末でも入力している戸別です。印だけを足します。") : "")))) return;
+    // ---- 反映 ----
+    const done = await flowShareItemsApply(items, byNo, openNo);
+    flowShareSave();
+    await flowShareAfter();
+    toast(adds.length + "件の印を引き継ぎました"
+      + (done.drafts ? ("（下書き " + done.drafts + "件に反映）") : ""));
+  }catch(e){
+    console.warn("引き継ぎに失敗", e);
+    await uiAlert("読み込みに失敗しました：" + (e && e.message ? e.message : e));
+  }finally{
+    _flowShareBusy = false;
+    flowShareBtnBusy(false);
+  }
+}
+/* 読んだ内容を控えと下書きへ入れる。
+   ・控え（_flowShare.rows）… 全部入れる。印が増えなくても editedAt を控えておく。
+   ・下書き … ある戸別だけ、印を足す（写真・測定値などは触らない）。
+   ・その戸別のファイルが「他の端末のもの」なら、その印を控える（上書きの前に確かめる）。 */
+async function flowShareItemsApply(items, byNo, openNo){
+  let drafts = 0, marked = 0;
+  for(const it of items){
+    _flowShare.rows[it.no] = flowShareMergeRec(_flowShare.rows[it.no], it.rec);
+    const isOpen = (it.no === openNo);
+    const rec = byNo[it.no];
+    const model = isOpen ? M : ((rec && rec.model) || null);
+    if(!model) continue;
+    const changed = flowApplyShared(model, it.rec);
+    // このファイルはこの端末が保存したものか。保存していない／保存より後に書かれていれば
+    // 他の端末のもの＝この端末から保存し直すと、その中身（写真など）が置き換わる。
+    const mineMs = isOpen ? (_save.fileAt || 0) : ((rec && rec.fileSavedAt) || 0);
+    const fileMs = Date.parse(it.rec.editedAt || "") || 0;
+    const notMine = !mineMs || (fileMs && fileMs > mineMs + 60000);
+    let markChanged = false;
+    if(notMine && model._otherFile !== it.rec.from){ model._otherFile = it.rec.from; markChanged = true; marked++; }
+    if(changed) drafts++;
+    if(isOpen) continue;                       // 開いている戸別は最後に persistDraft でまとめて控える
+    if(!changed && !markChanged) continue;
+    if(changed){
+      rec.rev = (rec.rev | 0) + 1; rec.touched = true;
+      rec.flow = flowOf(rec.model); rec.surveyDone = !!rec.model.survey_done;
+    }
+    rec.other = rec.model._otherFile || "";
+    try{ await idbPut(rec); }catch(e){ console.warn("下書きへの反映に失敗", it.no, e); }
+  }
+  return { drafts, marked };
+}
+/* 反映のあと片づけ（開いている戸別の控え・一覧・地図・保存バーを出し直す） */
+async function flowShareAfter(){
+  clearTimeout(_persistTimer);
+  try{ await persistDraft(); }catch(_){}
+  await refreshDraftInfo();
+  try{ render(); }catch(_){}
+  try{ receptionRerender(); }catch(_){}
+  try{ if(_mapPack && document.getElementById("map-modal").classList.contains("open")) mapRefreshMarks(); }catch(_){}
+}
+/* この戸別のファイルを他の端末が持っているなら、置き換える前に一度確かめる */
+async function flowShareConfirmOverwrite(m){
+  const f = m && m._otherFile;
+  if(!f) return true;
+  const sh = flowShareOf(m && m.chosho_mgmt_no);
+  const ph = (sh && sh.photos) ? ("そのファイルの写真 " + sh.photos + "枚など、") : "";
+  return await uiConfirm("この戸別は、すでにファイルに保存されています。\n\n「" + f + "」\n\n"
+    + "このまま保存すると、中身はこの端末の内容に置き換わります。\n"
+    + ph + "この端末に無いものは、そのファイルから消えます。\n\n保存しますか？");
+}
+/* 引き継いだ印を全部消す（別の物件に移ったとき等） */
+async function flowShareClearAsk(){
+  const n = flowShareCount();
+  if(!n){ await uiAlert("引き継いだ印はありません。"); return; }
+  if(!(await uiConfirm("他の端末から引き継いだ印 " + n + "件を消します。\n\n"
+      + "この端末で入力した内容と、保存した 管理番号.json は消えません。\n"
+      + "もう一度読み込めば、また引き継げます。"))) return;
+  flowShareClear();
+  await refreshDraftInfo();
+  receptionRerender();
+  toast("引き継いだ印を消しました");
+}
+
+/* ============================================================================
    「触っていないことにする」
    この端末の下書きを消して、受付台帳を取り込んだ直後の見た目に戻す。
    （PCの受付台帳の行と、すでに書き出した 管理番号.json は消さない）
@@ -3707,14 +4049,16 @@ function receptionRerender(){
 }
 /* 「開いただけ（まだ何も入力していない）」の下書きか */
 function isOpenedOnly(info){
-  return !!(info && info.has && !flowAny(info.flow) && handoverOf(info) === "");
+  return isUntouchedHere(info);
 }
 /* 1件を「触っていないことにする」 */
 async function untouchCase(row){
   if(!row) return;
   const no = String(row.mgmt_no||"").trim();
   const info = draftInfoOf(no);
-  if(!no || !info || !info.has || flowAny(info.flow)) return;   // 対象は「入力中」（工程がまだ1つも進んでいない）戸別だけ
+  // 対象は「入力中」（工程がまだ1つも進んでいない）戸別だけ。
+  // 引き継いだ印だけが付いている戸別も、この端末では何もしていないので戻せる。
+  if(!no || !info || !info.has || (flowAny(info.flow) && !isUntouchedHere(info))) return;
   const who = no + (row.name ? ("　" + row.name) : "");
   const lost = [];
   if(info.photos) lost.push("写真" + info.photos + "枚");
@@ -3724,7 +4068,8 @@ async function untouchCase(row){
        + "この端末の " + lost.join("と") + " が消えます。元には戻せません。\n"
        + "（PCの受付台帳の行と、すでに保存した 管理番号.json は消えません）")
     : ("この戸別を「触っていない」状態に戻します。\n\n" + who + "\n\n"
-       + "開いただけで、まだ何も入力されていません。「入力中」の印が消えます。");
+       + "開いただけで、まだ何も入力されていません。「入力中」の印が消えます。"
+       + (info.other ? "\n（他の端末から引き継いだ工程の印は残ります）" : ""));
   if(!(await uiConfirm(msg))) return;
   await draftsFlushAndStop();
   const keys = await draftKeysOfNo(no);
@@ -3871,6 +4216,12 @@ document.getElementById("btn-new").addEventListener("click",newCase);
 document.getElementById("btn-list2").addEventListener("click",openDraftModal);
 document.getElementById("draft-close").addEventListener("click",closeDraftModal);
 document.getElementById("btn-import").addEventListener("click",()=>document.getElementById("import-file").click());
+document.getElementById("btn-flowshare").addEventListener("click",flowShareStart);
+document.getElementById("flowshare-file").addEventListener("change",async e=>{
+  const fs=[...(e.target.files||[])]; e.target.value="";
+  if(!fs.length) return;
+  await flowShareRead(fs.map(f=>({ name:f.name, file:f })), false);
+});
 document.getElementById("draft-modal").addEventListener("click",e=>{ if(e.target.id==="draft-modal") closeDraftModal(); });
 
 /* ============================================================================
@@ -3916,7 +4267,10 @@ async function refreshDraftInfo(){
                : ((rec.model && rec.model.chosho_photos) ? rec.model.chosho_photos.length : 0);
       // 工程（下見・ビラ・工事・同意書・工事完了書）。控えの無い古い下書きは中身から作る。
       const flow = (rec.flow && typeof rec.flow === "object") ? rec.flow : flowOf(rec.model || {});
-      map[no] = { done, flow, photos: ph, has: true, touched: (rec.touched !== false),
+      // その戸別のファイルを他の端末が持っているか（控えの無い古い下書きは中身から見る）
+      const other = String((rec.other !== undefined) ? (rec.other || "")
+                          : ((rec.model && rec.model._otherFile) || ""));
+      map[no] = { done, flow, photos: ph, has: true, touched: (rec.touched !== false), other,
                   fileAt: rec.fileSavedAt || 0, savedAt: rec.savedAt || 0,
                   rev: rec.rev | 0, fileRev: rec.fileRev | 0 };
     });
@@ -3928,13 +4282,14 @@ function draftInfoOf(no){
   no = String(no||"").trim();
   if(no && no === String(M.chosho_mgmt_no||"").trim()){
     return { done: !!M.survey_done, flow: flowOf(M), photos: (M.chosho_photos||[]).length, has: true,
-             touched: (M._touched !== false),
+             touched: (M._touched !== false), other: M._otherFile || "",
              fileAt: _save.fileAt, stale: !!(saveStale() || _save.dirty) };
   }
   const d = _draftInfo[no];
   if(!d) return null;
   // 古い下書き（回数を持たない）は 0>0 で false ＝「保存済み」扱い。次に直せば 1>0 で変更ありになる。
   return { done: d.done, flow: d.flow, photos: d.photos, has: true, touched: d.touched, fileAt: d.fileAt,
+           other: d.other || "",
            stale: !!(d.fileAt && (d.rev|0) > (d.fileRev|0)) };
 }
 /* この戸別をPCに渡せているか。
@@ -3943,9 +4298,18 @@ function draftInfoOf(no){
 function handoverOf(info){
   if(!info || !info.has) return "";
   // 台帳から開いただけ（まだ何も入力していない）は、渡すものが無いので何も出さない
-  if(!info.touched && !info.photos && !flowAny(info.flow) && !info.fileAt) return "";
+  if(isUntouchedHere(info)) return "";
   if(!info.fileAt) return "none";
   return info.stale ? "stale" : "ok";
+}
+/* この端末では、まだ何もしていない戸別か（開いただけ）。
+   他の端末から引き継いだ印だけが付いている戸別も「まだ何もしていない」に入れる。
+   ここで拾わないと、引き継いだ印のせいで「まとめて保存」の対象になり、
+   中身の入っている他の端末のファイルを、空に近い内容で上書きしてしまう。 */
+function isUntouchedHere(info){
+  if(!info || !info.has) return false;
+  if(info.touched || info.photos || info.fileAt) return false;
+  return !flowAny(info.flow) || !!info.other;
 }
 /* ---- 一覧を「いまの工程」で絞る ----
    下見の日／ビラ配りの日／工事の日…と、その日にやる戸別だけを出せるようにする。
@@ -4046,12 +4410,16 @@ function renderReceptionSort(){
   btn.disabled = (_rcSort === "file");            // 台帳の順は向きを変えても同じ
   btn.style.opacity = btn.disabled ? ".45" : "";
 }
-/* 一覧の1行の工程。この端末の下書きが最優先で、まだ開いていない戸別はPCの受付台帳の行から作る。 */
+/* 一覧の1行の工程。この端末の下書きが最優先。まだ開いていない戸別は、PCの受付台帳の行と、
+   他の端末の保存ファイルから引き継いだ印を合わせて作る（引き継ぎは「付いている方」を採る）。 */
 function rowFlowOf(row){
-  const info = draftInfoOf(row && row.mgmt_no);
+  const no = row && row.mgmt_no;
+  const info = draftInfoOf(no);
   if(info && info.flow) return info.flow;
   const rf = receptionFlowOf(row);
-  return { survey:false, flyer:rf.flyer, work:rf.work, consent:rf.consent, compdoc:rf.compdoc };
+  const base = { survey:false, flyer:rf.flyer, work:rf.work, consent:rf.consent, compdoc:rf.compdoc };
+  const sh = flowShareOf(no);
+  return sh ? flowMerge(base, sh.flow) : base;
 }
 /* 行の左に出す「下・ビ・工・完」の4つ並び。済んだ工程だけ色が付く。 */
 function flowDotsHtml(f){
@@ -4118,7 +4486,19 @@ function renderReceptionList(q){
     ? `<div class="rc-undo">開いただけの戸別が <b>${openedOnly}件</b> あります（まだ何も入力していません）。`
       + `<button id="rc-undoall">まとめて取消（${openedOnly}件）</button></div>`
     : "";
-  host.innerHTML=warn+redoBar+undoBar+filtered.map(r=>{
+  // 他の端末で進めた分の引き継ぎ。保存した戸別ファイルをそのまま印の控えとして読む。
+  const shareCnt = flowShareCount();
+  const shareDir = saveDirName();
+  const shareBar = `<div class="rc-share">何台かで分けて回るときは、`
+    + `<b>保存した「管理番号.json」を読む</b>と、他の端末で進めた<b>工程の印</b>を引き継げます。`
+    + `<button id="rc-share-btn" data-label="📥 他の端末の保存を読み込む">📥 他の端末の保存を読み込む</button>`
+    + `<div class="rc-share-sub">`
+    + (shareDir ? `「<b>${esc(shareDir)}</b>」フォルダを丸ごと読みます。`
+                : `<b class="fname">管理番号.json</b> をまとめて選んでください（いくつでも選べます）。`)
+    + `印は「付いている方」を採ります。写真・測定値・部材は取り込みません。`
+    + (shareCnt ? ` 引き継ぎ済み <b>${shareCnt}件</b> <button type="button" id="rc-share-clear" class="rc-share-clear">引き継ぎを消す</button>` : "")
+    + `</div></div>`;
+  host.innerHTML=warn+redoBar+undoBar+shareBar+filtered.map(r=>{
     const idx=rows.indexOf(r);
     const info=draftInfoOf(r.mgmt_no);
     const sub=[r.addr, r.date?("予定 "+r.date):"", r.contractor].filter(Boolean).map(esc).join("・");
@@ -4131,6 +4511,12 @@ function renderReceptionList(q){
     const dots = flowDotsHtml(rf);
     const phase = top ? `<span class="rc-badge ph-${top.key}">${esc(top.badge)}</span>` : '';
     const started = (info&&info.has&&!flowAny(rf)) ? '<span class="rc-badge open">入力中</span>' : '';
+    // その戸別のファイルを他の端末が持っている（＝印はそこから引き継いだ）。
+    // ここで出しておかないと、上書きになることに気づけない。
+    const otherFrom = (info && info.has) ? String(info.other||"") : String((flowShareOf(r.mgmt_no)||{}).from||"");
+    const other = otherFrom
+      ? `<span class="rc-badge other" title="${esc(otherFrom)}（他の端末が保存したファイル）から引き継いだ印です">他端末</span>`
+      : '';
     const ph = (info&&info.photos) ? ('<span class="rc-ph">写真'+info.photos+'枚</span>') : '';
     // 戸別ファイルに書き出したか。写真以外はこの書き出しでしかPCへ渡らないので、一覧にも出す。
     const hand = handoverOf(info);
@@ -4145,7 +4531,8 @@ function renderReceptionList(q){
     const note = String(r.note||"").replace(/\s+/g," ").trim();
     const noteHtml = note ? `<div class="rc-note">${esc(note)}</div>` : "";
     // 「入力中」の戸別は、触っていないことにして取り込み直後の状態へ戻せる
-    const canUndo = !!(info && info.has && !flowAny(rf));
+    // 引き継いだ印だけが付いている戸別も、この端末では何もしていないので戻せる
+    const canUndo = !!(info && info.has && (!flowAny(rf) || isUntouchedHere(info)));
     // 一覧からそのまま地図へ飛べる（戸別は開かない。地図を閉じればこの一覧に戻る）
     const onMap = !!(_mapPack && mapFindMark(r.mgmt_no));
     const mapBtn = _mapPack
@@ -4161,7 +4548,7 @@ function renderReceptionList(q){
     // この端末で工程を進めた戸別だけ「見直す」（PCの台帳で済んでいるだけの戸別は「開く」）
     const act = `<div class="d-act"><button class="d-open" data-recopen="${idx}">${(info&&flowAny(info.flow))?"見直す":"開く"}</button>${act2}</div>`;
     return `<div class="draft${cls}${unsaved?" rc-unsaved":""}"><div class="d-main" data-recopen="${idx}">
-      <div class="d-no">${dots}${phase}${started}${unsaved}${hold}${badge}${esc(r.mgmt_no||"（番号なし）")}${r.name?(" ／ "+esc(r.name)):""}</div>
+      <div class="d-no">${dots}${phase}${started}${other}${unsaved}${hold}${badge}${esc(r.mgmt_no||"（番号なし）")}${r.name?(" ／ "+esc(r.name)):""}</div>
       <div class="d-sub">${sub}${ph}${fileNote}</div>${noteHtml}</div>${act}</div>`;
   }).join("");
   const sa = document.getElementById("rc-saveall");
@@ -4170,6 +4557,10 @@ function renderReceptionList(q){
   if(sa2) sa2.addEventListener("click", saveAllOverwrite);
   const ua = document.getElementById("rc-undoall");
   if(ua) ua.addEventListener("click", untouchOpenedOnly);
+  const sh = document.getElementById("rc-share-btn");
+  if(sh) sh.addEventListener("click", flowShareStart);
+  const shc = document.getElementById("rc-share-clear");
+  if(shc) shc.addEventListener("click", flowShareClearAsk);
   // 「取消」は .d-main の外に置いてあるので、行を開くハンドラには拾われない
   host.querySelectorAll("[data-recmap]").forEach(b=>b.addEventListener("click",()=>{
     const r = rows[parseInt(b.getAttribute("data-recmap"),10)];
@@ -4216,6 +4607,10 @@ async function openFromReception(row){
       if(!rf[k]) return;
       const st=flowStep(k); if(st) m[st.flag]=true;
     }); }
+  // 他の端末の保存ファイルから引き継いだ印も入れる（一覧に出ているとおりの状態で開く）。
+  // その戸別のファイルは他の端末が持っているので、うっかり上書きしないよう控えておく。
+  { const sh=flowShareOf(mgmt);
+    if(sh){ flowApplyShared(m, sh); if(sh.from) m._otherFile=sh.from; } }
   if(mgmt){ delete m._draftId; m._lastDraftKey="no:"+mgmt; }
   if(row.note) m.chosho_note = String(row.note);  // 備考はPCと共通の欄。台帳の内容から始める
   m._rcSrc = rcSrcOf(row);                        // 次に「PCが直したか」を見分けるための控え
