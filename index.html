@@ -757,6 +757,8 @@ const OPT = {
   remove_drop:[["yes","あり"],["no","なし"]],
   dummy_attached:[["yes","取付確認済"],["no","未取付（要確認）"]],
   use_fa:[["yes","使用（保安器台に取付）"],["no","使用しない"]],
+  fa_splitter:[["no","なし"],["sp_2cw","2分配器WP SP2CW"],["sp_2cdw","2分配器WP SP2CDW（全通電）"],["sp_3cw","3分配器WP SP3CW"]],
+  fa_splitter_pos:[["instead","FAの代わり"],["after","FAの後ろ"]],
   ext_power_conn:[["splitter_2","2分配器使用（メイン）"],["direct","電源部IN/OUT直結"]],
   att_main:[["no","なし"],["att_w3","ATTW3 (-3dB)"],["att_w6","ATTW6 (-6dB)"],["att_w10","ATTW10 (-10dB)"]],
   att_46:[["no","なし"],["att_w3","ATTW3 (-3dB)"],["att_w6","ATTW6 (-6dB)"],["att_w10","ATTW10 (-10dB)"]],
@@ -790,7 +792,8 @@ const DEFAULTS = {
   connector_type:"mj25s",connector_qty:"0",turnbuckle_qty:"4",amplifier:"amp_3u43",
   line_booster:"yes",hpf:"hpf_std",outer_splitter:"sp_2cw",indoor_split:"unknown",split_all_pass:"no",
   power_pos:"tv_back",indoor_wire:"existing",outer_wire:"existing",tv_count:"4",
-  remove_safety:"yes",remove_drop:"yes",cable_drop_len:"20",dummy_attached:"yes",use_fa:"yes",meas_show:"yes",
+  remove_safety:"yes",remove_drop:"yes",cable_drop_len:"20",dummy_attached:"yes",use_fa:"yes",
+  fa_splitter:"no",fa_splitter_pos:"instead",meas_show:"yes",
   // 現場の流れ（下見 → ビラ配り → 工事 → 完了）。詳しくは FLOW_STEPS の説明を見てください。
   survey_done:false,survey_done_at:"",
   flyer_done:false,flyer_done_at:"",
@@ -847,7 +850,8 @@ const GENBA_KNOWN_KEYS = new Set([
   "mount_type","side_base_1","side_base_2","side_base_3","mast","mast_2","mast_3",
   "connector_type","connector_qty","turnbuckle_qty","amplifier","line_booster","hpf","outer_splitter",
   "indoor_split","split_all_pass","power_pos","indoor_wire","outer_wire","tv_count",
-  "remove_safety","remove_drop","cable_drop_len","dummy_attached","use_fa","meas_show",
+  "remove_safety","remove_drop","cable_drop_len","dummy_attached","use_fa",
+  "fa_splitter","fa_splitter_pos","meas_show",
   "cable_new_len","cable_main_len","cable_ch46_len","cable_ch50_len","cable_amp_next_len",
   "cable_indoor_new","cable_vvf_len","cable_s5cfb_power","ext_power_conn",
   "att_main","att_46","att_50","box_consent","ofmu_qty","wire_sus16_len",
@@ -1681,6 +1685,11 @@ const SECTIONS = [
     {id:"outer_wire", type:"seg", label:"外部配線（屋外ケーブル）", hint:"FA（接続部）から家の中に入って分配器までの配線を、新規=張替（図面は赤・積算に計上）／既存を流用（黒・計上なし）で選択。アンテナ〜増幅器〜FAは常に新規（赤）。基本は既存利用。"},
     {id:"indoor_wire", type:"seg", label:"宅内配線（家の中）", hint:"分配器から各部屋への配線を、新規=張替（赤・積算に計上）／既存を流用（黒・計上なし）で選択。基本は既存利用。新規分の長さは下の「宅内 新規分」で指定。"},
     {id:"use_fa", type:"seg", label:"FA中継"},
+    {id:"fa_splitter", type:"select", label:"FA接続部の分配", show:m=>m.is_catv==="yes"&&m.power_pos!=="outside",
+     hint:"FA接続部（保安器台のところ）に分配器が入る現場で選びます。1口は壁→宅内分配器へ、残りは「別系統へ」として図面に出ます。外部電源のときは、そこに2分配器WPが入るのでこの欄は出ません。"},
+    {id:"fa_splitter_pos", type:"seg", label:"分配器の位置",
+     show:m=>m.is_catv==="yes"&&m.power_pos!=="outside"&&m.fa_splitter!=="no"&&m.use_fa==="yes",
+     hint:"FAの代わり＝保安器台に分配器を付ける（FA中継は図面に出ません）／FAの後ろ＝増幅器アウト→FA中継→分配器→壁"},
     {id:"dummy_attached", type:"seg", label:"ダミー抵抗"},
     {sub:"ケーブル長（m）"},
     {id:"cable_main_len", type:"num", label:"主系統 ア→増幅"},
@@ -1977,7 +1986,10 @@ function wireEntries(){
   const spSideExist = (m.indoor_split==="unknown") ? true : (m.indoor_wire==="existing");
   const isOutside = m.power_pos==="outside";
   const direct = m.ext_power_conn==="direct";
-  const usesFA = (m.is_catv==="yes") && (m.use_fa==="yes") && !isOutside; // 原本: is_catv && faNode
+  // 原本: is_catv && (faNode || faSpNode)。FA接続部に分配器だけを置く現場もあるので、
+  // FA中継を使わなくても分配器があれば同じ道（増幅器→FA接続部→壁抜け）になる。
+  const usesFA = (m.is_catv==="yes") && !isOutside
+    && ((m.use_fa==="yes") || (m.fa_splitter && m.fa_splitter!=="no"));
   const list=[];
   // アンテナ→増幅器
   list.push({key:"main_trunk_0", label:"主系統 アンテナ→増幅器", def:false});
@@ -2467,7 +2479,8 @@ function buildState(){
     "mount_type","side_base_1","side_base_2","side_base_3","mast","mast_2","mast_3",
     "connector_type","connector_qty","turnbuckle_qty","amplifier","line_booster","hpf","outer_splitter",
     "indoor_split","split_all_pass","power_pos","indoor_wire","outer_wire","tv_count",
-    "remove_safety","remove_drop","cable_drop_len","dummy_attached","use_fa","meas_show",
+    "remove_safety","remove_drop","cable_drop_len","dummy_attached","use_fa",
+    "fa_splitter","fa_splitter_pos","meas_show",
     "cable_new_len","cable_main_len","cable_ch46_len","cable_ch50_len","cable_amp_next_len",
     "cable_indoor_new","cable_vvf_len","cable_s5cfb_power","ext_power_conn",
     "att_main","att_46","att_50","box_consent","ofmu_qty","wire_sus16_len",
