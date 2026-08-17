@@ -401,6 +401,9 @@
   /* 地図に載っている戸別は、地図ボタンを目立たせる */
   .footbar .nav button.on-map{background:#00695c; color:#fff;}
   .addr-row .map-btn.on-map{background:#00695c;}
+  /* 電話番号の横の「📞 電話」。押すとその番号にかけられる（スマホ） */
+  .addr-row .tel-btn{background:#1565c0; text-decoration:none;}
+  .addr-row .tel-btn.off{background:#b0bec5; pointer-events:none;}
   header button.ghost.on-map{background:#00897b; color:#fff;}
   /* ---- 動き（スマホで気持ちよく動くように） ---- */
   .sec{transition:box-shadow var(--t-med) var(--ease), border-color var(--t-med) var(--ease);}
@@ -1681,7 +1684,8 @@ const SECTIONS = [
      hint:"PCの受付台帳の「工事日程予定」と同じ欄です。下見の段階では空のままにしてください（台帳に予定日が入っていれば、開いたときに入ります。ここで空にすれば空のまま残ります）"},
     {id:"chosho_cust_name", type:"text", label:"顧客名"},
     {id:"chosho_cust_addr", type:"text", label:"住所", mapLink:true, hint:"「地図」は下のバーの「地図」と同じ。PCから取り込んだ図面でこの戸別の場所を見られます（図面が無いときはGoogleマップへ）"},
-    {id:"chosho_cust_tel", type:"tel", label:"電話番号"},
+    {id:"chosho_cust_tel", type:"tel", label:"電話番号", telLink:true,
+     hint:"「📞 電話」を押すと、この番号にそのままかけられます（スマホ）。番号が入っていないときは灰色です。"},
     {id:"chosho_status", type:"select", label:"ステータス",
      hint:"上の「🚩 工程」で工事を済みにすると、ここも自動で「完了」になります（PCの受付台帳の「完了」と同じ欄です）"},
     {id:"chosho_note", type:"area", label:"備考", rows:4,
@@ -1947,6 +1951,10 @@ function renderField(f){
       // 図面が無いとき／管理番号が図面に無いときは、その場からGoogleマップへ行ける。
       inner = `<div class="addr-row">${inputHtml}`
         + `<button type="button" class="map-btn" id="addr-map-link">地図</button></div>`;
+    } else if(f.telLink){
+      // 電話番号の横の「📞 電話」。スマホの電話アプリがそのまま開くよう、ふつうのリンクにする。
+      inner = `<div class="addr-row">${inputHtml}`
+        + `<a class="map-btn tel-btn" id="tel-call-link" href="#">📞 電話</a></div>`;
     } else {
       inner = inputHtml;
     }
@@ -2301,6 +2309,25 @@ function bindEvents(root){
 function onTextInput(id){
   saveDraft();
   updateHeader();
+  if(id === "chosho_cust_tel") updateTelLink();
+}
+/* 電話番号の横の「📞 電話」を、いまの番号に合わせる。
+   番号が無いときは灰色にして押せなくする（空の tel: を開くと何も起きず、壊れて見えるため）。 */
+function updateTelLink(){
+  const a = document.getElementById("tel-call-link"); if(!a) return;
+  const raw = String(M.chosho_cust_tel || "").trim();
+  // 全角で入っている番号（PCの台帳や手入力）でもかけられるように、半角へ直してから拾う
+  const num = raw.replace(/[０-９＋]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
+                 .replace(/[^0-9+]/g, "");
+  if(num.length >= 6){
+    a.href = "tel:" + num;
+    a.classList.remove("off");
+    a.title = raw + " にかけます";
+  } else {
+    a.href = "#";
+    a.classList.add("off");
+    a.title = "電話番号が入っていません";
+  }
 }
 // 住所→Googleマップ（各OSの地図アプリ）URL
 function mapUrl(addr){
@@ -2648,6 +2675,7 @@ function updateMapBtns(){
     b.title = !has ? "PCの地図を取り込むと、この戸別の場所を見られます"
       : (hit ? "この戸別の建物を地図で見る" : "地図を見る（この管理番号は地図に登録されていません）");
   });
+  updateTelLink();                    // 電話番号の横の「📞 電話」も同じ場面で作り直される
 }
 function openMapView(no){
   _mapTarget = String(no || M.chosho_mgmt_no || "").trim();
@@ -3030,7 +3058,7 @@ function renderMapCard(){
   const f = rowFlowOf(row || { mgmt_no: no });
   const top = flowTopPhase(f);
   const sub = row
-    ? [row.addr, row.date ? ("予定 " + row.date) : "", row.contractor].filter(Boolean).map(esc).join("・")
+    ? [row.addr, rcPlanText(row), rcMeetText(row), row.contractor].filter(Boolean).map(esc).join("・")
     : "";
   const badges = row
     ? ((row.status === "provisional" ? '<span class="rc-badge prov">仮</span>' : "")
@@ -3596,7 +3624,16 @@ function buildStateOf(model){
   try{ M = model; ensureModelShape(M); return buildState(); }
   finally{ M = keep; }
 }
-/* 受付台帳（PCで直したもの）を、この端末の下書きへ入れ直す。
+/* PCの受付台帳の項目が、現場入力でどう扱われるか
+       管理番号   … 下書きのキー。ここでは変えない
+       名前・住所・電話・工事予定日 … 下書きへ入れ直す（現場が空ならそのまま入れる）
+       状態       … 下書きへ入れ直す（「完了」は工程の工事完了と同じもの）
+       ビラ・同意書・工事完了書     … 工程の印として入れ直す
+       備考       … 現場でまだ書いていなければ入れる
+       保留・施工会社 … 下書きには持たない。一覧と地図のカードに台帳の内容をそのまま出す
+       工事の時刻・打合せ予定 … 同上（PCの受付台帳だけが持つ項目）
+
+   受付台帳（PCで直したもの）を、この端末の下書きへ入れ直す。
    PCが持ち主の項目＝名前・住所・電話・工事予定日。現場で入力したもの
    （アンテナ・部材・測定値・写真）は触らない。備考は現場でまだ書いていない時だけ入れる。
 
@@ -3615,6 +3652,9 @@ function receptionApplyToModel(m, row){
     const v   = String(row[rk] == null ? "" : row[rk]);
     const cur = String(m[k]    == null ? "" : m[k]);
     if(cur === v) return;
+    // 現場が空のままなら、台帳の値を入れる。「一覧に名前があるのに、開くと空欄」を防ぐ。
+    // （下書きを作ったあとで事務所が名前や電話を書き足した、という場面がこれ）
+    if(!cur && v){ m[k] = v; changed = true; return; }
     if(src){
       if(String(src[rk] == null ? "" : src[rk]) === v) return;   // 台帳は変わっていない＝現場が直した
     } else if(!v && !blankWins){
@@ -3649,6 +3689,14 @@ function receptionApplyToModel(m, row){
     }
     changed = true;
   });
+  // 状態（仮受付／受付済）。「完了」は工程の「工事完了」と同じものなので、上の工程の
+  // 入れ直しに任せる。現場で工事完了にした戸別を、台帳の「未完了」で戻したりはしない。
+  { const v = String(row.status || "").trim();
+    const cur = String(m.chosho_status || "");
+    const sv = src ? String(src.status || "") : "";
+    if(v && v !== cur && !(src && sv === v) && !(m.work_done && v !== "completed")){
+      m.chosho_status = v; changed = true;
+    } }
   m._rcSrc = rcSrcOf(row);
   return changed;
 }
@@ -4711,7 +4759,7 @@ function renderReceptionList(q){
   host.innerHTML=fltBar+warn+redoBar+undoBar+filtered.map(r=>{
     const idx=rows.indexOf(r);
     const info=draftInfoOf(r.mgmt_no);
-    const sub=[r.addr, r.date?("予定 "+r.date):"", r.contractor].filter(Boolean).map(esc).join("・");
+    const sub=[r.addr, rcPlanText(r), rcMeetText(r), r.contractor].filter(Boolean).map(esc).join("・");
     const badge = r.status==="provisional" ? '<span class="rc-badge prov">仮</span>' : '';
     // 保留は工程とは別枠。PCで保留にした戸別は現場でも一目で分かるようにする
     const hold = r.hold ? '<span class="rc-badge hold">保留</span>' : '';
@@ -4802,6 +4850,9 @@ async function openFromReception(row){
     const rec=await idbGet("no:"+mgmt);
     if(rec&&rec.model){                            // 既に下書きがあれば続きから
       M=rec.model; M._lastDraftKey="no:"+mgmt; ensureModelShape(M);
+      // PCで直した内容（名前・住所・電話・工事予定日・備考・工程）をここでも入れ直す。
+      // 取り込みのときにも入れているが、取り込み後に作った下書きなどもここで合わせる。
+      if(receptionApplyToModel(M, row)) saveDraftQuiet();
       // 現場でまだ備考を書いていなければ、台帳の備考（PC側で書き足した分）を入れる
       if(!String(M.chosho_note||"").trim() && row.note){ M.chosho_note = String(row.note); saveDraftQuiet(); }
       resetOpenState(); render();
@@ -4837,6 +4888,78 @@ async function openFromReception(row){
   updateHeader(); await persistDraft();            // 下書きは作るが「入力あり」にはしない
   closeReceptionModal(); toast("受付台帳から開きました");
 }
+/* 取り込んだ受付台帳を、この端末の下書きすべてへ入れ直す。反映できた件数を返す。
+   これをしないと、PCで直した名前・住所・電話・工事予定日・備考・工程が、
+   取り込んだあと戸別を開いても古いままになる（一覧の表示だけ新しくなって紛らわしい）。
+   現場で入力したもの（アンテナ・部材・測定値・写真）には触らない。 */
+async function receptionApplyToDrafts(){
+  const rows = getReceptionRows();
+  if(!rows.length) return 0;
+  const byNo = {};
+  rows.forEach(r => { const k = String((r && r.mgmt_no) || "").trim(); if(k && !byNo[k]) byNo[k] = r; });
+  let applied = 0;
+  // いま開いている戸別は画面ごと直す
+  const openNo = String(M.chosho_mgmt_no || "").trim();
+  if(openNo && byNo[openNo] && receptionApplyToModel(M, byNo[openNo])){
+    applied++; saveDraftQuiet(); render();
+  }
+  let all = [];
+  try{ all = await idbGetAll(); }catch(_){ return applied; }
+  for(const rec of (all || [])){
+    if(!rec || !rec.model) continue;
+    const no = String(rec.mgmt || "").trim();
+    if(!no || no === openNo || !byNo[no]) continue;
+    if(!receptionApplyToModel(rec.model, byNo[no])) continue;
+    rec.rev = (rec.rev | 0) + 1;          // 中身が変わった＝戸別ファイルを保存し直す対象になる
+    rec.flow = flowOf(rec.model);         // 工程の控えも合わせる（一覧・地図の印がすぐ合う）
+    try{ await idbPut(rec); applied++; }catch(e){ console.warn("下書きへの反映に失敗", no, e); }
+  }
+  if(applied){
+    clearTimeout(_persistTimer);
+    try{ await persistDraft(); }catch(_){}
+    await refreshDraftInfo();
+  }
+  return applied;
+}
+/* 取り込む前と後で、台帳がどう変わったかを数える。「読み込んだのに何も変わらない」を
+   その場で確かめられるようにするためのもの。 */
+function receptionDiffCount(oldRows, newRows){
+  const keyOf = r => String((r && r.mgmt_no) || "").trim();
+  const sigOf = r => [r.name, r.addr, r.tel, r.date, r.status, r.contractor,
+                      r.hold?1:0, r.flyer?1:0, r.consent?1:0, r.compdoc?1:0, r.note].join("\u0001");
+  const oldBy = {};
+  (oldRows || []).forEach(r => { const k = keyOf(r); if(k) oldBy[k] = r; });
+  let added = 0, changed = 0;
+  const seen = {};
+  (newRows || []).forEach(r => {
+    const k = keyOf(r); if(!k) return;
+    seen[k] = 1;
+    if(!oldBy[k]) added++;
+    else if(sigOf(oldBy[k]) !== sigOf(r)) changed++;
+  });
+  const removed = Object.keys(oldBy).filter(k => !seen[k]).length;
+  return { added, changed, removed };
+}
+/* 工事予定「2026-08-25」＋時刻「13:30」→「予定 2026-08-25 13:30」。時刻はPCの台帳だけが持つ。 */
+function rcPlanText(r){
+  const d = String((r && r.date) || "").trim(); if(!d) return "";
+  const t = String((r && r.time) || "").trim().slice(0, 5);
+  return "予定 " + d + (t ? (" " + t) : "");
+}
+/* 打合せ予定「2026-08-20T13:30」→「打合せ 8/20 13:30」。これもPCの台帳だけが持つ。 */
+function rcMeetText(r){
+  const v = String((r && r.meet) || "").trim(); if(!v) return "";
+  const m = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/.exec(v);
+  return m ? ("打合せ " + parseInt(m[2], 10) + "/" + parseInt(m[3], 10) + " " + m[4] + ":" + m[5])
+           : ("打合せ " + v);
+}
+/* 2026-08-17T05:30:00.000Z → 8/17 14:30（取り込みの知らせに出す） */
+function rcWhenText(iso){
+  const t = String(iso || "").trim(); if(!t) return "";
+  const dt = new Date(t); if(isNaN(dt.getTime())) return "";
+  const p = x => String(x).padStart(2, "0");
+  return (dt.getMonth()+1) + "/" + dt.getDate() + " " + p(dt.getHours()) + ":" + p(dt.getMinutes());
+}
 /* 受付台帳の行をこの端末に保存する。件数を返す。
    受付台帳ファイル単体からも、現場用（ひとまとめ）からも同じ道を通す。 */
 function receptionSaveRows(src){
@@ -4847,6 +4970,8 @@ function receptionSaveRows(src){
     addr:String(x.addr||x.chosho_cust_addr||""),
     tel:String(x.tel||x.chosho_cust_tel||""),
     date:String(x.date||x.chosho_date||""),
+    time:String(x.time||""),            // 工事予定の時刻（PCの受付台帳が持ち主。現場では見るだけ）
+    meet:String(x.meet||""),            // 打合せ予定の日時（同上）
     status:String(x.status||x.chosho_status||""),
     contractor:String(x.contractor||""),
     hold:!!x.hold,                      // 保留（古い書き出しファイルには無いので false 扱い）
@@ -4886,13 +5011,33 @@ document.getElementById("reception-file").addEventListener("change",e=>{
       else if(Array.isArray(data)) rows=data;
       else if(data && Array.isArray(data.rows)) rows=data.rows;
       if(!rows){
-        if(gotMap){ toast("地図を取り込みました（"+gotMap+"件）"); return; }   // 地図だけ入っていた場合
+        if(gotMap){ await uiAlert("🗺 地図を取り込みました（建物 "+gotMap+"件）。\n\nこのファイルに受付台帳は入っていませんでした。"); return; }
         await uiAlert("受付台帳が入っていないファイルです。\n\nPCの受付台帳で「📦 現場用」を押してできる\n「現場用_物件名_日付.json」を選んでください。"); return;
       }
+      const beforeRows = getReceptionRows();          // 取り込む前の中身（何が変わったか数えるため）
       let n;
       try{ n = receptionSaveRows({ rows, project, exportedAt, appVersion:mainVersion }); }
       catch(err){ await uiAlert("取り込んだ台帳の保存に失敗しました（空き容量不足かも）："+err.message); return; }
-      toast(gotMap ? ("受付台帳"+n+"件と地図を取り込みました") : ("受付台帳を取り込みました（"+n+"件）"));
+      const diff = receptionDiffCount(beforeRows, getReceptionRows());
+      let applied = 0;
+      try{ applied = await receptionApplyToDrafts(); }catch(e){ console.warn("下書きへの反映に失敗", e); }
+      try{ renderReceptionList(document.getElementById("reception-search").value||""); }catch(_){}
+      // 小さなトーストだと見落とすので、何がどう変わったかを出して確かめられるようにする
+      const when = rcWhenText(exportedAt);
+      await uiAlert("✅ 受付台帳を取り込みました（"+n+"件）"
+        + (project ? ("\n物件："+project) : "")
+        + (when ? ("\nPCで書き出した日時："+when) : "")
+        + (gotMap ? ("\n地図も取り込みました（建物 "+gotMap+"件）") : "")
+        + "\n\n"
+        + (beforeRows.length === 0
+            ? ("はじめての取り込みです（"+n+"件）。")
+            : ((diff.added || diff.changed || diff.removed)
+                ? ("前回の取り込みからの違い\n"
+                   + "・新しく増えた："+diff.added+"件\n"
+                   + "・内容が変わった："+diff.changed+"件"
+                   + (diff.removed ? ("\n・台帳から消えた："+diff.removed+"件") : ""))
+                : "前回の取り込みから変わったところはありませんでした。\n（PCで直したあと、書き出し直したファイルか確かめてください）"))
+        + (applied ? ("\n\nこの端末の下書き "+applied+"件に、PCで直した内容を入れ直しました。\n（現場で入力したアンテナ・部材・測定・写真はそのままです）") : ""));
     }catch(err){ await uiAlert("取込みに失敗しました："+err.message); }
   };
   r.readAsText(f);
