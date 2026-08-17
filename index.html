@@ -401,6 +401,9 @@
   /* 地図に載っている戸別は、地図ボタンを目立たせる */
   .footbar .nav button.on-map{background:#00695c; color:#fff;}
   .addr-row .map-btn.on-map{background:#00695c;}
+  /* 電話番号の横の「📞 電話」。押すとその番号にかけられる（スマホ） */
+  .addr-row .tel-btn{background:#1565c0; text-decoration:none;}
+  .addr-row .tel-btn.off{background:#b0bec5; pointer-events:none;}
   header button.ghost.on-map{background:#00897b; color:#fff;}
   /* ---- 動き（スマホで気持ちよく動くように） ---- */
   .sec{transition:box-shadow var(--t-med) var(--ease), border-color var(--t-med) var(--ease);}
@@ -1681,7 +1684,8 @@ const SECTIONS = [
      hint:"PCの受付台帳の「工事日程予定」と同じ欄です。下見の段階では空のままにしてください（台帳に予定日が入っていれば、開いたときに入ります。ここで空にすれば空のまま残ります）"},
     {id:"chosho_cust_name", type:"text", label:"顧客名"},
     {id:"chosho_cust_addr", type:"text", label:"住所", mapLink:true, hint:"「地図」は下のバーの「地図」と同じ。PCから取り込んだ図面でこの戸別の場所を見られます（図面が無いときはGoogleマップへ）"},
-    {id:"chosho_cust_tel", type:"tel", label:"電話番号"},
+    {id:"chosho_cust_tel", type:"tel", label:"電話番号", telLink:true,
+     hint:"「📞 電話」を押すと、この番号にそのままかけられます（スマホ）。番号が入っていないときは灰色です。"},
     {id:"chosho_status", type:"select", label:"ステータス",
      hint:"上の「🚩 工程」で工事を済みにすると、ここも自動で「完了」になります（PCの受付台帳の「完了」と同じ欄です）"},
     {id:"chosho_note", type:"area", label:"備考", rows:4,
@@ -1947,6 +1951,10 @@ function renderField(f){
       // 図面が無いとき／管理番号が図面に無いときは、その場からGoogleマップへ行ける。
       inner = `<div class="addr-row">${inputHtml}`
         + `<button type="button" class="map-btn" id="addr-map-link">地図</button></div>`;
+    } else if(f.telLink){
+      // 電話番号の横の「📞 電話」。スマホの電話アプリがそのまま開くよう、ふつうのリンクにする。
+      inner = `<div class="addr-row">${inputHtml}`
+        + `<a class="map-btn tel-btn" id="tel-call-link" href="#">📞 電話</a></div>`;
     } else {
       inner = inputHtml;
     }
@@ -2301,6 +2309,25 @@ function bindEvents(root){
 function onTextInput(id){
   saveDraft();
   updateHeader();
+  if(id === "chosho_cust_tel") updateTelLink();
+}
+/* 電話番号の横の「📞 電話」を、いまの番号に合わせる。
+   番号が無いときは灰色にして押せなくする（空の tel: を開くと何も起きず、壊れて見えるため）。 */
+function updateTelLink(){
+  const a = document.getElementById("tel-call-link"); if(!a) return;
+  const raw = String(M.chosho_cust_tel || "").trim();
+  // 全角で入っている番号（PCの台帳や手入力）でもかけられるように、半角へ直してから拾う
+  const num = raw.replace(/[０-９＋]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
+                 .replace(/[^0-9+]/g, "");
+  if(num.length >= 6){
+    a.href = "tel:" + num;
+    a.classList.remove("off");
+    a.title = raw + " にかけます";
+  } else {
+    a.href = "#";
+    a.classList.add("off");
+    a.title = "電話番号が入っていません";
+  }
 }
 // 住所→Googleマップ（各OSの地図アプリ）URL
 function mapUrl(addr){
@@ -2648,6 +2675,7 @@ function updateMapBtns(){
     b.title = !has ? "PCの地図を取り込むと、この戸別の場所を見られます"
       : (hit ? "この戸別の建物を地図で見る" : "地図を見る（この管理番号は地図に登録されていません）");
   });
+  updateTelLink();                    // 電話番号の横の「📞 電話」も同じ場面で作り直される
 }
 function openMapView(no){
   _mapTarget = String(no || M.chosho_mgmt_no || "").trim();
