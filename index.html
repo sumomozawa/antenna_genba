@@ -3822,17 +3822,41 @@ async function flowShareDirFiles(){
   }catch(e){ console.warn("保存先フォルダを読めませんでした", e); return null; }
   return out;
 }
-/* 「📥 他の端末の保存を読み込む」の入口 */
-async function flowShareStart(){
+/* 「📥 他の端末の保存を読み込む」の入口。
+   ・保存先フォルダを覚えている端末（PCのChrome/Edge）… そのフォルダを丸ごと読む
+   ・それ以外（スマホ）… その場でファイルを選んでもらう
+
+   ★ここは必ず同期のまま click() すること。
+     間に await を1つでも挟むと「押した操作」と切り離され、ファイル選択の画面が
+     開かない端末がある（iPhoneのSafari・ホーム画面アプリなど）。ボタンを押しても
+     何も起きない、という形で表に出る。
+     そのためフォルダの手がかりは起動時に読んでおき（boot）、ここでは覚えているか
+     どうかを見るだけにする。 */
+let _flowShareNoDir = false;      // フォルダから読めなかった端末：次からはファイル選択にする
+function flowShareStart(){
   if(_flowShareBusy) return;
-  let files = null;
-  try{ files = await flowShareDirFiles(); }catch(e){ console.warn("フォルダの読み取りに失敗", e); files = null; }
-  if(!files || !files.length){
-    const inp = document.getElementById("flowshare-file");
-    if(inp){ inp.value = ""; inp.click(); }        // 選ばれたら change から flowShareRead へ入る
+  if(!_flowShareNoDir && _saveDir && typeof _saveDir.values === "function"){
+    flowShareFromDir();
     return;
   }
-  await flowShareRead(files, true);
+  flowSharePick();
+}
+/* ファイルを選んでもらう（選ばれたら change から flowShareRead へ入る） */
+function flowSharePick(){
+  const inp = document.getElementById("flowshare-file");
+  if(!inp) return;
+  inp.value = "";
+  inp.click();
+}
+/* 覚えている保存先フォルダを丸ごと読む */
+async function flowShareFromDir(){
+  let files = null;
+  try{ files = await flowShareDirFiles(); }
+  catch(e){ console.warn("フォルダの読み取りに失敗", e); files = null; }
+  if(files && files.length){ await flowShareRead(files, true); return; }
+  _flowShareNoDir = true;         // このあとはファイルを選んでもらう
+  await uiAlert("保存先フォルダから 管理番号.json を読めませんでした。\n\n"
+    + "もう一度押すと、ファイルを選んで読み込めます。");
 }
 /* 読み込み本体。
    list … [{ name, handle }]（フォルダ） または [{ name, file }]（選んでもらったファイル）
@@ -4742,6 +4766,9 @@ window.addEventListener("pagehide", flushPersist);
     }
   }catch(e){ console.warn("boot draft load failed",e); }
   try{ await mapPackLoad(); }catch(e){ console.warn("boot map load failed",e); }
+  // 保存先フォルダの手がかりを先に読んでおく（「他の端末の保存を読み込む」を押した時に
+  // await を挟まずに済ませるため。スマホは覚えられないので null のまま）
+  try{ await saveDirGet(); }catch(e){ console.warn("boot savedir load failed",e); }
   try{ await saveStateLoad(); }catch(_){}
   setInterval(renderSaveBar, 30000);   // 「◯時◯分に保存」の表示を時々あらため直す
   // 画面を下へ送ったら上部バーを薄くする（入力欄を広く見せる）
