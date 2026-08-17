@@ -294,7 +294,7 @@
   header .flowtag{display:inline-block; margin-left:6px; background:#1b7a3d; color:#fff; font-size:10.5px;
     font-weight:700; padding:1px 7px; border-radius:9px; vertical-align:middle;
     animation:tagIn var(--t-med) var(--ease-out) both;}
-  /* いまどこまで進んだか（下見済／ビラ済／工事済／完了）を工程の色で出す */
+  /* いまどこまで進んだか（下見済／ビラ済／完了）を工程の色で出す */
   header .flowtag.ph-survey{background:#00838f;}
   header .flowtag.ph-flyer{background:#7b1fa2;}
   header .flowtag.ph-work{background:#1565c0;}
@@ -841,7 +841,7 @@ const DEFAULTS = {
   power_pos:"tv_back",indoor_wire:"existing",outer_wire:"existing",tv_count:"4",
   remove_safety:"yes",remove_drop:"yes",cable_drop_len:"20",dummy_attached:"yes",use_fa:"yes",
   fa_splitter:"no",fa_splitter_pos:"instead",meas_show:"yes",
-  // 現場の流れ（下見 → ビラ配り → 工事 → 完了）。詳しくは FLOW_STEPS の説明を見てください。
+  // 現場の流れ（下見 → ビラ配り → 同意書受取 → 工事完了書受取）。詳しくは FLOW_STEPS の説明を見てください。
   survey_done:false,survey_done_at:"",
   flyer_done:false,flyer_done_at:"",
   work_done:false,work_done_at:"",
@@ -961,8 +961,11 @@ function syncTvArrays(m){
 
        ① 下見       … 見て測って、材料を決める
        ② ビラ配り   … 工事のお知らせを配る
-       ③ 工事       … 実際に取り付ける
-       ④ 完了       … 同意書と工事完了書を受け取る（書類が2枚なので押す所も2つ）
+       ③ 完了       … 同意書 → 工事完了書 の順に受け取る（書類が2枚なので押す所も2つ）
+
+   同意書は工事より先にもらうこともあるので、同意書だけでは完了にしない。
+   工事そのものは「工事完了書 受取」と同じこととみなし、押す所は分けていない
+   （工事完了書を受け取ると、工事完了の印も一緒に付く）。
 
    どこまで済んだかを戸別ごとに持ち、下のボタン・「🚩 工程」の欄・受付台帳の一覧・
    地図の印の4か所で同じ内容を出します。
@@ -970,9 +973,10 @@ function syncTvArrays(m){
    PC（メイン）側の受付台帳との対応
        下見       survey_done        →（PCの「🧰 発注材料数量」の集計対象）
        ビラ配り   flyer_done         → 受付台帳の「ビラ」
-       工事       work_done          → 受付台帳の「完了」（＝工事完了。状態も completed になる）
        同意書     consent_received   → 受付台帳の「承諾書」
        工事完了書 compdoc_received   → 受付台帳の「完了書」
+       （工事）   work_done          → 受付台帳の「完了」（状態も completed になる）
+                                       ＝工事完了書 受取と一緒に付く。単独では押さない
 
    ※ 順番どおりでない押し方（下見より先にビラ等）も止めません。現場は前後することが
       あるので、「前が済んでいません」と一言聞いてから通します。
@@ -988,31 +992,34 @@ const FLOW_STEPS = [
     ask:"この戸別のビラ配りを済みにします。\n\nPCの受付台帳の「ビラ」に○が付きます。\n（あとから取り消せます）",
     undo:"ビラ配りの印を取り消しますか？\n（PCの受付台帳の「ビラ」の○が外れます）",
     hint:"工事のお知らせを配り終えたら押してください。PCの受付台帳の「ビラ」と同じ印です。" },
-  { key:"work", flag:"work_done", at:"work_done_at", ch:"工", phase:"work",
-    name:"工事", btn:"工事 完了", tone:"st-work",
-    ask:"この戸別の工事を完了にします。\n\nPCの受付台帳の「完了」に○が付き、ステータスも「完了」になります。\n（あとから取り消せます）",
-    undo:"工事完了の印を取り消しますか？\n（PCの受付台帳の「完了」の○が外れ、ステータスは「未完了」に戻ります）",
-    hint:"取り付けが終わったら押してください。PCの受付台帳の「完了」と同じ印です。" },
   { key:"consent", flag:"consent_received", at:"consent_received_at", ch:"同", phase:"done", doc:true,
     name:"同意書 受取", btn:"同意書 受取", tone:"st-doc",
-    ask:"同意書を受け取ったことにします。\n\nPCの受付台帳の「承諾書」に○が付きます。\n（あとから取り消せます）",
+    ask:"同意書を受け取ったことにします。\n\nPCの受付台帳の「承諾書」に○が付きます。\n（工事より先に受け取ることもあるので、これだけでは完了になりません）",
     undo:"同意書 受取の印を取り消しますか？\n（PCの受付台帳の「承諾書」の○が外れます）",
-    hint:"同意書（PCの受付台帳では「承諾書」）を受け取ったら押してください。" },
+    hint:"同意書（PCの受付台帳では「承諾書」）を受け取ったら押してください。工事より先でもかまいません。" },
   { key:"compdoc", flag:"compdoc_received", at:"compdoc_received_at", ch:"完", phase:"done", doc:true,
-    name:"工事完了書 受取", btn:"工事完了書 受取", tone:"st-doc",
-    ask:"工事完了書を受け取ったことにします。\n\nPCの受付台帳の「完了書」に○が付きます。\n（あとから取り消せます）",
-    undo:"工事完了書 受取の印を取り消しますか？\n（PCの受付台帳の「完了書」の○が外れます）",
-    hint:"工事完了書（PCの受付台帳では「完了書」）を受け取ったら押してください。" },
+    name:"工事完了書 受取", btn:"工事完了書 受取", tone:"st-doc", with:["work"],
+    ask:"工事完了書を受け取ったことにします。\n\n取り付けが終わった印（工事完了）も一緒に付きます。\nPCの受付台帳の「完了書」と「完了」に○が付き、ステータスも「完了」になります。\n（あとから取り消せます）",
+    undo:"工事完了書 受取の印を取り消しますか？\n（PCの受付台帳の「完了書」と「完了」の○が外れ、ステータスは「未完了」に戻ります）",
+    hint:"工事完了書（PCの受付台帳では「完了書」）を受け取ったら押してください。工事が終わった印も一緒に付きます。" },
+  // 工事は「工事完了書 受取」と同じこととみなすので、押す所は作らない（follow）。
+  // 印は今までどおり別に持っているので、PCや他の端末とのやりとりは変わらない。
+  { key:"work", flag:"work_done", at:"work_done_at", ch:"工", phase:"done", follow:true,
+    name:"工事完了", btn:"工事完了", ask:"", undo:"",
+    hint:"取り付けが終わった印（PCの受付台帳の「完了」）。工事完了書 受取と一緒に付きます。" },
 ];
-/* 画面に出す4つの工程。「完了」だけは書類2枚（同意書・工事完了書）でひとまとまり。 */
+/* 画面に出す3つの工程。「完了」だけは書類2枚（同意書 → 工事完了書）でひとまとまり。 */
 const FLOW_PHASES = [
   { key:"survey", ch:"下", name:"下見",     badge:"下見済", color:"#00838f" },
   { key:"flyer",  ch:"ビ", name:"ビラ配り", badge:"ビラ済", color:"#7b1fa2" },
-  { key:"work",   ch:"工", name:"工事",     badge:"工事済", color:"#1565c0" },
   { key:"done",   ch:"完", name:"完了",     badge:"完了",   color:"#1b5e20" },
 ];
 function flowStep(key){ for(const s of FLOW_STEPS){ if(s.key===key) return s; } return null; }
-function flowStepsOfPhase(pk){ return FLOW_STEPS.filter(s=>s.phase===pk); }
+/* 画面に出す工程。工事完了は「工事完了書 受取」と一緒に動くので、単独では出さない。 */
+function flowMainSteps(){ return FLOW_STEPS.filter(s=>!s.follow); }
+function flowStepsOfPhase(pk){ return flowMainSteps().filter(s=>s.phase===pk); }
+/* その工程と一緒に動かす工程（工事完了書 受取 → 工事完了） */
+function flowWithSteps(s){ return ((s && s.with) || []).map(flowStep).filter(Boolean); }
 /* 済んだ工程を { survey:true, ... } の形で取り出す。model でも、下書き一覧の控えでも使える。 */
 function flowOf(m){
   const o={};
@@ -1032,13 +1039,13 @@ function flowTopPhase(f){
 }
 /* 次にやること（上から順に、まだ済んでいない最初の1つ）。全部済んでいれば null */
 function flowNextStep(f){
-  for(const s of FLOW_STEPS){ if(!f || !f[s.key]) return s; }
+  for(const s of flowMainSteps()){ if(!f || !f[s.key]) return s; }
   return null;
 }
 /* その工程より前で、まだ済んでいないもの（「前が済んでいません」と知らせる用） */
 function flowPrevUndone(f, key){
   const out=[];
-  for(const s of FLOW_STEPS){ if(s.key===key) break; if(!f || !f[s.key]) out.push(s); }
+  for(const s of flowMainSteps()){ if(s.key===key) break; if(!f || !f[s.key]) out.push(s); }
   return out;
 }
 /* 2026-08-12T09:03:00.000Z → 8/12（一覧・工程の欄に小さく出す） */
@@ -1953,7 +1960,7 @@ function renderField(f){
 function renderFlow(){
   const f = flowOf(M);
   const next = flowNextStep(f);
-  const NUM = ["①","②","③","④"];
+  const NUM = ["①","②","③"];
   let strip = '<div class="flowstrip">';
   FLOW_PHASES.forEach(ph=>{
     const on = flowPhaseDone(f, ph.key);
@@ -1992,7 +1999,9 @@ function renderFlow(){
   return strip + rows
     + '<div class="flowhint">上から順に進みます。下のバーの<b>オレンジのボタン</b>でも、'
     + '次の工程をひとつずつ進められます。<br>'
-    + '「完了」は<b>同意書と工事完了書の両方</b>を受け取った状態です。</div>';
+    + '「完了」は<b>同意書と工事完了書の両方</b>を受け取った状態です。'
+    + '同意書は工事より先でもかまいません。<br>'
+    + '<b>工事完了書 受取</b>を押すと、取り付けが終わった印（PCの受付台帳の「完了」）も一緒に付きます。</div>';
 }
 
 // ---- TV各室 ----
@@ -2320,7 +2329,7 @@ function updateHeader(){
   const el=document.getElementById("hdr-mgmt");
   el.textContent = M.chosho_mgmt_no || "管理番号 未入力";
   el.classList.toggle("empty", !M.chosho_mgmt_no);
-  // どこまで進んだか（下見済／ビラ済／工事済／完了）を管理番号の右に出す
+  // どこまで進んだか（下見済／ビラ済／完了）を管理番号の右に出す
   const ph = flowTopPhase(flowOf(M));
   if(ph){
     const tag=document.createElement("span");
@@ -2332,7 +2341,7 @@ function updateHeader(){
   try{ updateMapBtns(); }catch(_){}
 }
 /* 下のバーの大きなボタン。「次にやること」を出し、押すとその工程を1つ進める。
-   下見 → ビラ配り → 工事 → 同意書 → 工事完了書 の順。全部済むと緑の「完了 済」になる。
+   下見 → ビラ配り → 同意書 → 工事完了書 の順。全部済むと緑の「完了 済」になる。
    （やり直し・順番の入れ替えは、上の「🚩 工程」の欄から） */
 function updateFlowBtn(){
   const b=document.getElementById("btn-flow");
@@ -2343,7 +2352,7 @@ function updateFlowBtn(){
   if(!nx){
     b.classList.add("done");
     b.textContent="完了 済";
-    b.title="この戸別は下見からビラ配り・工事・書類の受取まで、全部終わっています。直すときは上の「🚩 工程」から。";
+    b.title="この戸別は下見からビラ配り・書類の受取まで、全部終わっています。直すときは上の「🚩 工程」から。";
     return;
   }
   if(nx.tone) b.classList.add(nx.tone);
@@ -2358,15 +2367,19 @@ async function flowAdvance(){
 }
 /* 工程ひとつの済み／未済を入れ替える。
    ・順番どおりでなくても止めない（現場は前後する）。前が済んでいなければ一言聞く。
-   ・工事は、PCの受付台帳の「完了」＝ステータス completed と同じものなので、一緒に動かす。 */
+   ・工事完了書 受取には工事完了がぶら下がっている（with）。同じこととみなすので一緒に動かす。
+   ・工事完了は、PCの受付台帳の「完了」＝ステータス completed と同じものなので、これも一緒に。 */
 async function flowToggle(key){
   const s=flowStep(key); if(!s) return;
+  const also=flowWithSteps(s);            // 一緒に動かす工程（工事完了書 受取 → 工事完了）
+  const hasWork=[s].concat(also).some(x=>x.key==="work");
   const f=flowOf(M);
   const on=!!f[key];
   if(on){
     if(!(await uiConfirm(s.undo))) return;
     M[s.flag]=false; M[s.at]="";
-    if(key==="work" && M.chosho_status==="completed") M.chosho_status="in_progress";
+    also.forEach(x=>{ M[x.flag]=false; M[x.at]=""; });
+    if(hasWork && M.chosho_status==="completed") M.chosho_status="in_progress";
     toast(s.name+"の印を取り消しました");
   } else {
     if(key==="survey" && !String(M.chosho_mgmt_no||"").trim()){
@@ -2379,8 +2392,10 @@ async function flowToggle(key){
           + "\n\nこのまま「"+s.name+"」を済みにしますか？"))) return;
     }
     if(!(await uiConfirm(s.ask))) return;
-    M[s.flag]=true; M[s.at]=new Date().toISOString();
-    if(key==="work") M.chosho_status="completed";
+    const now=new Date().toISOString();
+    M[s.flag]=true; M[s.at]=now;
+    also.forEach(x=>{ M[x.flag]=true; M[x.at]=now; });
+    if(hasWork) M.chosho_status="completed";
     // 絞り込み中でも、済みにしたこの戸別は受付台帳から消さない
     { const no=String(M.chosho_mgmt_no||"").trim(); if(no) _rcJustDone.add(no); }
     const b=document.getElementById("btn-flow");
@@ -2562,9 +2577,10 @@ function buildState(){
   });
   s.asbestos=Object.assign({},M.asbestos);
   s.antenna_guide=JSON.parse(JSON.stringify(M.antenna_guide||{ver:1,pattern:null,parts:{}}));
-  // 現場の流れ（下見 → ビラ配り → 工事 → 完了）の印。
+  // 現場の流れ（下見 → ビラ配り → 同意書受取 → 工事完了書受取）の印。
   // ・下見完了 … PC側の「🧰 発注材料数量」がこの印を見て集計する
   // ・ビラ／工事／同意書／工事完了書 … PC側が受付台帳の「ビラ・完了・承諾書・完了書」に取り込む
+  //   （工事の印は「工事完了書 受取」と一緒に付くが、印そのものは今までどおり別に持って渡す）
   FLOW_STEPS.forEach(st=>{
     s[st.flag] = !!M[st.flag];
     s[st.at]   = String(M[st.at]||"");
@@ -2694,7 +2710,7 @@ function closeMapView(){
 
 /* ---- 地図に出す状態の印 ----
    建物の上に 保／下／ビ／工／完／未 を出す。工程の色は「🚩 工程」の帯と同じ。
-   ・下・ビ・工・完（工程）は、この端末の下書きが最優先。まだ開いていない戸別は
+   ・下・ビ・完（工程）は、この端末の下書きが最優先。まだ開いていない戸別は
      取り込んだ受付台帳の行から見る（PCで既にビラ済・完了になっていれば、それが出る）。
    ・保・未 は受付台帳の行から見る
    図面に焼き込まれた印ではなく、その場で重ねて描くので、
@@ -2703,7 +2719,6 @@ const MAPMK = [
   { key:"hold",   ch:"保", color:"#e65100", label:"保留",   def:true  },
   { key:"surv",   ch:"下", color:"#00838f", label:"下見済", def:true  },
   { key:"flyer",  ch:"ビ", color:"#7b1fa2", label:"ビラ済", def:true  },
-  { key:"work",   ch:"工", color:"#1565c0", label:"工事済", def:true  },
   { key:"done",   ch:"完", color:"#1b5e20", label:"完了（書類まで）", def:true  },
   { key:"undone", ch:"未", color:"#90a4ae", label:"未完了", def:false },
 ];
@@ -2736,10 +2751,9 @@ function mapMarksFor(no){
   if(row && row.hold) push("hold");
   if(flowPhaseDone(f, "survey")) push("surv");
   if(flowPhaseDone(f, "flyer"))  push("flyer");
-  if(flowPhaseDone(f, "work"))   push("work");
   if(flowPhaseDone(f, "done"))   push("done");
-  // 「未」は、まだ工事が終わっていない受付済みの戸別だけ（仮受付は工事前なので付けない）
-  else if(!flowPhaseDone(f, "work") && String((row && row.status) || "") === "in_progress") push("undone");
+  // 「未」は、まだ終わっていない受付済みの戸別だけ（仮受付は工事前なので付けない）
+  else if(String((row && row.status) || "") === "in_progress") push("undone");
   return out;
 }
 /* 図面の上に印を重ねる。建物の大きさに合わせた文字の大きさで、右肩に並べる。 */
@@ -4512,7 +4526,7 @@ const RC_FILTERS = [
   { key:"all",    label:"すべて",   hit:()=>true },
   { key:"survey", label:"下見待ち", hit:f=>!flowPhaseDone(f,"survey") },
   { key:"flyer",  label:"ビラ待ち", hit:f=>!flowPhaseDone(f,"flyer") },
-  { key:"work",   label:"工事待ち", hit:f=>!flowPhaseDone(f,"work") },
+  { key:"work",   label:"工事待ち", hit:f=>!(f && f.work) },
   { key:"doc",    label:"書類待ち", hit:f=>!flowPhaseDone(f,"done") },
   { key:"done",   label:"完了",     hit:f=>flowPhaseDone(f,"done") },
 ];
@@ -4542,7 +4556,7 @@ function renderReceptionFilter(){
 function flowRankOf(f){
   const top = flowTopPhase(f);
   const i = top ? FLOW_PHASES.findIndex(p => p.key === top.key) : -1;
-  return i + 1;                        // 0＝まだ何もしていない／1＝下見…4＝完了
+  return i + 1;                        // 0＝まだ何もしていない／1＝下見…3＝完了
 }
 /* 管理番号の下三桁。数字だけを拾って末尾3桁（メインの mgmtLast3Digits と同じ拾い方）。
    「2611MKM001」→「001」。現場では下三桁だけで呼ぶことが多いので、その順に並べられるようにする。 */
