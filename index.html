@@ -853,7 +853,7 @@ const DEFAULTS = {
   cable_new_len:"0",cable_main_len:"5",cable_ch46_len:"5",cable_ch50_len:"5",cable_amp_next_len:"10",
   cable_indoor_new:"2",cable_vvf_len:"5",cable_s5cfb_power:"5",ext_power_conn:"splitter_2",
   att_main:"no",att_46:"no",att_50:"no",box_consent:"no",ofmu_qty:"0",wire_sus16_len:"0",
-  chosho_mgmt_no:"",chosho_date:"",chosho_cust_name:"",chosho_cust_addr:"",chosho_cust_tel:"",
+  chosho_mgmt_no:"",chosho_date:"",chosho_meet_at:"",chosho_cust_name:"",chosho_cust_addr:"",chosho_cust_tel:"",
   chosho_note:"",
   chosho_status:"provisional",tax_mode:"excl",misc_fee:"include",
   outsource_fee_on:false,outsource_fee_amount:0,outsource_fee_auto:false,
@@ -905,7 +905,7 @@ const GENBA_KNOWN_KEYS = new Set([
   "cable_new_len","cable_main_len","cable_ch46_len","cable_ch50_len","cable_amp_next_len",
   "cable_indoor_new","cable_vvf_len","cable_s5cfb_power","ext_power_conn",
   "att_main","att_46","att_50","box_consent","ofmu_qty","wire_sus16_len",
-  "chosho_mgmt_no","chosho_date","chosho_cust_name","chosho_cust_addr","chosho_cust_tel","chosho_status",
+  "chosho_mgmt_no","chosho_date","chosho_meet_at","chosho_cust_name","chosho_cust_addr","chosho_cust_tel","chosho_status",
   "chosho_note","survey_done","survey_done_at",
   "flyer_done","flyer_done_at","work_done","work_done_at",
   "consent_received","consent_received_at","compdoc_received","compdoc_received_at",
@@ -1682,6 +1682,8 @@ const SECTIONS = [
     {id:"chosho_mgmt_no", type:"text", label:"管理番号", req:true, hint:"ファイル名・写真フォルダ名になります（例 245001）"},
     {id:"chosho_date", type:"date", label:"工事予定日",
      hint:"PCの受付台帳の「工事日程予定」と同じ欄です。下見の段階では空のままにしてください（台帳に予定日が入っていれば、開いたときに入ります。ここで空にすれば空のまま残ります）"},
+    {id:"chosho_meet_at", type:"datetime-local", label:"打合せ予定",
+     hint:"PCの受付台帳の「打合せ予定」と同じ欄です。現場でここに入れると、保存した戸別ファイルからPCの台帳へ戻ります。"},
     {id:"chosho_cust_name", type:"text", label:"顧客名"},
     {id:"chosho_cust_addr", type:"text", label:"住所", mapLink:true, hint:"「地図」は下のバーの「地図」と同じ。PCから取り込んだ図面でこの戸別の場所を見られます（図面が無いときはGoogleマップへ）"},
     {id:"chosho_cust_tel", type:"tel", label:"電話番号", telLink:true,
@@ -2575,7 +2577,7 @@ function buildState(){
     "cable_new_len","cable_main_len","cable_ch46_len","cable_ch50_len","cable_amp_next_len",
     "cable_indoor_new","cable_vvf_len","cable_s5cfb_power","ext_power_conn",
     "att_main","att_46","att_50","box_consent","ofmu_qty","wire_sus16_len",
-    "chosho_mgmt_no","chosho_date","chosho_cust_name","chosho_cust_addr","chosho_cust_tel","chosho_status",
+    "chosho_mgmt_no","chosho_date","chosho_meet_at","chosho_cust_name","chosho_cust_addr","chosho_cust_tel","chosho_status",
     "chosho_note"];
   const s={};
   STR_FIELDS.forEach(k=>{ s[k]=String(M[k]==null?"":M[k]); });
@@ -3666,6 +3668,7 @@ function receptionApplyToModel(m, row){
   set("chosho_cust_addr", "addr", false);
   set("chosho_cust_tel",  "tel",  false);
   set("chosho_date",      "date", true);   // 工事予定日はPCの台帳のもの。空にできないと直せない
+  set("chosho_meet_at",   "meet", true);   // 打合せ予定も同じ（PCで消したら現場でも消える）
   if(!String(m.chosho_note || "").trim() && row.note){ m.chosho_note = String(row.note); changed = true; }
   // 工程（ビラ・工事・同意書・工事完了書）も同じ考え方で入れ直す。
   // 下見だけはPCの受付台帳に無い（現場だけの印）ので触らない。
@@ -3712,7 +3715,7 @@ function receptionFlowOf(row){
 function rcSrcOf(row){
   return { name:String((row&&row.name)||""), addr:String((row&&row.addr)||""),
            tel:String((row&&row.tel)||""),   date:String((row&&row.date)||""),
-           note:String((row&&row.note)||""),
+           meet:String((row&&row.meet)||""), note:String((row&&row.note)||""),
            flyer:!!(row&&row.flyer), consent:!!(row&&row.consent), compdoc:!!(row&&row.compdoc),
            status:String((row&&row.status)||"") };
 }
@@ -4509,6 +4512,7 @@ async function refreshDraftInfo(){
       const other = String((rec.other !== undefined) ? (rec.other || "")
                           : ((rec.model && rec.model._otherFile) || ""));
       map[no] = { done, flow, photos: ph, has: true, touched: (rec.touched !== false), other,
+                  meet: String((rec.model && rec.model.chosho_meet_at) || ""),
                   fileAt: rec.fileSavedAt || 0, savedAt: rec.savedAt || 0,
                   rev: rec.rev | 0, fileRev: rec.fileRev | 0 };
     });
@@ -4524,6 +4528,7 @@ function draftInfoNote(rec, ownKey){
   if(!no || ownKey === false) return;    // 管理番号がぶつかって別キーへ逃がした分は触らない
   _draftInfo[no] = { done: !!rec.surveyDone, flow: rec.flow || {}, photos: rec.photos | 0, has: true,
                      touched: (rec.touched !== false), other: String(rec.other || ""),
+                     meet: String((rec.model && rec.model.chosho_meet_at) || ""),
                      fileAt: rec.fileSavedAt || 0, savedAt: rec.savedAt || 0,
                      rev: rec.rev | 0, fileRev: rec.fileRev | 0 };
 }
@@ -4539,13 +4544,14 @@ function draftInfoOf(no){
   if(no && no === String(M.chosho_mgmt_no||"").trim()){
     return { done: !!M.survey_done, flow: flowOf(M), photos: (M.chosho_photos||[]).length, has: true,
              touched: (M._touched !== false), other: M._otherFile || "",
+             meet: String(M.chosho_meet_at || ""),
              fileAt: _save.fileAt, stale: !!(saveStale() || _save.dirty) };
   }
   const d = _draftInfo[no];
   if(!d) return null;
   // 古い下書き（回数を持たない）は 0>0 で false ＝「保存済み」扱い。次に直せば 1>0 で変更ありになる。
   return { done: d.done, flow: d.flow, photos: d.photos, has: true, touched: d.touched, fileAt: d.fileAt,
-           other: d.other || "",
+           other: d.other || "", meet: d.meet || "",
            stale: !!(d.fileAt && (d.rev|0) > (d.fileRev|0)) };
 }
 /* この戸別をPCに渡せているか。
@@ -4866,6 +4872,7 @@ async function openFromReception(row){
   m.chosho_cust_addr=row.addr||"";
   m.chosho_cust_tel=row.tel||"";
   if(row.date) m.chosho_date=row.date;
+  if(row.meet) m.chosho_meet_at=String(row.meet);
   if(row.status) m.chosho_status=String(row.status);
   // PCの受付台帳で既に済んでいる工程（ビラ・工事・承諾書・完了書）を引き継ぐ。
   // いつ済んだかは台帳に無いので、日付は空のまま（画面には「済」とだけ出る）。
@@ -4946,9 +4953,12 @@ function rcPlanText(r){
   const t = String((r && r.time) || "").trim().slice(0, 5);
   return "予定 " + d + (t ? (" " + t) : "");
 }
-/* 打合せ予定「2026-08-20T13:30」→「打合せ 8/20 13:30」。これもPCの台帳だけが持つ。 */
+/* 打合せ予定「2026-08-20T13:30」→「打合せ 8/20 13:30」。
+   現場で決めた分（下書き）があればそちらを出す。取り込み直すまで古い予定が出ると紛らわしいため。 */
 function rcMeetText(r){
-  const v = String((r && r.meet) || "").trim(); if(!v) return "";
+  const info = draftInfoOf(r && r.mgmt_no);
+  const mine = info && info.has ? String(info.meet || "") : "";
+  const v = (mine || String((r && r.meet) || "")).trim(); if(!v) return "";
   const m = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/.exec(v);
   return m ? ("打合せ " + parseInt(m[2], 10) + "/" + parseInt(m[3], 10) + " " + m[4] + ":" + m[5])
            : ("打合せ " + v);
