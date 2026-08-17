@@ -449,6 +449,16 @@
   .rc-badge.prov{background:#f9a825; color:#5d4037;}
   /* 保留：PC（受付台帳・地図の「保」マーク）と同じ橙色 */
   .rc-badge.hold{background:#e65100;}
+  /* いま済みにしたばかりの戸別（絞り込みから外れても、この一覧では残して見せる） */
+  .rc-badge.just{background:#0d47a1;}
+  /* 絞り込みで隠れている件数。ここを見れば「消えた」のではなく「隠れている」と分かる */
+  .rc-flt{margin:0 0 10px; padding:9px 11px; border-radius:10px; font-size:12.5px; line-height:1.7;
+    background:#e8f0fe; border:1px solid #c3d6f5; color:#1a3a6b;}
+  .rc-flt b{color:var(--accent);}
+  .rc-flt button{display:block; width:100%; margin-top:7px; min-height:40px; border:0; border-radius:9px;
+    background:var(--accent); color:#fff; font-weight:700; font-size:13.5px; font-family:inherit;
+    transition:transform var(--t-fast) var(--ease);}
+  .rc-flt button:active{transform:scale(.97);}
   .draft.rc-hold{background:#fff4e8; border-left:4px solid #e65100; padding-left:8px;}
   /* 下見が終わった戸別（この端末で「下見完了」を押したもの） */
   .rc-badge.surv{background:#1b7a3d;}
@@ -2334,6 +2344,8 @@ async function flowToggle(key){
     if(!(await uiConfirm(s.ask))) return;
     M[s.flag]=true; M[s.at]=new Date().toISOString();
     if(key==="work") M.chosho_status="completed";
+    // 絞り込み中でも、済みにしたこの戸別は受付台帳から消さない
+    { const no=String(M.chosho_mgmt_no||"").trim(); if(no) _rcJustDone.add(no); }
     const b=document.getElementById("btn-flow");
     if(b){ b.classList.remove("justdone"); void b.offsetWidth; b.classList.add("justdone");
            setTimeout(()=>b.classList.remove("justdone"),800); }
@@ -4289,7 +4301,10 @@ function openReceptionModal(){
     renderReceptionList(sv?sv.value:"");
   });
 }
-function closeReceptionModal(){ document.getElementById("reception-modal").classList.remove("open"); }
+function closeReceptionModal(){
+  _rcJustDone.clear();          // 次に開いたときは、ふつうの絞り込みに戻す
+  document.getElementById("reception-modal").classList.remove("open");
+}
 /* 管理番号 → { 下見完了, 写真枚数 }。台帳一覧で「この戸別はもう終わったか」を出すために使う。
    下書きの見出し情報だけを見るので、写真の中身は読み込まない。 */
 let _draftInfo = {};
@@ -4361,6 +4376,10 @@ const RC_FILTERS = [
   { key:"doc",    label:"書類待ち", hit:f=>!flowPhaseDone(f,"done") },
   { key:"done",   label:"完了",     hit:f=>flowPhaseDone(f,"done") },
 ];
+/* いま工程を済みにしたばかりの戸別（管理番号）。
+   「ビラ待ち」などで絞っていると、済みにした途端その行が一覧から外れて
+   消えたように見えるので、受付台帳を閉じるまでは絞り込みに関わらず残して見せる。 */
+const _rcJustDone = new Set();
 const LS_RCFILTER = "field_reception_filter_v1";
 let _rcFilter = (()=>{ try{ const v=localStorage.getItem(LS_RCFILTER);
   return RC_FILTERS.some(x=>x.key===v) ? v : "all"; }catch(_){ return "all"; } })();
@@ -4485,7 +4504,11 @@ function renderReceptionList(q){
   const byKw=kw ? rows.filter(r=>((r.mgmt_no||"")+" "+(r.name||"")+" "+(r.addr||"")+" "+(r.tel||"")).toLowerCase().includes(kw)) : rows;
   // いまの工程で絞る（「今日はビラ配り」の日に、ビラの済んでいない戸別だけ出す）
   const flt=rcFilterDef();
-  const filtered=rcSortRows((flt.key==="all") ? byKw : byKw.filter(r=>flt.hit(rowFlowOf(r))));
+  // いま済みにしたばかりの戸別は、絞り込みから外れても残す（消えたように見せない）
+  const justDone=r=>_rcJustDone.has(String((r&&r.mgmt_no)||"").trim());
+  const inFilter=r=>flt.hit(rowFlowOf(r));
+  const filtered=rcSortRows((flt.key==="all") ? byKw : byKw.filter(r=>inFilter(r)||justDone(r)));
+  const hiddenN=byKw.length-filtered.length;
   // いま何件出しているか（絞り込んでいる時は、絞り込みの名前も添える）
   if(meta && meta.style.display!=="none" && flt.key!=="all"){
     meta.textContent += "／" + flt.label + " " + filtered.length + "件";
@@ -4523,9 +4546,15 @@ function renderReceptionList(q){
     ? `<div class="rc-undo">開いただけの戸別が <b>${openedOnly}件</b> あります（まだ何も入力していません）。`
       + `<button id="rc-undoall">まとめて取消（${openedOnly}件）</button></div>`
     : "";
+  // 絞り込みで隠れている件数。「消えた」のではなく「隠れている」と分かるようにする
+  const fltBar = (flt.key!=="all" && hiddenN>0)
+    ? `<div class="rc-flt">「<b>${esc(flt.label)}</b>」で絞り込んでいます。`
+      + `済んだ戸別など <b>${hiddenN}件</b> は出していません。`
+      + `<button type="button" id="rc-showall">すべて出す（${rows.length}件）</button></div>`
+    : "";
   // 他の端末で進めた分の引き継ぎは「📋 履歴」の中に置いてある（毎日使うものではないので、
   // 台帳の一覧の上には出さない）。引き継いだ戸別には行に「他端末」が付く。
-  host.innerHTML=warn+redoBar+undoBar+filtered.map(r=>{
+  host.innerHTML=fltBar+warn+redoBar+undoBar+filtered.map(r=>{
     const idx=rows.indexOf(r);
     const info=draftInfoOf(r.mgmt_no);
     const sub=[r.addr, r.date?("予定 "+r.date):"", r.contractor].filter(Boolean).map(esc).join("・");
@@ -4544,6 +4573,9 @@ function renderReceptionList(q){
     const other = otherFrom
       ? `<span class="rc-badge other" title="${esc(otherFrom)}（他の端末が保存したファイル）から引き継いだ印です">他端末</span>`
       : '';
+    // 絞り込みから外れているのに残している行＝いま済みにしたばかり、と分かるようにする
+    const just = (flt.key!=="all" && justDone(r) && !inFilter(r))
+      ? '<span class="rc-badge just">いま済にしました</span>' : '';
     const ph = (info&&info.photos) ? ('<span class="rc-ph">写真'+info.photos+'枚</span>') : '';
     // 戸別ファイルに書き出したか。写真以外はこの書き出しでしかPCへ渡らないので、一覧にも出す。
     const hand = handoverOf(info);
@@ -4575,7 +4607,7 @@ function renderReceptionList(q){
     // この端末で工程を進めた戸別だけ「見直す」（PCの台帳で済んでいるだけの戸別は「開く」）
     const act = `<div class="d-act"><button class="d-open" data-recopen="${idx}">${(info&&flowAny(info.flow))?"見直す":"開く"}</button>${act2}</div>`;
     return `<div class="draft${cls}${unsaved?" rc-unsaved":""}"><div class="d-main" data-recopen="${idx}">
-      <div class="d-no">${dots}${phase}${started}${other}${unsaved}${hold}${badge}${esc(r.mgmt_no||"（番号なし）")}${r.name?(" ／ "+esc(r.name)):""}</div>
+      <div class="d-no">${dots}${phase}${just}${started}${other}${unsaved}${hold}${badge}${esc(r.mgmt_no||"（番号なし）")}${r.name?(" ／ "+esc(r.name)):""}</div>
       <div class="d-sub">${sub}${ph}${fileNote}</div>${noteHtml}</div>${act}</div>`;
   }).join("");
   const sa = document.getElementById("rc-saveall");
@@ -4585,6 +4617,13 @@ function renderReceptionList(q){
   const ua = document.getElementById("rc-undoall");
   if(ua) ua.addEventListener("click", untouchOpenedOnly);
   // 「取消」は .d-main の外に置いてあるので、行を開くハンドラには拾われない
+  const showAll=document.getElementById("rc-showall");
+  if(showAll) showAll.addEventListener("click",()=>{
+    _rcFilter="all";
+    try{ localStorage.setItem(LS_RCFILTER, _rcFilter); }catch(_){}
+    renderReceptionFilter();
+    receptionRerender();
+  });
   host.querySelectorAll("[data-recmap]").forEach(b=>b.addEventListener("click",()=>{
     const r = rows[parseInt(b.getAttribute("data-recmap"),10)];
     if(r) openMapView(r.mgmt_no);        // 地図を閉じれば、この一覧に戻ってくる
