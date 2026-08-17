@@ -533,17 +533,12 @@
   .rc-redo button:disabled{background:#c3b391;}
   .rc-redo .rc-redo-sub{margin-top:6px; font-size:11.5px; font-weight:600; color:#8a7a55;}
   /* 他の端末の保存ファイルから工程の印を引き継ぐ */
-  .rc-share{margin:0 0 12px; padding:9px 12px; border-radius:11px; background:#e8f1fb; color:#28456b;
-    font-size:12px; line-height:1.6; border:1px solid #c3d8f0;}
-  .rc-share b{color:#0d47a1;}
-  .rc-share button{display:block; width:100%; margin-top:8px; min-height:46px; border:0; border-radius:10px;
-    background:#1565c0; color:#fff; font-weight:700; font-size:14px; cursor:pointer;
-    transition:transform var(--t-fast) var(--ease), filter var(--t-fast) var(--ease);}
-  .rc-share button:active{transform:scale(.96); filter:brightness(.92);}
-  .rc-share button:disabled{background:#9db8d6;}
-  .rc-share .rc-share-sub{margin-top:6px; font-size:11.5px; font-weight:600; color:#4a6485;}
-  .rc-share .rc-share-clear{display:inline-block; width:auto; margin:0 0 0 2px; min-height:0; padding:1px 9px;
-    background:#fff; color:#28456b; border:1px solid #a9c4e4; border-radius:8px; font-size:11px;}
+  /* 履歴の「引き継ぐ」ボタンの下の添え書き（普段は目に入れない・空なら出さない） */
+  .fs-note{font-size:11.5px; font-weight:600; color:#4a6485; line-height:1.6; margin:-6px 0 12px 2px;}
+  .fs-note:empty{display:none;}
+  .fs-note b{color:#0d47a1;}
+  .fs-note button{margin-left:4px; padding:1px 9px; background:#fff; color:#28456b;
+    border:1px solid #a9c4e4; border-radius:8px; font-size:11px; font-weight:700; cursor:pointer;}
   .unsaved-ex{display:inline-block; background:#d32f2f; color:#fff; font-size:10px; font-weight:700;
     padding:0 6px; border-radius:8px; line-height:17px; vertical-align:1px;}
   .rc-ex-other{display:inline-block; background:#455a64; color:#fff; font-size:10px; font-weight:700;
@@ -671,7 +666,8 @@
     下のボタンで、PCや他の端末の <b class="fname">管理番号.json</b> を読めます。<b>📂</b>＝その戸別の続きを編集／<b>📥</b>＝工程の印だけを引き継ぐ（写真や測定値は取り込みません）。</div>
     <button id="btn-import" style="width:100%; padding:15px; border:0; border-radius:11px; background:#455a64; color:#fff; font-weight:700; font-size:15px; margin-bottom:10px;">📂 保存済みJSONを開いて続きを編集</button>
     <input type="file" id="import-file" accept=".json,application/json,*/*" style="display:none;">
-    <button id="btn-flowshare" data-label="📥 他の端末の保存からチェックを引き継ぐ" style="width:100%; padding:15px; border:0; border-radius:11px; background:#1565c0; color:#fff; font-weight:700; font-size:15px; margin-bottom:12px;">📥 他の端末の保存からチェックを引き継ぐ</button>
+    <button id="btn-flowshare" data-label="📥 他の端末の保存からチェックを引き継ぐ" style="width:100%; padding:15px; border:0; border-radius:11px; background:#1565c0; color:#fff; font-weight:700; font-size:15px; margin-bottom:10px;">📥 他の端末の保存からチェックを引き継ぐ</button>
+    <div class="fs-note" id="flowshare-note"></div>
     <input type="file" id="flowshare-file" accept=".json,application/json,*/*" multiple style="display:none;">
     <div id="draft-list"></div>
     <button class="closebtn" id="draft-close">閉じる</button>
@@ -3801,11 +3797,10 @@ function readTextFile(file){
 /* 読み込みボタンの表示（受付台帳の帯と履歴の両方にあるので、まとめて面倒を見る） */
 let _flowShareBusy = false;
 function flowShareBtnBusy(on, txt){
-  ["rc-share-btn", "btn-flowshare"].forEach(id => {
-    const b = document.getElementById(id); if(!b) return;
-    b.disabled = !!on;
-    b.textContent = on ? (txt || "読み込み中…") : (b.dataset.label || b.textContent);
-  });
+  const b = document.getElementById("btn-flowshare");
+  if(!b) return;
+  b.disabled = !!on;
+  b.textContent = on ? (txt || "読み込み中…") : (b.dataset.label || b.textContent);
 }
 /* 保存先フォルダを覚えている端末（PCのChrome/Edge）は、そのフォルダを丸ごと見る。
    覚えていない・許可が下りない端末では null を返し、ファイルを選んでもらう。 */
@@ -3988,6 +3983,7 @@ async function flowShareAfter(){
   await refreshDraftInfo();
   try{ render(); }catch(_){}
   try{ receptionRerender(); }catch(_){}
+  try{ renderFlowShareNote(); }catch(_){}
   try{ if(_mapPack && document.getElementById("map-modal").classList.contains("open")) mapRefreshMarks(); }catch(_){}
 }
 /* この戸別のファイルを他の端末が持っているなら、置き換える前に一度確かめる */
@@ -4000,6 +3996,18 @@ async function flowShareConfirmOverwrite(m){
     + "このまま保存すると、中身はこの端末の内容に置き換わります。\n"
     + ph + "この端末に無いものは、そのファイルから消えます。\n\n保存しますか？");
 }
+/* 履歴の「引き継ぐ」ボタンの下の添え書き。読む場所と、引き継ぎ済みの件数だけ。
+   何も無いときは空にして出さない（普段は目に入らないように）。 */
+function renderFlowShareNote(){
+  const el = document.getElementById("flowshare-note"); if(!el) return;
+  const n = flowShareCount();
+  const dir = saveDirName();
+  el.innerHTML = (dir ? ("「<b>" + esc(dir) + "</b>」フォルダを丸ごと読みます。") : "")
+    + (n ? ("引き継ぎ済み <b>" + n + "件</b>"
+            + '<button type="button" id="fs-clear">消す</button>') : "");
+  const c = document.getElementById("fs-clear");
+  if(c) c.addEventListener("click", flowShareClearAsk);
+}
 /* 引き継いだ印を全部消す（別の物件に移ったとき等） */
 async function flowShareClearAsk(){
   const n = flowShareCount();
@@ -4010,6 +4018,7 @@ async function flowShareClearAsk(){
   flowShareClear();
   await refreshDraftInfo();
   receptionRerender();
+  renderFlowShareNote();
   toast("引き継いだ印を消しました");
 }
 
@@ -4113,6 +4122,7 @@ async function untouchOpenedOnly(){
 
 async function openDraftModal(){
   document.getElementById("draft-modal").classList.add("open");
+  renderFlowShareNote();
   const list=document.getElementById("draft-list");
   list.innerHTML=`<div class="info" style="text-align:center">読み込み中…</div>`;
   let recs=[];
@@ -4500,18 +4510,9 @@ function renderReceptionList(q){
     ? `<div class="rc-undo">開いただけの戸別が <b>${openedOnly}件</b> あります（まだ何も入力していません）。`
       + `<button id="rc-undoall">まとめて取消（${openedOnly}件）</button></div>`
     : "";
-  // 他の端末で進めた分の引き継ぎ。保存した戸別ファイルをそのまま印の控えとして読む。
-  const shareCnt = flowShareCount();
-  const shareDir = saveDirName();
-  const shareBar = `<div class="rc-share">他の端末で進めた<b>工程の印</b>は、`
-    + `保存した <b class="fname">管理番号.json</b> から引き継げます。`
-    + `<button id="rc-share-btn" data-label="📥 他の端末の保存を読み込む">📥 他の端末の保存を読み込む</button>`
-    + `<div class="rc-share-sub">`
-    + (shareDir ? `「<b>${esc(shareDir)}</b>」フォルダを丸ごと読みます。` : `ファイルはまとめて選べます。`)
-    + `印だけを読み、済みは消しません。`
-    + (shareCnt ? ` 引き継ぎ済み <b>${shareCnt}件</b> <button type="button" id="rc-share-clear" class="rc-share-clear">消す</button>` : "")
-    + `</div></div>`;
-  host.innerHTML=warn+redoBar+undoBar+shareBar+filtered.map(r=>{
+  // 他の端末で進めた分の引き継ぎは「📋 履歴」の中に置いてある（毎日使うものではないので、
+  // 台帳の一覧の上には出さない）。引き継いだ戸別には行に「他端末」が付く。
+  host.innerHTML=warn+redoBar+undoBar+filtered.map(r=>{
     const idx=rows.indexOf(r);
     const info=draftInfoOf(r.mgmt_no);
     const sub=[r.addr, r.date?("予定 "+r.date):"", r.contractor].filter(Boolean).map(esc).join("・");
@@ -4570,10 +4571,6 @@ function renderReceptionList(q){
   if(sa2) sa2.addEventListener("click", saveAllOverwrite);
   const ua = document.getElementById("rc-undoall");
   if(ua) ua.addEventListener("click", untouchOpenedOnly);
-  const sh = document.getElementById("rc-share-btn");
-  if(sh) sh.addEventListener("click", flowShareStart);
-  const shc = document.getElementById("rc-share-clear");
-  if(shc) shc.addEventListener("click", flowShareClearAsk);
   // 「取消」は .d-main の外に置いてあるので、行を開くハンドラには拾われない
   host.querySelectorAll("[data-recmap]").forEach(b=>b.addEventListener("click",()=>{
     const r = rows[parseInt(b.getAttribute("data-recmap"),10)];
