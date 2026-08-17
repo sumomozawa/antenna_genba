@@ -2667,6 +2667,11 @@ function openMapView(no){
   _mapSheetIdx = hit ? hit.sheet : Math.min(_mapSheetIdx, _mapPack.sheets.length - 1);
   mapRenderSheet();
   modal.classList.add("open");
+  // 工程の印は「この端末の下書き」から出す。アプリを開き直した直後などは控えが空なので、
+  // ここで取り直して印だけ出し直す（地図はもう出ているので待たせない）。
+  refreshDraftInfo().then(() => {
+    if(document.getElementById("map-modal").classList.contains("open")) mapRefreshMarks();
+  });
   // 開いた直後は全体を映してから、その建物へ寄っていく（どこに居るか分かるように）
   if(hit){
     mapFitAll(false);                  // まず全体。ここは動かさず、そのあと一息おいて寄る
@@ -3480,7 +3485,7 @@ async function persistDraft(){
       persistDraft._collisionKey = null;
     }
     // 前回このモデルを保存したキーから変わっていたら旧レコードを削除（tmp:/no:旧番号 の孤児化を防ぐ）
-    if(M._lastDraftKey && M._lastDraftKey !== key){ try{ await idbDel(M._lastDraftKey); }catch(_){} }
+    if(M._lastDraftKey && M._lastDraftKey !== key){ try{ await idbDel(M._lastDraftKey); }catch(_){} draftInfoForget(M._lastDraftKey); }
     M._lastDraftKey = key;
     const cur = (key===wantKey) ? prev : await idbGet(key);
     // 画面を通さずに中身が変わっていた場合（台帳から引き継いだ等）も「変更あり」に数える。
@@ -3495,6 +3500,7 @@ async function persistDraft(){
       other:M._otherFile||"",                       // その戸別のファイルを他の端末が持っている時のファイル名
       rev:(M._rev|0), fileRev:(cur&&cur.fileRev)|0 };
     await idbPut(rec);
+    draftInfoNote(rec, key === wantKey);   // 控えも同じ内容にする（地図・一覧の工程の印が古いままにならないように）
     localStorage.setItem(LS_LAST, key);
     persistDraft._warned=false;
     saveStateSaved(rec.fileSavedAt, rec.fileRev);   // 「いつ保存したか」の表示を更新
@@ -4446,6 +4452,24 @@ async function refreshDraftInfo(){
     });
     _draftInfo = map;
   }catch(e){ console.warn("下書き情報の読み取りに失敗", e); }
+}
+/* 下書きを1件書いたときに、控えもその場で直す。
+   全部を読み直す（refreshDraftInfo）のは重いので、書いた1件だけを入れ替える。
+   これをしないと、ビラなどの工程の印が「受付台帳を開き直すまで」古いままになり、
+   保存せずに次の戸別へ移ると、前の戸別の印が地図から消えて見える。 */
+function draftInfoNote(rec, ownKey){
+  const no = String((rec && rec.mgmt) || "").trim();
+  if(!no || ownKey === false) return;    // 管理番号がぶつかって別キーへ逃がした分は触らない
+  _draftInfo[no] = { done: !!rec.surveyDone, flow: rec.flow || {}, photos: rec.photos | 0, has: true,
+                     touched: (rec.touched !== false), other: String(rec.other || ""),
+                     fileAt: rec.fileSavedAt || 0, savedAt: rec.savedAt || 0,
+                     rev: rec.rev | 0, fileRev: rec.fileRev | 0 };
+}
+/* 下書きを消したとき（管理番号を変えて古い方を消した等）は、控えからも消す。 */
+function draftInfoForget(key){
+  const k = String(key || "");
+  if(k.indexOf("no:") !== 0) return;     // tmp: の下書きは管理番号が無く、控えにも入っていない
+  delete _draftInfo[k.slice(3)];
 }
 /* いま編集中の戸別は、まだ保存されていなくても最新の状態を出す */
 function draftInfoOf(no){
