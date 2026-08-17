@@ -2212,6 +2212,29 @@ function animateSection(sec, open){
     a.onfinish = () => { sec.classList.remove("open"); body.style.overflow = ""; };
   }
 }
+/* 全角の英数字を半角へ（メイン・受付台帳ソフトと同じ規則）。
+   長音符「ー」は「コーポ」等の語を壊すので触らない。
+   とくに管理番号は、全角のままだとファイル名まで全角になり、メインで下三桁の
+   突き合わせ（数字だけ拾う）が空振りして、別の戸別として扱われてしまう。 */
+function toHalfWidthAn(s){
+  return String(s == null ? "" : s)
+    .replace(/[Ａ-Ｚａ-ｚ０-９]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
+    .replace(/[－−‐‑]/g, "-");
+}
+/* 半角にそろえる欄。打っている途中（日本語入力の変換中）に変えると邪魔なので、
+   欄から離れたときにそろえる。 */
+const HAN_FIELDS = ["chosho_mgmt_no", "chosho_cust_addr", "chosho_cust_tel", "chosho_cust_name"];
+function hanFixField(id){
+  if(HAN_FIELDS.indexOf(id) < 0) return false;
+  const v = String(M[id] == null ? "" : M[id]);
+  const h = toHalfWidthAn(v);
+  if(h === v) return false;
+  M[id] = h;
+  const el = document.querySelector('[data-fld="' + id + '"]');
+  if(el) el.value = h;
+  saveDraft();
+  return true;
+}
 function bindEvents(root){
   root = root || app;
   // アコーディオン開閉
@@ -2228,6 +2251,12 @@ function bindEvents(root){
   root.querySelectorAll("[data-fld]").forEach(el=>{
     const isSelect = el.tagName==="SELECT";
     const ev = isSelect ? "change" : "input";
+    // 英数字を半角にそろえる（変換中に触らないよう、欄から離れたときだけ）
+    if(!isSelect && HAN_FIELDS.indexOf(el.getAttribute("data-fld")) >= 0){
+      el.addEventListener("blur", () => {
+        if(hanFixField(el.getAttribute("data-fld"))) updateHeader();
+      });
+    }
     el.addEventListener(ev,()=>{
       const id=el.getAttribute("data-fld");
       const asb=el.getAttribute("data-asb");
@@ -2614,6 +2643,9 @@ function buildState(){
     s[st.flag] = !!M[st.flag];
     s[st.at]   = String(M[st.at]||"");
   });
+  // 管理番号・名前・住所・電話は必ず半角でファイルへ入れる。全角のままだとファイル名も
+  // 全角になり、メインで下三桁の突き合わせが空振りして別の戸別として扱われてしまう。
+  HAN_FIELDS.forEach(k => { if(typeof s[k] === "string" && s[k]) s[k] = toHalfWidthAn(s[k]); });
   // 取込んだ戸別JSONの未知トップレベルキー（PC側の ag_placement 等）をそのまま復元（往復での欠落防止）。
   if(M._passthrough && typeof M._passthrough==="object"){
     for(const k in M._passthrough){ if(!(k in s)) s[k]=M._passthrough[k]; }
