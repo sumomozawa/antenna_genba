@@ -218,6 +218,43 @@
   .footbar .nav button:disabled{opacity:.45;}
   .footbar .save{flex:1; min-height:56px; font-size:16px; background:var(--accent); color:#fff;
     box-shadow:0 3px 10px rgba(13,71,161,.32);}
+  /* 保存ボタンの状態。いま保存されているかが一目で分かれば、不安で押し直さずに済む。
+     ・保存中…    書き出している最中（押しても効かない）
+     ・✓ 保存済み  前に保存してから何も変えていない */
+  .footbar .save.saving, #btn-save-top.saving{
+    background:#8a95a1; box-shadow:none; color:#fff;}
+  .footbar .save.saved{background:var(--green); box-shadow:0 3px 10px rgba(46,125,50,.32);}
+  #btn-save-top.saved{background:var(--green); border-color:var(--green); color:#fff;}
+  .footbar .save:disabled, #btn-save-top:disabled{opacity:1;}
+  .footbar .save.saving:active, #btn-save-top.saving:active{transform:none;}
+  /* ---- 保存中の暗幕 ----
+     何も反応が無いと不安になって押し直してしまい、Androidでは同じ戸別の
+     ファイルが増える。書き出しているあいだは画面を暗くしてはっきり示す。 */
+  #save-ov{position:fixed; inset:0; z-index:9999; display:flex; align-items:center; justify-content:center;
+    background:rgba(16,24,38,.58); backdrop-filter:blur(3px); -webkit-backdrop-filter:blur(3px);
+    animation:saveOvIn .16s var(--ease-out) both; padding:24px;}
+  @keyframes saveOvIn{ from{opacity:0;} to{opacity:1;} }
+  #save-ov .save-ov-card{background:#fff; border-radius:16px; padding:26px 22px 20px; text-align:center;
+    min-width:232px; max-width:320px; box-shadow:0 12px 34px rgba(0,0,0,.34);
+    animation:saveCardIn .22s var(--ease-spring) both;}
+  @keyframes saveCardIn{ from{opacity:0; transform:translateY(14px) scale(.94);} to{opacity:1; transform:none;} }
+  #save-ov .save-ov-ring{width:56px; height:56px; margin:0 auto 14px; border-radius:50%;
+    border:5px solid #dde3ea; border-top-color:var(--accent); animation:saveSpin .8s linear infinite;}
+  @keyframes saveSpin{ to{ transform:rotate(360deg);} }
+  #save-ov .save-ov-t{font-size:17px; font-weight:800; color:var(--ink); letter-spacing:.02em;}
+  #save-ov .save-ov-s{margin-top:5px; font-size:12.5px; color:var(--sub); word-break:break-all;}
+  #save-ov .save-ov-w{margin-top:12px; font-size:12px; color:var(--warn); line-height:1.65;}
+  #save-ov .save-ov-w button{margin-top:9px; width:100%; min-height:42px; border:0; border-radius:10px;
+    background:#eef2f7; color:var(--accent); font-weight:700; font-size:14px; font-family:inherit;}
+  /* 書き終わったら緑の✓を一瞬見せる（押した操作がきちんと終わったと分かるように） */
+  #save-ov.ok .save-ov-card{background:#e8f5e9;}
+  #save-ov .save-ov-check{width:56px; height:56px; margin:0 auto 12px; border-radius:50%;
+    background:var(--green); color:#fff; font-size:32px; font-weight:800; line-height:56px;
+    animation:saveCheck .34s var(--ease-spring) both;}
+  @keyframes saveCheck{ from{ transform:scale(.3); opacity:0;} 60%{ transform:scale(1.12);} to{ transform:none; opacity:1;} }
+  /* 保存中は点滅させて「動いている」と分かるようにする */
+  .save.saving, #btn-save-top.saving{animation:savePulse 1.1s var(--ease) infinite;}
+  @keyframes savePulse{ 0%,100%{opacity:1;} 50%{opacity:.55;} }
   /* ---- 工程を1つ進めるボタン（いちばん目立たせる） ----
      下見 → ビラ配り → 工事 → 同意書 → 工事完了書 の「次にやること」を出す。 */
   .footbar .flow{
@@ -3137,11 +3174,32 @@ function currentFileName(){
   return no+".json";   // 戸別ファイル名は「管理番号.json」に統一
 }
 async function saveJson(){
-  if(!M.chosho_mgmt_no){
-    if(!(await uiConfirm("管理番号が未入力です。このまま保存しますか？（ファイル名が「戸別」になります）"))) return;
+  if(_saving) return;                    // 続けて押しても1回しか走らせない（ファイルが増えるのを防ぐ）
+  // 「すでに保存済みか」は目印を立てる前に見ておく（立てたあとでは常に保存中になるため）
+  const wasSaved = (saveButtonState() === "saved");
+  // 目印は待つ前に立てる。確認ダイアログを待っている間に続けて押されても、
+  // 2つめ以降は上の行で戻る（ここを await のあとにすると3回押せば3ファイルできてしまう）
+  _saving = true; renderSaveButtons();
+  let done = false;
+  try{
+    if(!M.chosho_mgmt_no){
+      if(!(await uiConfirm("管理番号が未入力です。このまま保存しますか？（ファイル名が「戸別」になります）"))) return;
+    }
+    // すでに保存してあって、そのあと何も変えていないときは一度確かめる。
+    // 保存し直すたびにファイルが増えるので、要らない保存を減らす。
+    if(wasSaved
+       && !(await uiConfirm("この内容は "+_hhmm(_save.fileAt)+" に保存済みです。\nそのあと変わったところはありません。\n\nもう一度保存しますか？\n（同じ戸別のファイルがもう1つ増えます）"))) return;
+    // 他の端末が保存したファイルを置き換えることになる時は、一度確かめる
+    if(!(await flowShareConfirmOverwrite(M))) return;
+    saveOverlayShow(currentFileName());   // 実際に書き始めるところで暗幕を出す
+    done = await saveJsonRun();
+  } finally {
+    _saving = false;
+    if(done) saveOverlayDone(); else saveOverlayHide();
+    renderSaveBar();
   }
-  // 他の端末が保存したファイルを置き換えることになる時は、一度確かめる
-  if(!(await flowShareConfirmOverwrite(M))) return;
+}
+async function saveJsonRun(){
   const state=buildState();
   const json=JSON.stringify(state);
   const blob=new Blob([json],{type:"application/json"});
@@ -3159,8 +3217,8 @@ async function saveJson(){
       await w.write(blob); await w.close();
       await markDraftSaved(); saveStateFile();   // ← 書込成功後にだけ💾
       toast("保存しました："+fname);
-      return;
-    }catch(e){ if(e && e.name==="AbortError") return; /* 失敗時は下へフォールバック */ }
+      return true;
+    }catch(e){ if(e && e.name==="AbortError") return false; /* 失敗時は下へフォールバック */ }
   }
   // ② Web Share（ファイル共有→Dropbox/ドライブ等）
   if(navigator.canShare){
@@ -3171,9 +3229,9 @@ async function saveJson(){
         await navigator.share({files:[file]});
         await markDraftSaved(); saveStateFile();
         toast("共有しました："+fname);
-        return;
+        return true;
       }
-    }catch(e){ if(e && e.name==="AbortError") return; }
+    }catch(e){ if(e && e.name==="AbortError") return false; }
   }
   // ③ ダウンロード
   const url=URL.createObjectURL(blob);
@@ -3181,6 +3239,7 @@ async function saveJson(){
   setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); },4000); // 大量写真でDLダイアログが遅延しても失敗しないよう余裕を持つ
   await markDraftSaved(); saveStateFile();
   toast("ダウンロードしました："+fname);
+  return true;
 }
 
 // 既存JSONを読み込んでフォームへ（plainのみ。暗号化(.enc/.hyb)はPCで）
@@ -3302,7 +3361,64 @@ async function saveStateLoad(){
 const _hhmm = t => { const d=new Date(t); const p=n=>String(n).padStart(2,"0");
   const now=new Date(); const sameDay = d.toDateString()===now.toDateString();
   return (sameDay?"":(d.getMonth()+1)+"/"+d.getDate()+" ") + p(d.getHours())+":"+p(d.getMinutes()); };
+/* いま保存はどうなっているか。ボタンの文字と色をこの3つに合わせる。
+   Android では同じ戸別を保存し直すたびに「管理番号_長い数字.json」が増え、
+   途中で切れると0KBのごみが残る。押し直す必要が無いと分かることが、
+   ごみファイルを増やさないいちばんの対策になる。 */
+let _saving = false;
+function saveButtonState(){
+  if(_saving) return "saving";
+  if(_save.fileAt && !saveStale() && !_save.dirty) return "saved";
+  return "todo";
+}
+function renderSaveButtons(){
+  const st = saveButtonState();
+  const label = (st === "saving") ? "保存中…" : (st === "saved") ? "✓ 保存済み" : "保存";
+  const title = (st === "saving") ? "書き出しています。そのままお待ちください"
+              : (st === "saved") ? ("この内容は " + _hhmm(_save.fileAt) + " に保存済みです。押し直さなくて大丈夫です")
+              : "この戸別を 管理番号.json に書き出してPCへ渡します";
+  ["btn-save", "btn-save-top"].forEach(id => {
+    const b = document.getElementById(id); if(!b) return;
+    if(b.textContent !== label) b.textContent = label;
+    b.title = title;
+    b.classList.toggle("saving", st === "saving");
+    b.classList.toggle("saved", st === "saved");
+    b.disabled = (st === "saving");
+  });
+}
+/* 保存中の暗幕。8秒たっても終わらないときは逃げ道を出す（画面に閉じ込めない）。 */
+let _saveOvTimer = null;
+function saveOverlayShow(fname){
+  saveOverlayHide();
+  const d = document.createElement("div");
+  d.id = "save-ov";
+  d.innerHTML = '<div class="save-ov-card"><div class="save-ov-ring"></div>'
+    + '<div class="save-ov-t">保存中…</div>'
+    + '<div class="save-ov-s">' + esc(fname || "") + "</div>"
+    + '<div class="save-ov-w" id="save-ov-w"></div></div>';
+  document.body.appendChild(d);
+  _saveOvTimer = setTimeout(() => {
+    const w = document.getElementById("save-ov-w"); if(!w) return;
+    w.innerHTML = "時間がかかっています。共有の画面が出ていれば、そちらで保存先を選んでください。"
+      + '<button type="button" id="save-ov-x">閉じる</button>';
+    const x = document.getElementById("save-ov-x");
+    if(x) x.addEventListener("click", saveOverlayHide);
+  }, 8000);
+}
+function saveOverlayDone(){
+  const d = document.getElementById("save-ov"); if(!d){ return; }
+  clearTimeout(_saveOvTimer); _saveOvTimer = null;
+  d.classList.add("ok");
+  const c = d.querySelector(".save-ov-card");
+  if(c) c.innerHTML = '<div class="save-ov-check">✓</div><div class="save-ov-t">保存しました</div>';
+  setTimeout(saveOverlayHide, 950);
+}
+function saveOverlayHide(){
+  clearTimeout(_saveOvTimer); _saveOvTimer = null;
+  const d = document.getElementById("save-ov"); if(d) d.remove();
+}
 function renderSaveBar(){
+  renderSaveButtons();
   const el=document.getElementById("savebar"); if(!el) return;
   let cls, main;
   if(_save.failed){ cls="ng"; main="この端末に控えられません。「保存」でファイルに残してください"; }
