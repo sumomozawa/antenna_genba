@@ -885,7 +885,7 @@ const GENBA_SCHEMA_VER = 1;
    （PC側で「現場入力アプリの版」を確認でき、メインとの食い違いに気付ける）。
    ★更新したらこの2行を書き換える。 */
 const APP_NAME_SHORT = "現場入力";
-const APP_VERSION = "2026.08.18";
+const APP_VERSION = "2026.08.18b";
 function photoContentId(dataUri){
   if(!dataUri || typeof dataUri !== "string") return "";
   let a = 5381, b = 0;
@@ -3421,9 +3421,14 @@ const IDB_NAME="field_input_db_v1", IDB_STORE="drafts", IDB_MAPS="maps";
 function idb(){ return new Promise((res,rej)=>{ const r=indexedDB.open(IDB_NAME,2); r.onupgradeneeded=()=>{ if(!r.result.objectStoreNames.contains(IDB_STORE)) r.result.createObjectStore(IDB_STORE,{keyPath:"key"}); if(!r.result.objectStoreNames.contains(IDB_MAPS)) r.result.createObjectStore(IDB_MAPS,{keyPath:"key"}); }; r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
 async function idbMapPut(rec){ const db=await idb(); return new Promise((res,rej)=>{ const tx=db.transaction(IDB_MAPS,"readwrite"); tx.objectStore(IDB_MAPS).put(rec); tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error); }); }
 async function idbMapGet(key){ const db=await idb(); return new Promise((res,rej)=>{ const tx=db.transaction(IDB_MAPS,"readonly"); const rq=tx.objectStore(IDB_MAPS).get(key); rq.onsuccess=()=>res(rq.result||null); rq.onerror=()=>rej(rq.error); }); }
-async function idbPut(rec){ const db=await idb(); return new Promise((res,rej)=>{ const tx=db.transaction(IDB_STORE,"readwrite"); tx.objectStore(IDB_STORE).put(rec); tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error); }); }
+async function idbPut(rec){
+  _draftInfoStale = true; const db=await idb(); return new Promise((res,rej)=>{ const tx=db.transaction(IDB_STORE,"readwrite"); tx.objectStore(IDB_STORE).put(rec); tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error); }); }
 async function idbGet(key){ const db=await idb(); return new Promise((res,rej)=>{ const tx=db.transaction(IDB_STORE,"readonly"); const rq=tx.objectStore(IDB_STORE).get(key); rq.onsuccess=()=>res(rq.result||null); rq.onerror=()=>rej(rq.error); }); }
 async function idbGetAll(){ const db=await idb(); return new Promise((res,rej)=>{ const tx=db.transaction(IDB_STORE,"readonly"); const rq=tx.objectStore(IDB_STORE).getAll(); rq.onsuccess=()=>res(rq.result||[]); rq.onerror=()=>rej(rq.error); }); }
+/* 下書きを1件でも書き換えたら、控えの読み直しが要る、という印。
+   ここに置けば書き換えを取りこぼさない。1件ずつ控えを直せた場合（draftInfoNote）は、
+   その直後に元へ戻すので、読み直しは起きない。 */
+let _draftInfoStale = true;
 async function idbDel(key){ const db=await idb(); return new Promise((res,rej)=>{ const tx=db.transaction(IDB_STORE,"readwrite"); tx.objectStore(IDB_STORE).delete(key); tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error); }); }
 
 let _persistTimer=null;
@@ -3597,8 +3602,10 @@ async function persistDraft(){
       surveyDone:!!M.survey_done, flow:flowOf(M), touched:(M._touched!==false), sig,
       other:M._otherFile||"",                       // その戸別のファイルを他の端末が持っている時のファイル名
       rev:(M._rev|0), fileRev:(cur&&cur.fileRev)|0 };
+    const wasStale = _draftInfoStale;
     await idbPut(rec);
     draftInfoNote(rec, key === wantKey);   // 控えも同じ内容にする（地図・一覧の工程の印が古いままにならないように）
+    if(key === wantKey) _draftInfoStale = wasStale;   // この1件は控えに入れた＝読み直しは要らない
     localStorage.setItem(LS_LAST, key);
     persistDraft._warned=false;
     saveStateSaved(rec.fileSavedAt, rec.fileRev);   // 「いつ保存したか」の表示を更新
@@ -3631,7 +3638,10 @@ async function markDraftSaved(){
     delete M._otherFile;
     if(rec){ rec.fileSavedAt=Date.now(); rec.fileRev=(rec.rev|0); rec.other="";
              if(rec.model) delete rec.model._otherFile;
-             await idbPut(rec); }
+             const wasStale = _draftInfoStale;
+             await idbPut(rec);
+             draftInfoNote(rec, true);     // 控えもその場で「保存済」にする（読み直しを待たない）
+             _draftInfoStale = wasStale; }
   }catch(e){ console.warn("markDraftSaved failed",e); }
 }
 /* ============================================================================
@@ -3806,7 +3816,10 @@ async function markDraftSavedFor(key){
     const rec = await idbGet(key);
     if(rec){ rec.fileSavedAt = Date.now(); rec.fileRev = (rec.rev|0); rec.other = "";
              if(rec.model) delete rec.model._otherFile;      // 保存できた＝この端末の内容になった
-             await idbPut(rec); }
+             const wasStale = _draftInfoStale;
+             await idbPut(rec);
+             draftInfoNote(rec, true);     // 控えもその場で「保存済」にする（読み直しを待たない）
+             _draftInfoStale = wasStale; }
     if(M._lastDraftKey === key || draftKey() === key){ delete M._otherFile; saveStateFile(); }
   }catch(e){ console.warn("markDraftSavedFor failed", e); }
 }
@@ -3822,7 +3835,7 @@ async function saveAllDrafts(mode){
   const setBusy = on => { if(btn){ btn.disabled = on; btn.textContent = on ? "保存中…" : btn.dataset.label; } };
   clearTimeout(_persistTimer);
   try{ await persistDraft(); }catch(_){}     // いまの入力を先に下書きへ確定
-  await refreshDraftInfo();
+  await refreshDraftInfo(true);
   const nos = isAll ? allDraftTargets() : unsavedTargets();
   const all = await idbGetAll();
   // 管理番号が無くて対象にできない下書き（ファイル名を決められない）
@@ -4165,7 +4178,7 @@ async function flowShareRead(list, fromDir){
       return;
     }
     // ---- 何が増えるか調べる（読み込む前に見せて、納得してから反映する） ----
-    await refreshDraftInfo();
+    await refreshDraftInfo(true);
     const all = await idbGetAll();
     const byNo = {};
     (all || []).forEach(r => { const k = String((r && r.mgmt) || "").trim(); if(k) byNo[k] = r; });
@@ -4247,7 +4260,7 @@ async function flowShareItemsApply(items, byNo, openNo){
 async function flowShareAfter(){
   clearTimeout(_persistTimer);
   try{ await persistDraft(); }catch(_){}
-  await refreshDraftInfo();
+  await refreshDraftInfo(true);
   try{ render(); }catch(_){}
   try{ receptionRerender(); }catch(_){}
   try{ renderFlowShareNote(); }catch(_){}
@@ -4283,7 +4296,7 @@ async function flowShareClearAsk(){
       + "この端末で入力した内容と、保存した 管理番号.json は消えません。\n"
       + "もう一度読み込めば、また引き継げます。"))) return;
   flowShareClear();
-  await refreshDraftInfo();
+  await refreshDraftInfo(true);
   receptionRerender();
   renderFlowShareNote();
   toast("引き継いだ印を消しました");
@@ -4331,7 +4344,7 @@ async function forgetDrafts(keys, curNo){
     render(); appSwap();
     await saveStateLoad();                              // 保存バーも初期化（failed も戻る）
   }
-  await refreshDraftInfo();
+  await refreshDraftInfo(true);
   return delCur;
 }
 /* 受付台帳の一覧を、検索語を保ったまま出し直す */
@@ -4554,9 +4567,24 @@ let _draftInfo = {};
    いま開いている1件しか分からないので、その数を出すと嘘になる（開いた直後に
    「1件」と出て、少し経つと本当の件数に変わる、という見え方をしていた）。 */
 let _draftInfoReady = false;
-async function refreshDraftInfo(){
+/* 控えを「1件だけ直した」ときに進める番号と、「全部読み直す」ときの通し番号。
+   読み取りは端末の中を全部なめるので、写真の多い端末では時間がかかる。
+   その間に工程を済みにすると、あとから返ってきた“読み取り前の中身”が
+   まるごと上書きして、付けたばかりの印や「未保存」が消えていた。
+   ・番号が追い越されていたら、その読み取りの結果は捨てる
+   ・読み取っている間に直した1件は、読み取り前の中身で上書きしない */
+let _draftInfoTick = 0;
+let _draftInfoSeq = 0;
+async function refreshDraftInfo(force){
+  /* 全部読み直すのは重い（下書きには写真もそのまま入っている）。
+     前に読んでから、控えを1件ずつ直すだけで足りている間は読み直さない。
+     force=true は「画面を通さずに下書きを書き換えた」呼び出し側が使う。 */
+  if(!force && _draftInfoReady && !_draftInfoStale) return;
+  const mySeq = ++_draftInfoSeq;
+  const tick0 = _draftInfoTick;
   try{
     const all = await idbGetAll();
+    if(mySeq !== _draftInfoSeq) return;      // もっと新しい読み取りが走っている＝この結果は古い
     const map = {};
     (all||[]).forEach(rec=>{
       if(!rec) return;
@@ -4574,10 +4602,16 @@ async function refreshDraftInfo(){
                   meet: String((rec.model && rec.model.chosho_meet_at) || ""),
                   time: String((rec.model && rec.model.chosho_time) || ""),
                   fileAt: rec.fileSavedAt || 0, savedAt: rec.savedAt || 0,
-                  rev: rec.rev | 0, fileRev: rec.fileRev | 0 };
+                  rev: rec.rev | 0, fileRev: rec.fileRev | 0, tick: 0 };
+    });
+    // 読んでいる間に直した分（ビラを済みにした等）は、読み取り前の中身で上書きしない
+    Object.keys(_draftInfo).forEach(no => {
+      const cur = _draftInfo[no];
+      if(cur && (cur.tick | 0) >= tick0 && (cur.tick | 0) > 0) map[no] = cur;
     });
     _draftInfo = map;
     _draftInfoReady = true;
+    _draftInfoStale = false;
   }catch(e){ console.warn("下書き情報の読み取りに失敗", e); }
 }
 /* 下書きを1件書いたときに、控えもその場で直す。
@@ -4592,10 +4626,11 @@ function draftInfoNote(rec, ownKey){
                      meet: String((rec.model && rec.model.chosho_meet_at) || ""),
                      time: String((rec.model && rec.model.chosho_time) || ""),
                      fileAt: rec.fileSavedAt || 0, savedAt: rec.savedAt || 0,
-                     rev: rec.rev | 0, fileRev: rec.fileRev | 0 };
+                     rev: rec.rev | 0, fileRev: rec.fileRev | 0, tick: ++_draftInfoTick };
 }
 /* 下書きを消したとき（管理番号を変えて古い方を消した等）は、控えからも消す。 */
 function draftInfoForget(key){
+  _draftInfoStale = true;
   const k = String(key || "");
   if(k.indexOf("no:") !== 0) return;     // tmp: の下書きは管理番号が無く、控えにも入っていない
   delete _draftInfo[k.slice(3)];
@@ -4997,7 +5032,7 @@ async function receptionApplyToDrafts(){
   if(applied){
     clearTimeout(_persistTimer);
     try{ await persistDraft(); }catch(_){}
-    await refreshDraftInfo();
+    await refreshDraftInfo(true);
   }
   return applied;
 }
