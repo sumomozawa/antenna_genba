@@ -2591,7 +2591,7 @@ async function handlePhotoFiles(files){
   if(fail) toast(fail+"枚は読み込めませんでした（別の写真でお試しください）");
 }
 function suggestLabel(n){
-  const seq=["施工前","施工前②","施工中","施工完了","施工完了②","現地","表札","その他"];
+  const seq=["施工前","施工前②","施工前③","施工中","施工完了","施工完了②","現地","表札","その他"];
   return seq[n]||("写真"+(n+1));
 }
 document.getElementById("cam-input").addEventListener("change",e=>{ handlePhotoFiles(e.target.files); e.target.value=""; });
@@ -4535,6 +4535,10 @@ function closeReceptionModal(){
 /* 管理番号 → { 下見完了, 写真枚数 }。台帳一覧で「この戸別はもう終わったか」を出すために使う。
    下書きの見出し情報だけを見るので、写真の中身は読み込まない。 */
 let _draftInfo = {};
+/* 下書きの控えを1度でも読み終えたか。読む前は「まだ保存していない戸別」の数が
+   いま開いている1件しか分からないので、その数を出すと嘘になる（開いた直後に
+   「1件」と出て、少し経つと本当の件数に変わる、という見え方をしていた）。 */
+let _draftInfoReady = false;
 async function refreshDraftInfo(){
   try{
     const all = await idbGetAll();
@@ -4558,6 +4562,7 @@ async function refreshDraftInfo(){
                   rev: rec.rev | 0, fileRev: rec.fileRev | 0 };
     });
     _draftInfo = map;
+    _draftInfoReady = true;
   }catch(e){ console.warn("下書き情報の読み取りに失敗", e); }
 }
 /* 下書きを1件書いたときに、控えもその場で直す。
@@ -4772,7 +4777,12 @@ function renderReceptionList(q){
   // 「まだPCに渡していない戸別」の数。ここで数えないと、書き出し忘れがそのまま埋もれる。
   const notHanded = unsavedTargets().length;
   const dirName = saveDirName();
-  const warn = notHanded
+  // まだ控えを読み終えていないときは、数の代わりに「確認中」と出す。
+  // ここで中途半端な数を出すと、まとめて保存が1件しか効かないように見える。
+  const warn0 = !_draftInfoReady
+    ? '<div class="rc-warn">まだ保存していない戸別を確認しています…</div>'
+    : null;
+  const warn = warn0 !== null ? warn0 : notHanded
     ? `<div class="rc-warn">まだ保存していない戸別が <b>${notHanded}件</b> あります。`
       + `保存しないと、写真以外の入力はPCへ渡りません。`
       + `<button id="rc-saveall" class="rc-saveall" data-label="まとめて保存（${notHanded}件）">まとめて保存（${notHanded}件）</button>`
