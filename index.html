@@ -523,6 +523,10 @@
   .draft.rc-done{background:#e6f4ea; border-left:4px solid #1b5e20; padding-left:8px;}
   .draft.rc-done .d-no{color:#14501a;}
   .draft.rc-done .d-open{background:#1b5e20;}
+  /* 同意書を受け取った戸別。済み（緑）・予定あり（青）・保留（橙）とぶつからない紫で塗る。
+     日にちの色を先にしたいので、下の .draft.rc-soon より前に書いておく
+     （同じ強さなら、あとに書いた方が勝つ）。 */
+  .draft.rc-consent{background:#ece1fa;}
   /* これからの予定（打合せ・工事日が本日より後）。
      済み（緑）・保留（橙）・未保存（赤）とぶつからない青で塗る。
      左の帯は今までどおりその戸別の状態を出したいので、地色だけ変える。 */
@@ -885,7 +889,7 @@ const GENBA_SCHEMA_VER = 1;
    （PC側で「現場入力アプリの版」を確認でき、メインとの食い違いに気付ける）。
    ★更新したらこの2行を書き換える。 */
 const APP_NAME_SHORT = "現場入力";
-const APP_VERSION = "2026.08.18b";
+const APP_VERSION = "2026.08.18c";
 function photoContentId(dataUri){
   if(!dataUri || typeof dataUri !== "string") return "";
   let a = 5381, b = 0;
@@ -4898,6 +4902,9 @@ function renderReceptionList(q){
               : (r.hold ? " rc-hold" : "");
     // これからの予定（本日より後の打合せ・工事日）。済んだ戸別には出さない。
     const soon = flowPhaseDone(rf,"done") ? null : rcSoonOf(r);
+    /* 同意書を受け取った戸別。全部終わった戸別（緑）には出さない。
+       色は日にち（これからの予定）を先にするので、予定のある戸別には出さない。 */
+    const consentOnly = !flowPhaseDone(rf,"done") && !!rf.consent && !soon;
     const soonBadge = soon
       ? `<span class="rc-badge soon" title="${esc(soon.kind)}の予定が ${esc(soon.date)} にあります（これからの予定）">`
         + `${esc(rcSoonLabel(soon.date))}</span>`
@@ -4922,7 +4929,7 @@ function renderReceptionList(q){
       : "";
     // この端末で工程を進めた戸別だけ「見直す」（PCの台帳で済んでいるだけの戸別は「開く」）
     const act = `<div class="d-act"><button class="d-open" data-recopen="${idx}">${(info&&flowAny(info.flow))?"見直す":"開く"}</button>${act2}</div>`;
-    return `<div class="draft${cls}${soon?" rc-soon":""}${unsaved?" rc-unsaved":""}"><div class="d-main" data-recopen="${idx}">
+    return `<div class="draft${cls}${soon?" rc-soon":""}${consentOnly?" rc-consent":""}${unsaved?" rc-unsaved":""}"><div class="d-main" data-recopen="${idx}">
       <div class="d-no">${dots}${phase}${soonBadge}${just}${started}${other}${unsaved}${hold}${badge}${esc(r.mgmt_no||"（番号なし）")}${r.name?(" ／ "+esc(r.name)):""}</div>
       <div class="d-sub">${sub}${ph}${fileNote}</div>${noteHtml}</div>${act}</div>`;
   }).join("");
