@@ -4541,7 +4541,7 @@ async function refreshDraftInfo(){
     const map = {};
     (all||[]).forEach(rec=>{
       if(!rec) return;
-      const no = String(rec.mgmt || (rec.model && rec.model.chosho_mgmt_no) || "").trim();
+      const no = toHalfWidthAn(rec.mgmt || (rec.model && rec.model.chosho_mgmt_no) || "").trim();
       if(!no) return;
       const done = (rec.surveyDone !== undefined) ? !!rec.surveyDone : !!(rec.model && rec.model.survey_done);
       const ph = (typeof rec.photos === "number") ? rec.photos
@@ -4565,7 +4565,7 @@ async function refreshDraftInfo(){
    これをしないと、ビラなどの工程の印が「受付台帳を開き直すまで」古いままになり、
    保存せずに次の戸別へ移ると、前の戸別の印が地図から消えて見える。 */
 function draftInfoNote(rec, ownKey){
-  const no = String((rec && rec.mgmt) || "").trim();
+  const no = toHalfWidthAn((rec && rec.mgmt) || "").trim();
   if(!no || ownKey === false) return;    // 管理番号がぶつかって別キーへ逃がした分は触らない
   _draftInfo[no] = { done: !!rec.surveyDone, flow: rec.flow || {}, photos: rec.photos | 0, has: true,
                      touched: (rec.touched !== false), other: String(rec.other || ""),
@@ -4582,8 +4582,8 @@ function draftInfoForget(key){
 }
 /* いま編集中の戸別は、まだ保存されていなくても最新の状態を出す */
 function draftInfoOf(no){
-  no = String(no||"").trim();
-  if(no && no === String(M.chosho_mgmt_no||"").trim()){
+  no = toHalfWidthAn(no||"").trim();
+  if(no && no === toHalfWidthAn(M.chosho_mgmt_no||"").trim()){
     return { done: !!M.survey_done, flow: flowOf(M), photos: (M.chosho_photos||[]).length, has: true,
              touched: (M._touched !== false), other: M._otherFile || "",
              meet: String(M.chosho_meet_at || ""), time: String(M.chosho_time || ""),
@@ -4945,10 +4945,10 @@ async function receptionApplyToDrafts(){
   const rows = getReceptionRows();
   if(!rows.length) return 0;
   const byNo = {};
-  rows.forEach(r => { const k = String((r && r.mgmt_no) || "").trim(); if(k && !byNo[k]) byNo[k] = r; });
+  rows.forEach(r => { const k = toHalfWidthAn((r && r.mgmt_no) || "").trim(); if(k && !byNo[k]) byNo[k] = r; });
   let applied = 0;
   // いま開いている戸別は画面ごと直す
-  const openNo = String(M.chosho_mgmt_no || "").trim();
+  const openNo = toHalfWidthAn(M.chosho_mgmt_no || "").trim();
   if(openNo && byNo[openNo] && receptionApplyToModel(M, byNo[openNo])){
     applied++; saveDraftQuiet(); render();
   }
@@ -4956,7 +4956,7 @@ async function receptionApplyToDrafts(){
   try{ all = await idbGetAll(); }catch(_){ return applied; }
   for(const rec of (all || [])){
     if(!rec || !rec.model) continue;
-    const no = String(rec.mgmt || "").trim();
+    const no = toHalfWidthAn(rec.mgmt || "").trim();
     if(!no || no === openNo || !byNo[no]) continue;
     if(!receptionApplyToModel(rec.model, byNo[no])) continue;
     rec.rev = (rec.rev | 0) + 1;          // 中身が変わった＝戸別ファイルを保存し直す対象になる
@@ -5020,7 +5020,7 @@ function rcWhenText(iso){
 function receptionSaveRows(src){
   const rows = (src && src.rows) || [];
   const norm = rows.map(x=>({
-    mgmt_no:String(x.mgmt_no||x.chosho_mgmt_no||"").trim(),
+    mgmt_no:toHalfWidthAn(x.mgmt_no||x.chosho_mgmt_no||"").trim(),   // 突き合わせは半角で
     name:String(x.name||x.chosho_cust_name||""),
     addr:String(x.addr||x.chosho_cust_addr||""),
     tel:String(x.tel||x.chosho_cust_tel||""),
