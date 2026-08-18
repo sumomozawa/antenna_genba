@@ -880,7 +880,7 @@ const GENBA_SCHEMA_VER = 1;
    （PC側で「現場入力アプリの版」を確認でき、メインとの食い違いに気付ける）。
    ★更新したらこの2行を書き換える。 */
 const APP_NAME_SHORT = "現場入力";
-const APP_VERSION = "2026.08.16";
+const APP_VERSION = "2026.08.18";
 function photoContentId(dataUri){
   if(!dataUri || typeof dataUri !== "string") return "";
   let a = 5381, b = 0;
@@ -1807,6 +1807,9 @@ function render(){
   app.innerHTML = html;
   bindEvents();
   mountAntennaGuide();
+  // ここが肝心。画面を作り直したあとでないと、電話リンクの行き先が入らない
+  // （updateHeader() は作り直す前に走るので、そのぶんは毎回消えてしまう）。
+  try{ updateMapBtns(); }catch(_){}
   window.scrollTo(0, _sy);
 }
 // アンテナ取付ガイド ウィジェットをホストへマウント（render()毎に再生成。旧インスタンスは破棄してリスナーの積み重なりを防ぐ）
@@ -2349,16 +2352,23 @@ function onTextInput(id){
   updateHeader();
   if(id === "chosho_cust_tel") updateTelLink();
 }
+/* 電話番号を、電話アプリが開く「tel:」の形に直す。
+   全角で入っている番号（PCの台帳や手入力）でもかけられるよう、まず半角へ直す。
+   番号が無い／短すぎるときは空を返す。 */
+function telHref(raw){
+  const num = String(raw == null ? "" : raw)
+    .replace(/[０-９＋]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
+    .replace(/[^0-9+]/g, "");
+  return num.length >= 6 ? ("tel:" + num) : "";
+}
 /* 電話番号の横の「📞 電話」を、いまの番号に合わせる。
    番号が無いときは灰色にして押せなくする（空の tel: を開くと何も起きず、壊れて見えるため）。 */
 function updateTelLink(){
   const a = document.getElementById("tel-call-link"); if(!a) return;
   const raw = String(M.chosho_cust_tel || "").trim();
-  // 全角で入っている番号（PCの台帳や手入力）でもかけられるように、半角へ直してから拾う
-  const num = raw.replace(/[０-９＋]/g, ch => String.fromCharCode(ch.charCodeAt(0) - 0xFEE0))
-                 .replace(/[^0-9+]/g, "");
-  if(num.length >= 6){
-    a.href = "tel:" + num;
+  const href = telHref(raw);
+  if(href){
+    a.href = href;
     a.classList.remove("off");
     a.title = raw + " にかけます";
   } else {
@@ -3118,7 +3128,7 @@ function renderMapCard(){
     + (note ? ('<div class="mcard-note">' + esc(note) + "</div>") : "")
     + '<div class="mcard-row">'
     +   '<button type="button" class="mcard-open" id="mcard-open">この戸別を開く</button>'
-    +   (tel ? ('<a class="mcard-tel" href="tel:' + esc(tel.replace(/[^0-9+\-]/g, "")) + '">📞 電話</a>') : "")
+    +   (telHref(tel) ? ('<a class="mcard-tel" href="' + esc(telHref(tel)) + '">📞 電話</a>') : "")
     + "</div></div>";
   const x = document.getElementById("mcard-x");
   if(x) x.addEventListener("click", () => mapSelect(null));
