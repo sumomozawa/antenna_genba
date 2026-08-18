@@ -523,6 +523,11 @@
   .draft.rc-done{background:#e6f4ea; border-left:4px solid #1b5e20; padding-left:8px;}
   .draft.rc-done .d-no{color:#14501a;}
   .draft.rc-done .d-open{background:#1b5e20;}
+  /* これからの予定（打合せ・工事日が本日より後）。
+     済み（緑）・保留（橙）・未保存（赤）とぶつからない青で塗る。
+     左の帯は今までどおりその戸別の状態を出したいので、地色だけ変える。 */
+  .draft.rc-soon{background:#e8f1fb;}
+  .rc-badge.soon{background:#0277bd;}
   /* 受付台帳一覧の「いまの工程で絞る」 */
   /* 6つ全部が見えるように折り返す（横スクロールだと隠れた分に気付けない） */
   .rc-filter{display:flex; flex-wrap:wrap; gap:6px; padding:2px 0 10px;}
@@ -4856,6 +4861,12 @@ function renderReceptionList(q){
     const cls = flowPhaseDone(rf,"done") ? " rc-done"
               : flowPhaseDone(rf,"survey") ? " rc-surv"
               : (r.hold ? " rc-hold" : "");
+    // これからの予定（本日より後の打合せ・工事日）。済んだ戸別には出さない。
+    const soon = flowPhaseDone(rf,"done") ? null : rcSoonOf(r);
+    const soonBadge = soon
+      ? `<span class="rc-badge soon" title="${esc(soon.kind)}の予定が ${esc(soon.date)} にあります（これからの予定）">`
+        + `${esc(rcSoonLabel(soon.date))}</span>`
+      : "";
     // 備考はPCと共通の欄。事務所が書いた内容を現場でも読めるように行に出す。
     const note = String(r.note||"").replace(/\s+/g," ").trim();
     const noteHtml = note ? `<div class="rc-note">${esc(note)}</div>` : "";
@@ -4876,8 +4887,8 @@ function renderReceptionList(q){
       : "";
     // この端末で工程を進めた戸別だけ「見直す」（PCの台帳で済んでいるだけの戸別は「開く」）
     const act = `<div class="d-act"><button class="d-open" data-recopen="${idx}">${(info&&flowAny(info.flow))?"見直す":"開く"}</button>${act2}</div>`;
-    return `<div class="draft${cls}${unsaved?" rc-unsaved":""}"><div class="d-main" data-recopen="${idx}">
-      <div class="d-no">${dots}${phase}${just}${started}${other}${unsaved}${hold}${badge}${esc(r.mgmt_no||"（番号なし）")}${r.name?(" ／ "+esc(r.name)):""}</div>
+    return `<div class="draft${cls}${soon?" rc-soon":""}${unsaved?" rc-unsaved":""}"><div class="d-main" data-recopen="${idx}">
+      <div class="d-no">${dots}${phase}${soonBadge}${just}${started}${other}${unsaved}${hold}${badge}${esc(r.mgmt_no||"（番号なし）")}${r.name?(" ／ "+esc(r.name)):""}</div>
       <div class="d-sub">${sub}${ph}${fileNote}</div>${noteHtml}</div>${act}</div>`;
   }).join("");
   const sa = document.getElementById("rc-saveall");
@@ -5027,6 +5038,27 @@ function rcMeetText(r){
   const m = /^(\d{4})-(\d{2})-(\d{2})[T ](\d{2}):(\d{2})/.exec(v);
   return m ? ("打合せ " + parseInt(m[2], 10) + "/" + parseInt(m[3], 10) + " " + m[4] + ":" + m[5])
            : ("打合せ " + v);
+}
+/* これからの予定（打合せ日時・工事日が「本日より後」）を1つ見つける。近い方を返す。
+   現場で決め直した分（下書き）があればそちらを見る。今日ぶんは含めない（本日より後、なので）。 */
+function rcSoonOf(r){
+  if(!r) return null;
+  const today = todayStr();
+  const info = draftInfoOf(r.mgmt_no);
+  const cand = [];
+  const work = String((r.date) || "").trim().slice(0, 10);
+  if(work) cand.push({ kind: "工事", date: work });
+  const meetRaw = ((info && info.has) ? String(info.meet || "") : "") || String(r.meet || "");
+  const meet = meetRaw.trim().slice(0, 10);
+  if(meet) cand.push({ kind: "打合せ", date: meet });
+  const soon = cand.filter(c => /^\d{4}-\d{2}-\d{2}$/.test(c.date) && c.date > today)
+                   .sort((a, b) => a.date.localeCompare(b.date));
+  return soon[0] || null;
+}
+/* 「2026-08-20」→「8/20」 */
+function rcSoonLabel(ds){
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(ds || ""));
+  return m ? (parseInt(m[2], 10) + "/" + parseInt(m[3], 10)) : String(ds || "");
 }
 /* 2026-08-17T05:30:00.000Z → 8/17 14:30（取り込みの知らせに出す） */
 function rcWhenText(iso){
