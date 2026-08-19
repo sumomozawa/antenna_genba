@@ -889,7 +889,7 @@ const GENBA_SCHEMA_VER = 1;
    （PC側で「現場入力アプリの版」を確認でき、メインとの食い違いに気付ける）。
    ★更新したらこの2行を書き換える。 */
 const APP_NAME_SHORT = "現場入力";
-const APP_VERSION = "2026.08.18c";
+const APP_VERSION = "2026.08.19a";
 function photoContentId(dataUri){
   if(!dataUri || typeof dataUri !== "string") return "";
   let a = 5381, b = 0;
@@ -3739,11 +3739,14 @@ function receptionApplyToModel(m, row){
   set("chosho_time",      "time", true);   // 工事の時刻も同じ（PCで消したら現場でも消える）
   set("chosho_meet_at",   "meet", true);   // 打合せ予定も同じ（PCで消したら現場でも消える）
   if(!String(m.chosho_note || "").trim() && row.note){ m.chosho_note = String(row.note); changed = true; }
-  // 工程（ビラ・工事・同意書・工事完了書）も同じ考え方で入れ直す。
-  // 下見だけはPCの受付台帳に無い（現場だけの印）ので触らない。
+  // 工程（下見・ビラ・工事・同意書・工事完了書）も同じ考え方で入れ直す。
+  // 下見は現場で押す印だが、PCが戸別ファイルから受け取って台帳に載せて返してくるので、
+  // 別の端末で下見した戸別も、台帳を取り込めば印が付く。
+  // なお、控え(_rcSrc)が無いときや台帳側が変わっていないときは○を消さないので、
+  // PCがまだ受け取っていない（台帳では未下見の）戸別の印が消えることはない。
   const rf = receptionFlowOf(row);
   const sf = src ? receptionFlowOf(src) : null;
-  ["flyer", "work", "consent", "compdoc"].forEach(k => {
+  ["survey", "flyer", "work", "consent", "compdoc"].forEach(k => {
     const st = flowStep(k); if(!st) return;
     const v = !!rf[k], cur = !!m[st.flag];
     if(cur === v) return;
@@ -3754,6 +3757,7 @@ function receptionApplyToModel(m, row){
     }
     m[st.flag] = v;
     if(!v) m[st.at] = "";
+    else if(k === "survey" && !m[st.at] && row.survey_at) m[st.at] = String(row.survey_at);
     // 工事はPCの「完了」＝ステータス completed と同じもの。一緒に動かす。
     if(k === "work"){
       if(v) m.chosho_status = "completed";
@@ -3775,7 +3779,8 @@ function receptionApplyToModel(m, row){
 /* 受付台帳の行が持っている工程。ビラ・承諾書・完了書はPCの台帳が持ち主で、
    工事は「状態＝完了」がその印（PCの受付台帳の「完了」列と同じ）。 */
 function receptionFlowOf(row){
-  return { flyer:   !!(row && row.flyer),
+  return { survey:  !!(row && row.survey),
+           flyer:   !!(row && row.flyer),
            work:    String((row && row.status) || "") === "completed",
            consent: !!(row && row.consent),
            compdoc: !!(row && row.compdoc) };
@@ -3785,6 +3790,7 @@ function rcSrcOf(row){
   return { name:String((row&&row.name)||""), addr:String((row&&row.addr)||""),
            tel:String((row&&row.tel)||""),   date:String((row&&row.date)||""),
            meet:String((row&&row.meet)||""), note:String((row&&row.note)||""),
+           survey:!!(row&&row.survey),
            flyer:!!(row&&row.flyer), consent:!!(row&&row.consent), compdoc:!!(row&&row.compdoc),
            status:String((row&&row.status)||"") };
 }
@@ -5048,7 +5054,7 @@ async function receptionApplyToDrafts(){
 function receptionDiffCount(oldRows, newRows){
   const keyOf = r => String((r && r.mgmt_no) || "").trim();
   const sigOf = r => [r.name, r.addr, r.tel, r.date, r.status, r.contractor,
-                      r.hold?1:0, r.flyer?1:0, r.consent?1:0, r.compdoc?1:0, r.note].join("\u0001");
+                      r.hold?1:0, r.survey?1:0, r.flyer?1:0, r.consent?1:0, r.compdoc?1:0, r.note].join("\u0001");
   const oldBy = {};
   (oldRows || []).forEach(r => { const k = keyOf(r); if(k) oldBy[k] = r; });
   let added = 0, changed = 0;
