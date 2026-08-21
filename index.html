@@ -889,7 +889,7 @@ const GENBA_SCHEMA_VER = 1;
    （PC側で「現場入力アプリの版」を確認でき、メインとの食い違いに気付ける）。
    ★更新したらこの2行を書き換える。 */
 const APP_NAME_SHORT = "現場入力";
-const APP_VERSION = "2026.08.19a";
+const APP_VERSION = "2026.08.21a";
 function photoContentId(dataUri){
   if(!dataUri || typeof dataUri !== "string") return "";
   let a = 5381, b = 0;
@@ -3277,7 +3277,9 @@ async function mapImportFile(file){
    ============================================================================ */
 function sanitizeFilename(s){ return String(s||"").replace(/[\\\/:*?"<>|]/g,"_").trim(); }
 function currentFileName(){
-  const no=sanitizeFilename(M.chosho_mgmt_no)||"戸別";
+  // 中身（buildState）は管理番号を半角にして書くので、ファイル名も同じにそろえる。
+  // 名前だけ全角だと、同じ戸別なのに全角名と半角名の2ファイルがフォルダに並ぶ。
+  const no=sanitizeFilename(toHalfWidthAn(M.chosho_mgmt_no))||"戸別";
   return no+".json";   // 戸別ファイル名は「管理番号.json」に統一
 }
 async function saveJson(){
@@ -3311,9 +3313,32 @@ async function saveJsonRun(){
   const json=JSON.stringify(state);
   const blob=new Blob([json],{type:"application/json"});
   const fname=currentFileName();
+  /* ★① 覚えている保存先フォルダへ、同じ名前で上書きする★
+     ここを飛ばして「保存先を選ぶ」窓から始めると、
+       ・毎回どこへ置くか選び直しになる
+       ・同じ戸別のファイルがフォルダに増えていく（PCは「いちばん新しい1件」しか見ない）
+       ・フォルダを選べない端末では、そのままダウンロードへ落ちて
+         PCが読むフォルダに入らないのに「保存しました」と出る
+     という事が起きる。「まとめて保存」は前からこの道を通っているので、そちらに合わせる。
+     ※ フォルダを選ぶ窓は「押した直後」しか開けないので、いちばん先にやる。 */
+  /* ここでは新しくフォルダを選ばせない。すでに覚えているフォルダがある時だけ使う。
+     （ここで選ばせると、選ぶのをやめたときに保存そのものが消えてしまう。
+       フォルダを覚えるのは「まとめて保存」の役目。） */
+  let dir = await saveDirGet();
+  if(dir && !(await saveDirOk(dir, true))) dir = null;      // 許可が切れていたら聞き直す
   M._touched = true;     // 明示的に保存したものは、中身が薄くても下書きに残す
   await persistDraft();  // 下書きは保存（ただし💾＝JSON書出済フラグは“実際に書き出せた時だけ”後で付ける）
-  // ① File System Access（Android Chrome対応）
+  if(dir){
+    try{
+      const fh = await dir.getFileHandle(fname, { create:true });
+      const w = await fh.createWritable();
+      await w.write(blob); await w.close();
+      await markDraftSaved(); saveStateFile();
+      toast("保存しました：" + (dir.name ? (dir.name + "／") : "") + fname);
+      return true;
+    }catch(e){ console.warn("覚えている保存先フォルダへ書けませんでした", e); }   // 下へ
+  }
+  // ② File System Access（保存先を選ぶ）
   if(window.showSaveFilePicker){
     try{
       const handle=await window.showSaveFilePicker({
@@ -3335,7 +3360,8 @@ async function saveJsonRun(){
         // iOSはtitle/textを渡すと別テキストファイルが作られるためfilesのみ共有
         await navigator.share({files:[file]});
         await markDraftSaved(); saveStateFile();
-        toast("共有しました："+fname);
+        // フォルダへ直接は入っていない。PCが読むフォルダへ置いたか確かめてもらう。
+        toast("共有しました："+fname+"（保存先フォルダには入っていません）");
         return true;
       }
     }catch(e){ if(e && e.name==="AbortError") return false; }
@@ -3345,7 +3371,8 @@ async function saveJsonRun(){
   const a=document.createElement("a"); a.href=url; a.download=fname; document.body.appendChild(a); a.click();
   setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); },4000); // 大量写真でDLダイアログが遅延しても失敗しないよう余裕を持つ
   await markDraftSaved(); saveStateFile();
-  toast("ダウンロードしました："+fname);
+  // ダウンロードフォルダに落ちただけ。PCが読むフォルダとは別なので、はっきり言う。
+  toast("ダウンロードしました："+fname+"（保存先フォルダには入っていません）");
   return true;
 }
 
@@ -3833,6 +3860,24 @@ async function markDraftSavedFor(key){
     if(M._lastDraftKey === key || draftKey() === key){ delete M._otherFile; saveStateFile(); }
   }catch(e){ console.warn("markDraftSavedFor failed", e); }
 }
+/* 同じ管理番号の下書きが2つ以上あるときに、どれを書き出すかを決める。
+   ・管理番号を入れる前の下書き（tmp:）と、入れた後の下書き（no:）が両方残ることがある
+   ・管理番号が全角と半角で、別のキーになっていることがある
+   これまでは「あとから来た方が勝つ」だけだったので、古い・中身の薄い方が
+   ファイルに書き出され、現場で入れた名前や工程の印が入っていないファイルが
+   PCへ渡ってしまうことがあった。 */
+function draftPickBetter(a, b){
+  if(!a) return b;
+  if(!b) return a;
+  const keyOf = r => String((r && r.key) || "");
+  const tmpA = keyOf(a).indexOf("tmp:") === 0, tmpB = keyOf(b).indexOf("tmp:") === 0;
+  if(tmpA !== tmpB) return tmpA ? b : a;                       // 管理番号の付いた方を採る
+  const rev = r => ((r && r.rev) | 0);
+  if(rev(a) !== rev(b)) return (rev(a) > rev(b)) ? a : b;      // 直した回数が多い方
+  const at = r => ((r && r.savedAt) || 0);
+  return (at(a) >= at(b)) ? a : b;                             // 最後に直した方
+}
+function draftNoKey(v){ return toHalfWidthAn(String(v == null ? "" : v)).trim(); }
 function saveAllUnsaved(){ return saveAllDrafts("unsaved"); }
 function saveAllOverwrite(){ return saveAllDrafts("all"); }
 /* mode="unsaved" … まだPCに渡していない戸別だけ保存する（まとめて保存）
@@ -3857,8 +3902,10 @@ async function saveAllDrafts(mode){
                         : "まだ保存していない戸別はありません。");
     return;
   }
+  /* 管理番号は半角にそろえて数える。全角のままだと、同じ戸別なのに
+     別のキーになり、その戸別のファイルが黙って1つも書かれないことがある。 */
   const byNo = {};
-  (all||[]).forEach(r => { const k = String((r && r.mgmt) || "").trim(); if(k) byNo[k] = r; });
+  (all||[]).forEach(r => { const k = draftNoKey(r && r.mgmt); if(k) byNo[k] = draftPickBetter(byNo[k], r); });
   // 全部保存し直す：PCで直した内容（名前・住所・電話・工事予定日・備考）を下書きへ入れ直す。
   // 入れ直さずに書き出すと、古いままのファイルができてメイン側が元に戻ってしまう。
   let applied = 0;
@@ -3888,10 +3935,11 @@ async function saveAllDrafts(mode){
     }
   }
   const files = [];
+  const missing = [];                       // 下書きが見つからず書き出せなかった戸別
   nos.forEach(no => {
-    const rec = byNo[no];
-    if(!rec || !rec.model) return;
-    files.push({ no, key: rec.key, name: sanitizeFilename(no) + ".json",
+    const rec = byNo[draftNoKey(no)];
+    if(!rec || !rec.model){ missing.push(no); return; }
+    files.push({ no, key: rec.key, name: sanitizeFilename(draftNoKey(no) || no) + ".json",
                  text: JSON.stringify(buildStateOf(rec.model)),
                  other: (rec.model && rec.model._otherFile) || "" });
   });
@@ -3910,7 +3958,13 @@ async function saveAllDrafts(mode){
     ? ("\n\n※ このうち " + otherCnt + "件は、他の端末が保存したファイルです。\n"
        + "上書きすると、その端末で撮った写真などはファイルから消えます。")
     : "";
-  if(!(await uiConfirm(head + listTxt + otherTxt
+  // 書き出せなかった分は黙って落とさず、必ず知らせる（「保存したのにファイルが無い」を防ぐ）
+  const missTxt = missing.length
+    ? ("\n\n⚠ この端末に下書きが見つからず、書き出せない戸別が " + missing.length + " 件あります：\n"
+       + missing.slice(0, 6).map(n => "・" + n).join("\n")
+       + (missing.length > 6 ? ("\n・ほか " + (missing.length - 6) + " 件") : ""))
+    : "";
+  if(!(await uiConfirm(head + listTxt + otherTxt + missTxt
       + (noNum && !isAll ? ("\n\n※ 管理番号の無い下書き " + noNum + " 件は対象外です") : "")))) return;
 
   setBusy(true);
