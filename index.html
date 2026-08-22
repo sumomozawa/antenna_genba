@@ -889,7 +889,7 @@ const GENBA_SCHEMA_VER = 1;
    （PC側で「現場入力アプリの版」を確認でき、メインとの食い違いに気付ける）。
    ★更新したらこの2行を書き換える。 */
 const APP_NAME_SHORT = "現場入力";
-const APP_VERSION = "2026.08.22a";
+const APP_VERSION = "2026.08.22b";
 function photoContentId(dataUri){
   if(!dataUri || typeof dataUri !== "string") return "";
   let a = 5381, b = 0;
@@ -3326,8 +3326,13 @@ async function saveJsonRun(){
   /* ここでは新しくフォルダを選ばせない。すでに覚えているフォルダがある時だけ使う。
      （ここで選ばせると、選ぶのをやめたときに保存そのものが消えてしまう。
        フォルダを覚えるのは「まとめて保存」の役目。） */
+  /* ★ここでは許可を「聞き直さない」（ask=false）★
+     聞き直すと、その窓で「押した直後」の権利を使い切ってしまい、
+     そのあとの「保存先を選ぶ」窓が開けなくなって、
+     ダウンロードへ落ちる。すでに許可があるフォルダだけ使う。
+     許可を取り直すのは「まとめて保存」の役目。 */
   let dir = await saveDirGet();
-  if(dir && !(await saveDirOk(dir, true))) dir = null;      // 許可が切れていたら聞き直す
+  if(dir && !(await saveDirOk(dir, false))) dir = null;
   M._touched = true;     // 明示的に保存したものは、中身が薄くても下書きに残す
   await persistDraft();  // 下書きは保存（ただし💾＝JSON書出済フラグは“実際に書き出せた時だけ”後で付ける）
   if(dir){
