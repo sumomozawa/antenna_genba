@@ -482,6 +482,12 @@
   .draft .d-undo:active{transform:scale(.92); background:#fdecea;}
   .draft .d-check{width:24px; height:24px; flex:none;}
   /* バージョン表記（本文の最後・フッターバーの上。目立たせない） */
+  .sb-dest{ margin-left:8px; padding:1px 7px; border-radius:9px; background:#e8f1fb;
+    color:#1e3a5f; font-size:11px; font-weight:700; white-space:nowrap; }
+  .sb-dest.none{ background:#fff3e0; color:#8a4b00; }
+  .hdr-ver{ display:inline-block; margin-left:8px; padding:1px 7px; border-radius:9px;
+    background:rgba(255,255,255,.22); color:#fff; font-size:11px; font-weight:700;
+    vertical-align:2px; white-space:nowrap; }
   .app-ver{font-size:10.5px; color:#9aa3ad; text-align:center; padding:10px 12px 4px; line-height:1.7;}
   .app-ver b{color:#7c8894; font-weight:600;}
   .rc-badge{display:inline-block; font-size:10px; font-weight:700; padding:0 6px; border-radius:8px; margin-right:6px; line-height:17px; vertical-align:1px; color:#fff;}
@@ -672,6 +678,7 @@
 <body>
 <header>
   <div class="ttl"><span class="app">現場入力</span>
+    <span class="hdr-ver" id="hdr-ver" title="このアプリの版。PCと版がそろっているか確かめるときに使います"></span>
     <span class="mgmt empty" id="hdr-mgmt">管理番号 未入力</span>
   </div>
   <button id="btn-save-top">保存</button>
@@ -889,7 +896,7 @@ const GENBA_SCHEMA_VER = 1;
    （PC側で「現場入力アプリの版」を確認でき、メインとの食い違いに気付ける）。
    ★更新したらこの2行を書き換える。 */
 const APP_NAME_SHORT = "現場入力";
-const APP_VERSION = "2026.08.22c";
+const APP_VERSION = "2026.08.22e";
 function photoContentId(dataUri){
   if(!dataUri || typeof dataUri !== "string") return "";
   let a = 5381, b = 0;
@@ -3308,6 +3315,42 @@ async function saveJson(){
     renderSaveBar();
   }
 }
+/* 書き出したものの「大きさ」と「写真の枚数」を言葉にする。
+   PCで見たファイルが小さすぎる時に、
+     ・ここで大きいと出ていた → 端末は書けている。PCへ届いていないだけ（同期ソフトが止まっている等）
+     ・ここでも小さい         → その戸別に写真が入っていない
+   のどちらかがすぐ分かるようにするため。 */
+function saveSizeText(json, state){
+  const n = (state && state.chosho_photos || []).filter(p => p && p.dataUri).length;
+  const b = (json && json.length) ? new Blob([json]).size : 0;
+  const size = b >= 1024*1024 ? ((b/1024/1024).toFixed(1) + "MB")
+             : b >= 1024      ? (Math.round(b/1024) + "KB") : (b + "バイト");
+  return "写真" + n + "枚・" + size;
+}
+/* 書き出したファイルを読み返して、書いたはずの中身が入っているか確かめる。
+   合っていれば "" を返す。合わないところがあれば、その説明を返す。 */
+async function saveVerify(fileHandle, state){
+  try{
+    const f = await fileHandle.getFile();
+    const o = JSON.parse(await f.text());
+    const ng = [];
+    const same = (k, label) => {
+      const a = String((state && state[k]) == null ? "" : state[k]);
+      const b = String((o && o[k]) == null ? "" : o[k]);
+      if(a !== b) ng.push("・" + label + "： 入れたはず「" + (a || "空") + "」／ ファイル「" + (b || "空") + "」");
+    };
+    same("chosho_mgmt_no", "管理番号");
+    same("chosho_date",    "工事予定日");
+    same("chosho_time",    "工事の時刻");
+    same("chosho_cust_name", "顧客名");
+    const pa = (state && state.chosho_photos || []).filter(x => x && x.dataUri).length;
+    const pb = (o && o.chosho_photos || []).filter(x => x && x.dataUri).length;
+    if(pa !== pb) ng.push("・写真の枚数： 入れたはず " + pa + " 枚 ／ ファイル " + pb + " 枚");
+    return ng.length ? ng.join("\n") : "";
+  }catch(e){
+    return "・読み返せませんでした（" + ((e && e.message) || e) + "）";
+  }
+}
 let _lastSaveInfo = null;      // 直前の保存がどこへ入ったか（暗幕に出す）
 async function saveJsonRun(){
   _lastSaveInfo = null;
@@ -3315,6 +3358,7 @@ async function saveJsonRun(){
   const json=JSON.stringify(state);
   const blob=new Blob([json],{type:"application/json"});
   const fname=currentFileName();
+  const sizeTxt=saveSizeText(json, state);
   /* ★① 覚えている保存先フォルダへ、同じ名前で上書きする★
      ここを飛ばして「保存先を選ぶ」窓から始めると、
        ・毎回どこへ置くか選び直しになる
@@ -3341,7 +3385,22 @@ async function saveJsonRun(){
       const w = await fh.createWritable();
       await w.write(blob); await w.close();
       await markDraftSaved(); saveStateFile();
-      _lastSaveInfo = { title: "保存しました", msg: "「" + (dir.name || "選んだフォルダ") + "」の中\n" + fname, warn: false };
+      /* ★書いたあと、そのファイルを読み返して確かめる★
+         「保存したのに、PCで開いても中身が入っていない」を、その場で捕まえるため。
+         黙って成功したことにすると、現場では気づきようがない。 */
+      const bad = await saveVerify(fh, state);
+      if(bad){
+        _lastSaveInfo = { title: "⚠ 保存できていないかもしれません",
+          msg: "「" + (dir.name || "選んだフォルダ") + "」の中\n" + fname + "\n\n"
+             + sizeTxt + "\n\n"
+             + "書いたあとに読み返したところ、中身が合いませんでした。\n" + bad
+             + "\n\nもう一度「保存」を押すか、\n台帳の「まとめて保存」をお試しください。", warn: true };
+        toast("⚠ 保存を確かめられませんでした：" + fname);
+        return true;
+      }
+      _lastSaveInfo = { title: "保存しました", msg: "「" + (dir.name || "選んだフォルダ") + "」の中\n" + fname
+        + "\n" + sizeTxt
+        + "\n（書いたあと読み返して、中身が入っていることを確かめました）", warn: false };
       toast("保存しました：" + (dir.name ? (dir.name + "／") : "") + fname);
       return true;
     }catch(e){ console.warn("覚えている保存先フォルダへ書けませんでした", e); }   // 下へ
@@ -3356,7 +3415,8 @@ async function saveJsonRun(){
       const w=await handle.createWritable();
       await w.write(blob); await w.close();
       await markDraftSaved(); saveStateFile();   // ← 書込成功後にだけ💾
-      _lastSaveInfo = { title: "保存しました", msg: (handle.name || fname) + "\n（保存先を選んで保存しました）", warn: false };
+      _lastSaveInfo = { title: "保存しました", msg: (handle.name || fname) + "\n" + sizeTxt
+        + "\n（保存先を選んで保存しました）", warn: false };
       toast("保存しました："+fname);
       return true;
     }catch(e){ if(e && e.name==="AbortError") return false; /* 失敗時は下へフォールバック */ }
@@ -3372,7 +3432,7 @@ async function saveJsonRun(){
         // フォルダへ直接は入っていない。PCが読むフォルダへ置いたか確かめてもらう。
         /* 共有先がPCの読み込むフォルダなら、これで正しく入っている。
            どこへ渡したかはこちらでは分からないので、決めつけずに事実だけ書く。 */
-        _lastSaveInfo = { title: "共有で渡しました", msg: fname
+        _lastSaveInfo = { title: "共有で渡しました", msg: fname + "\n" + sizeTxt
           + "\n\n中身はきちんと入っています（消えていません）。\n\n"
           + "渡した先が、PCで読み込むフォルダなら\nそのままPCで読めます。\n"
           + "ちがう場所へ渡したときは、そのフォルダへ移してください。", warn: true };
@@ -3387,7 +3447,7 @@ async function saveJsonRun(){
   setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); },4000); // 大量写真でDLダイアログが遅延しても失敗しないよう余裕を持つ
   await markDraftSaved(); saveStateFile();
   // ダウンロードフォルダに落ちただけ。PCが読むフォルダとは別なので、はっきり言う。
-  _lastSaveInfo = { title: "ダウンロードに入れました", msg: fname
+  _lastSaveInfo = { title: "ダウンロードに入れました", msg: fname + "\n" + sizeTxt
     + "\n\n中身はきちんと入っています（消えていません）。\n\n"
     + "この端末の「ダウンロード」に入りました。\n"
     + "PCで読み込むフォルダとちがう場合は、\nそのフォルダへ移してください。", warn: true };
@@ -3617,7 +3677,16 @@ function renderSaveBar(){
   else if(saveStale()||_save.dirty) file="未保存（"+_hhmm(_save.fileAt)+" 保存後に変更）";
   else file="保存済 "+_hhmm(_save.fileAt);
   el.className="savebar "+cls;
+  /* ★どこへ保存するかを、いつでも見えるようにする★
+     ここが食い違っていると「保存したのにPCで読めない」になる。
+     フォルダを覚えていなければ、そうと分かるように出す。 */
+  const dest = saveDirName();
+  const destHtml = dest
+    ? '<span class="sb-dest" title="「保存」を押すと、このフォルダの中の 管理番号.json を上書きします">📁 '
+      + esc(dest) + '</span>'
+    : '<span class="sb-dest none" title="保存先のフォルダを覚えていません。「保存」を押すと、保存先を選ぶ窓が出るか、共有／ダウンロードになります。台帳の「まとめて保存」で一度フォルダを選ぶと、ここに出ます">📁 保存先 未設定</span>';
   el.innerHTML='<span class="sb-dot"></span><span class="sb-main">'+esc(main)+'</span>'
+    + destHtml
     + (file ? '<span class="sb-file'+((saveStale()||!_save.fileAt)?" attn":"")+'">'+esc(file)+'</span>' : "");
 }
 /* 中身の指紋。saveDraft を通さずにモデルが書き換わっても、次に控えるときに
@@ -4660,6 +4729,9 @@ function getReceptionData(){ try{ const j=JSON.parse(localStorage.getItem(LS_REC
 function getReceptionRows(){ const d=getReceptionData(); return d?d.rows:[]; }
 /* 画面下部の版表記（このアプリ＋取り込んだ受付台帳から分かるメイン側の版）。目立たせない。 */
 function renderAppVer(){
+  // 見出しにも出す（設定を開かなくても、いつでも版が分かるように）
+  { const h=document.getElementById("hdr-ver");
+    if(h){ h.textContent = "v" + APP_VERSION; } }
   const el=document.getElementById("app-ver"); if(!el) return;
   const d=getReceptionData();
   const mv=(d && d.mainVersion) ? String(d.mainVersion) : "";
