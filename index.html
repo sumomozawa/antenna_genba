@@ -889,7 +889,7 @@ const GENBA_SCHEMA_VER = 1;
    （PC側で「現場入力アプリの版」を確認でき、メインとの食い違いに気付ける）。
    ★更新したらこの2行を書き換える。 */
 const APP_NAME_SHORT = "現場入力";
-const APP_VERSION = "2026.08.21a";
+const APP_VERSION = "2026.08.22a";
 function photoContentId(dataUri){
   if(!dataUri || typeof dataUri !== "string") return "";
   let a = 5381, b = 0;
@@ -3304,11 +3304,13 @@ async function saveJson(){
     done = await saveJsonRun();
   } finally {
     _saving = false;
-    if(done) saveOverlayDone(); else saveOverlayHide();
+    if(done) saveOverlayDone(_lastSaveInfo); else saveOverlayHide();
     renderSaveBar();
   }
 }
+let _lastSaveInfo = null;      // 直前の保存がどこへ入ったか（暗幕に出す）
 async function saveJsonRun(){
+  _lastSaveInfo = null;
   const state=buildState();
   const json=JSON.stringify(state);
   const blob=new Blob([json],{type:"application/json"});
@@ -3334,6 +3336,7 @@ async function saveJsonRun(){
       const w = await fh.createWritable();
       await w.write(blob); await w.close();
       await markDraftSaved(); saveStateFile();
+      _lastSaveInfo = { title: "保存しました", msg: "「" + (dir.name || "選んだフォルダ") + "」の中\n" + fname, warn: false };
       toast("保存しました：" + (dir.name ? (dir.name + "／") : "") + fname);
       return true;
     }catch(e){ console.warn("覚えている保存先フォルダへ書けませんでした", e); }   // 下へ
@@ -3348,6 +3351,7 @@ async function saveJsonRun(){
       const w=await handle.createWritable();
       await w.write(blob); await w.close();
       await markDraftSaved(); saveStateFile();   // ← 書込成功後にだけ💾
+      _lastSaveInfo = { title: "保存しました", msg: (handle.name || fname) + "\n（保存先を選んで保存しました）", warn: false };
       toast("保存しました："+fname);
       return true;
     }catch(e){ if(e && e.name==="AbortError") return false; /* 失敗時は下へフォールバック */ }
@@ -3361,6 +3365,9 @@ async function saveJsonRun(){
         await navigator.share({files:[file]});
         await markDraftSaved(); saveStateFile();
         // フォルダへ直接は入っていない。PCが読むフォルダへ置いたか確かめてもらう。
+        _lastSaveInfo = { title: "共有しました（フォルダには入っていません）",
+          msg: fname + "\n\nこのファイルは、PCが読み込むフォルダには入っていません。\n"
+             + "共有先から、そのフォルダへ移してください。", warn: true };
         toast("共有しました："+fname+"（保存先フォルダには入っていません）");
         return true;
       }
@@ -3372,6 +3379,9 @@ async function saveJsonRun(){
   setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); },4000); // 大量写真でDLダイアログが遅延しても失敗しないよう余裕を持つ
   await markDraftSaved(); saveStateFile();
   // ダウンロードフォルダに落ちただけ。PCが読むフォルダとは別なので、はっきり言う。
+  _lastSaveInfo = { title: "ダウンロードしました（フォルダには入っていません）",
+    msg: fname + "\n\nこのファイルは「ダウンロード」に入りました。\n"
+       + "PCが読み込むフォルダには入っていないので、そこへ移してください。", warn: true };
   toast("ダウンロードしました："+fname+"（保存先フォルダには入っていません）");
   return true;
 }
@@ -3527,6 +3537,7 @@ function renderSaveButtons(){
 }
 /* 保存中の暗幕。8秒たっても終わらないときは逃げ道を出す（画面に閉じ込めない）。 */
 let _saveOvTimer = null;
+let _saveOvHide = null;        // 自動で閉じるタイマー（次の知らせが出たら取り消す）
 function saveOverlayShow(fname){
   saveOverlayHide();
   const d = document.createElement("div");
@@ -3544,16 +3555,42 @@ function saveOverlayShow(fname){
     if(x) x.addEventListener("click", saveOverlayHide);
   }, 8000);
 }
-function saveOverlayDone(){
+/* 保存の結果。どこへ入ったかを必ず出す。
+   ★フォルダに入らなかったときは、押すまで消さない★
+     前は 0.95 秒で自動的に消えるうえ、行き先に関係なく「保存しました」としか
+     出していなかったので、ダウンロードに落ちたことに気づけなかった。 */
+function saveOverlayDone(info){
   const d = document.getElementById("save-ov"); if(!d){ return; }
   clearTimeout(_saveOvTimer); _saveOvTimer = null;
-  d.classList.add("ok");
+  const warn = !!(info && info.warn);
+  d.classList.add(warn ? "warn" : "ok");
   const c = d.querySelector(".save-ov-card");
-  if(c) c.innerHTML = '<div class="save-ov-check">✓</div><div class="save-ov-t">保存しました</div>';
-  setTimeout(saveOverlayHide, 950);
+  if(c){
+    c.innerHTML = '<div class="save-ov-check">' + (warn ? "⚠" : "✓") + '</div>'
+      + '<div class="save-ov-t">' + esc((info && info.title) || "保存しました") + '</div>'
+      + '<div class="save-ov-s" style="white-space:pre-line;line-height:1.6;">'
+      +   esc((info && info.msg) || "") + '</div>'
+      + (warn ? '<div class="save-ov-w"><button type="button" id="save-ov-x2">わかりました</button></div>' : '');
+    const x = document.getElementById("save-ov-x2");
+    if(x) x.addEventListener("click", saveOverlayHide);
+  }
+  clearTimeout(_saveOvHide); _saveOvHide = null;
+  if(!warn) _saveOvHide = setTimeout(saveOverlayHide, 2200);   // 読める長さにする（前は0.95秒）
 }
+/* 注意つきの暗幕の見た目（押すまで消えない） */
+(function(){
+  try {
+    const st = document.createElement("style");
+    st.textContent = "#save-ov.warn .save-ov-check{color:#b35c00;}"
+      + "#save-ov.warn .save-ov-t{color:#8a4b00;}"
+      + "#save-ov.warn .save-ov-w button{margin-top:10px;padding:6px 18px;border-radius:6px;"
+      + "border:1px solid #8a4b00;background:#b35c00;color:#fff;font-size:14px;cursor:pointer;}";
+    document.head.appendChild(st);
+  } catch(_){}
+})();
 function saveOverlayHide(){
   clearTimeout(_saveOvTimer); _saveOvTimer = null;
+  clearTimeout(_saveOvHide); _saveOvHide = null;
   const d = document.getElementById("save-ov"); if(d) d.remove();
 }
 function renderSaveBar(){
@@ -3765,7 +3802,19 @@ function receptionApplyToModel(m, row){
   set("chosho_date",      "date", true);   // 工事予定日はPCの台帳のもの。空にできないと直せない
   set("chosho_time",      "time", true);   // 工事の時刻も同じ（PCで消したら現場でも消える）
   set("chosho_meet_at",   "meet", true);   // 打合せ予定も同じ（PCで消したら現場でも消える）
-  if(!String(m.chosho_note || "").trim() && row.note){ m.chosho_note = String(row.note); changed = true; }
+  /* 備考もPCが直したら入れ直す（名前・住所などと同じ扱い）。
+     ★以前は「現場でまだ何も書いていないときだけ入れる」だったので、
+       いちど現場で書いた戸別は、事務所が台帳の備考を直しても
+       取り込み後に開いても古いままだった。
+     set() の中で「台帳が前回から変わっていなければ現場の内容を残す」ので、
+     現場で書いた内容がPCの古い備考で消されることはない。 */
+  /* ただし控え(_rcSrc)が無いときは、どちらが新しいか判断できない。
+     備考は現場も書く欄なので、その場合は現場で書いた内容を上書きしない（空なら入れる）。 */
+  if(!src && String(m.chosho_note || "").trim()){
+    /* 現場が書いた備考をそのまま残す */
+  } else {
+    set("chosho_note", "note", false);
+  }
   // 工程（下見・ビラ・工事・同意書・工事完了書）も同じ考え方で入れ直す。
   // 下見は現場で押す印だが、PCが戸別ファイルから受け取って台帳に載せて返してくるので、
   // 別の端末で下見した戸別も、台帳を取り込めば印が付く。
