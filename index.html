@@ -490,6 +490,48 @@
     vertical-align:2px; white-space:nowrap; }
   .app-ver{font-size:10.5px; color:#9aa3ad; text-align:center; padding:10px 12px 4px; line-height:1.7;}
   .app-ver b{color:#7c8894; font-weight:600;}
+  /* ---- 予定カレンダー ----
+     3社が同じ予定を見るので、どの会社の予定かが色と頭文字で分かるようにする。
+     指で押すので、日のマスと予定の行は大きめに取る。 */
+  .cal-top{display:flex; align-items:center; gap:6px; margin-bottom:9px;}
+  .cal-top .cal-ym{flex:1; text-align:center; font-weight:700; font-size:16px;}
+  .cal-top button{min-width:44px; min-height:38px; border:1px solid #cdd3da; border-radius:9px;
+    background:#fff; color:var(--accent); font-weight:700; font-size:14px; font-family:inherit;}
+  .cal-top button:active{transform:scale(.93);}
+  .cal-ctr{display:flex; flex-wrap:wrap; gap:5px; margin-bottom:9px;}
+  .cal-ctr button{border:1px solid #cdd3da; border-radius:999px; background:#fff; color:#37474f;
+    padding:5px 11px; min-height:32px; font-size:12.5px; font-weight:700; font-family:inherit;}
+  .cal-ctr button.on{border-color:transparent; color:#fff;}
+  .cal-ctr .cal-ctr-dot{display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:5px;
+    vertical-align:-1px;}
+  .cal-grid{display:grid; grid-template-columns:repeat(7,1fr); gap:2px;}
+  .cal-dow{text-align:center; font-size:11px; font-weight:700; color:var(--sub); padding:3px 0;}
+  .cal-dow.sun{color:#c62828;} .cal-dow.sat{color:#1565c0;}
+  .cal-cell{min-height:56px; border:1px solid var(--line); border-radius:7px; background:#fff;
+    padding:2px 2px 3px; text-align:left; font-family:inherit; overflow:hidden;}
+  .cal-cell:active{transform:scale(.95);}
+  .cal-cell.out{background:#f7f8fa; opacity:.55;}
+  .cal-cell.today{border-color:var(--accent); box-shadow:inset 0 0 0 1px var(--accent);}
+  .cal-cell.pick{background:#e8f0fe; border-color:var(--accent);}
+  .cal-cell .cal-d{font-size:11.5px; font-weight:700; color:#37474f; line-height:15px;}
+  .cal-cell.sun .cal-d{color:#c62828;} .cal-cell.sat .cal-d{color:#1565c0;}
+  .cal-chip{display:block; font-size:9.5px; font-weight:700; line-height:14px; border-radius:4px;
+    padding:0 3px; margin-top:1px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis;}
+  .cal-more{display:block; font-size:9.5px; color:var(--sub); line-height:13px; padding-left:3px;}
+  /* 選んだ日の中身 */
+  .cal-day{margin-top:12px; font-weight:700; font-size:14px; color:#37474f;}
+  .cal-day .cal-day-n{color:var(--sub); font-weight:400; font-size:12px; margin-left:6px;}
+  .cal-ev{display:flex; align-items:center; gap:9px; width:100%; text-align:left; font-family:inherit;
+    padding:11px 4px; border:0; border-bottom:1px solid var(--line); background:none;}
+  .cal-ev:active{background:#f2f6fb;}
+  .cal-ev .cal-ev-k{flex:none; width:26px; height:26px; border-radius:7px; color:#fff;
+    font-size:12px; font-weight:700; line-height:26px; text-align:center;}
+  .cal-ev .cal-ev-m{flex:1; min-width:0;}
+  .cal-ev .cal-ev-t{font-weight:700; font-size:14px;}
+  .cal-ev .cal-ev-s{font-size:11.5px; color:var(--sub); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .cal-ctr-badge{display:inline-block; font-size:10px; font-weight:700; padding:0 5px; border-radius:7px;
+    margin-right:5px; line-height:16px; vertical-align:1px;}
+  .cal-none{padding:14px 4px; color:var(--sub); font-size:13px; text-align:center;}
   .rc-badge{display:inline-block; font-size:10px; font-weight:700; padding:0 6px; border-radius:8px; margin-right:6px; line-height:17px; vertical-align:1px; color:#fff;}
   .rc-badge.done{background:#2e7d32;}
   .rc-badge.prov{background:#f9a825; color:#5d4037;}
@@ -692,6 +734,7 @@
   <div class="nav">
     <button id="btn-new">新規</button>
     <button id="btn-reception2">台帳</button>
+    <button id="btn-cal">予定</button>
     <button id="btn-list2">履歴</button>
     <button id="btn-map">地図</button>
   </div>
@@ -737,6 +780,24 @@
     <input type="file" id="flowshare-file" accept=".json,application/json,*/*" multiple style="display:none;">
     <div id="draft-list"></div>
     <button class="closebtn" id="draft-close">閉じる</button>
+  </div>
+</div>
+
+<!-- 予定カレンダー（取り込んだ受付台帳の工事予定日・打合せ予定を月で見る） -->
+<div class="modal" id="cal-modal">
+  <div class="sheet">
+    <h3>📅 予定カレンダー</h3>
+    <div class="info"><b>日をタップ</b>→その日の予定が下に出ます。<b>予定をタップ</b>→その戸別の入力を開きます。<br>
+    <span class="sub">受付台帳の工事予定日（<b>工</b>）と打合せ予定（<b>打</b>）です。色は施工会社。現場で直した予定はそちらを出します。</span></div>
+    <div class="cal-top">
+      <button type="button" id="cal-prev" aria-label="前の月">‹</button>
+      <div class="cal-ym" id="cal-ym"></div>
+      <button type="button" id="cal-next" aria-label="次の月">›</button>
+      <button type="button" id="cal-today">今日</button>
+    </div>
+    <div class="cal-ctr" id="cal-ctr"></div>
+    <div id="cal-body"></div>
+    <button class="closebtn" id="cal-close">閉じる</button>
   </div>
 </div>
 
@@ -896,7 +957,7 @@ const GENBA_SCHEMA_VER = 1;
    （PC側で「現場入力アプリの版」を確認でき、メインとの食い違いに気付ける）。
    ★更新したらこの2行を書き換える。 */
 const APP_NAME_SHORT = "現場入力";
-const APP_VERSION = "2026.08.22e";
+const APP_VERSION = "2026.08.22f";
 function photoContentId(dataUri){
   if(!dataUri || typeof dataUri !== "string") return "";
   let a = 5381, b = 0;
@@ -4795,6 +4856,7 @@ async function refreshDraftInfo(force){
       map[no] = { done, flow, photos: ph, has: true, touched: (rec.touched !== false), other,
                   meet: String((rec.model && rec.model.chosho_meet_at) || ""),
                   time: String((rec.model && rec.model.chosho_time) || ""),
+                  date: String((rec.model && rec.model.chosho_date) || ""),
                   fileAt: rec.fileSavedAt || 0, savedAt: rec.savedAt || 0,
                   rev: rec.rev | 0, fileRev: rec.fileRev | 0, tick: 0 };
     });
@@ -4819,6 +4881,7 @@ function draftInfoNote(rec, ownKey){
                      touched: (rec.touched !== false), other: String(rec.other || ""),
                      meet: String((rec.model && rec.model.chosho_meet_at) || ""),
                      time: String((rec.model && rec.model.chosho_time) || ""),
+                     date: String((rec.model && rec.model.chosho_date) || ""),
                      fileAt: rec.fileSavedAt || 0, savedAt: rec.savedAt || 0,
                      rev: rec.rev | 0, fileRev: rec.fileRev | 0, tick: ++_draftInfoTick };
 }
@@ -4836,6 +4899,7 @@ function draftInfoOf(no){
     return { done: !!M.survey_done, flow: flowOf(M), photos: (M.chosho_photos||[]).length, has: true,
              touched: (M._touched !== false), other: M._otherFile || "",
              meet: String(M.chosho_meet_at || ""), time: String(M.chosho_time || ""),
+             date: String(M.chosho_date || ""),
              fileAt: _save.fileAt, stale: !!(saveStale() || _save.dirty) };
   }
   const d = _draftInfo[no];
@@ -5299,6 +5363,270 @@ function rcWhenText(iso){
   const p = x => String(x).padStart(2, "0");
   return (dt.getMonth()+1) + "/" + dt.getDate() + " " + p(dt.getHours()) + ":" + p(dt.getMinutes());
 }
+/* ============================================================================
+   9) 予定カレンダー
+   ------------------------------------------------------------------------
+   取り込んだ受付台帳の「工事予定日」と「打合せ予定」を、月のカレンダーで出す。
+   一覧は1件ずつ見るのには向いているが、「来週どこへ行くのか」「今日は何件か」は
+   一覧では分からない。ここはその一目のためのもの。
+
+   ・予定を決めるのはPCの受付台帳。ここは見るためのもの（戸別を開けば時刻は直せる）
+   ・3社が同じカレンダーを使うので、会社ごとに色と頭文字を付けて分けられるようにする
+   ・現場でこの端末が直した予定（工事予定日・時刻・打合せ）があれば、そちらを出す。
+     取り込み直すまで古い予定が出ると、行き先を間違える
+   ============================================================================ */
+let _calYM   = null;    // 出している月 { y, m }（m は 1〜12）
+let _calPick = "";      // 選んでいる日 "YYYY-MM-DD"
+let _calCtr  = "all";   // 会社の絞り込み（会社名 または "all"）
+const CAL_KIND = { work: { ch:"工", name:"工事",   color:"#1565c0" },
+                   meet: { ch:"打", name:"打合せ", color:"#e65100" } };
+/* 会社の色。PCの受付台帳のカレンダーと同じ並びの色を使う。 */
+const CAL_COLORS = ["#1565c0", "#c62828", "#2e7d32", "#6a1b9a", "#e65100", "#00838f",
+  "#ad1457", "#3949ab", "#558b2f", "#5d4037", "#0277bd", "#8d6e63"];
+/* 色を配る会社の並び。台帳に出てくる会社名を名前順にする。
+   台帳はどの端末でも同じものを取り込むので、これで端末によらず同じ色になる。 */
+function calCtrOrder(){
+  const seen = Object.create(null), out = [];
+  getReceptionRows().forEach(r => {
+    const n = String((r && r.contractor) || "").trim();
+    if(n && !seen[n]){ seen[n] = 1; out.push(n); }
+  });
+  return out.sort((a, b) => a.localeCompare(b, "ja"));
+}
+function calCtrColor(name){
+  name = String(name || "").trim();
+  if(!name) return "#78909c";                 // 会社が決まっていない戸別
+  const i = calCtrOrder().indexOf(name);
+  return CAL_COLORS[(i < 0 ? 0 : i) % CAL_COLORS.length];
+}
+/* 下地の色に対して読める文字色（白か黒）。濃い青に黒字のような読めない組み合わせを避ける。 */
+function calInk(bg){
+  const m = String(bg || "").trim().replace(/^#/, "");
+  if(m.length !== 6) return "#fff";
+  const v = i => parseInt(m.slice(i, i + 2), 16) / 255;
+  const f = x => (x <= 0.03928) ? (x / 12.92) : Math.pow((x + 0.055) / 1.055, 2.4);
+  const L = 0.2126 * f(v(0)) + 0.7152 * f(v(2)) + 0.0722 * f(v(4));
+  return ((1.05 / (L + 0.05)) >= ((L + 0.05) / 0.05)) ? "#fff" : "#111";
+}
+/* 会社名から「株式会社」等を取る。 */
+function calCtrStrip(name){
+  const s = String(name || "")
+    .replace(/株式会社|有限会社|合同会社|合資会社|合名会社/g, "")
+    .replace(/[（(]株[）)]|[（(]有[）)]|㈱|㈲|㈾/g, "")
+    .replace(/[\s　]+/g, "").trim();
+  return s || String(name || "").trim();
+}
+/* 狭いマスに入れる短い名前。ふつうは先頭2文字だが、
+   「アンテナ甲」「アンテナ乙」のように頭が同じ会社があると2文字では見分けが付かない。
+   区別が付くところまで1文字ずつ伸ばす。 */
+let _calCtrShortMap = null, _calCtrShortKey = null;
+function calCtrLabels(){
+  const order = calCtrOrder();
+  const key = order.join("／");
+  if(_calCtrShortMap && _calCtrShortKey === key) return _calCtrShortMap;
+  const base = order.map(calCtrStrip);
+  const map = Object.create(null);
+  base.forEach((s, i) => {
+    let n = 2;
+    while(n < s.length && base.some((o, j) => j !== i && o.slice(0, n) === s.slice(0, n))) n++;
+    map[order[i]] = s.slice(0, n) || "？";
+  });
+  _calCtrShortMap = map; _calCtrShortKey = key;
+  return map;
+}
+function calCtrShort(name){
+  name = String(name || "").trim(); if(!name) return "？";
+  return calCtrLabels()[name] || calCtrStrip(name).slice(0, 2) || "？";
+}
+function calDS(y, m, d){ const p = n => String(n).padStart(2, "0"); return y + "-" + p(m) + "-" + p(d); }
+/* その戸別の「いまの工事予定」。現場で直した分（下書き）があればそちらを見る。 */
+function calWorkOf(r){
+  const info = draftInfoOf(r && r.mgmt_no);
+  const mine = (info && info.has) ? String(info.date || "") : "";
+  const d = (mine || String((r && r.date) || "")).trim().slice(0, 10);
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(d)) return null;
+  const mt = (info && info.has) ? String(info.time || "") : "";
+  return { date: d, time: (mt || String((r && r.time) || "")).trim().slice(0, 5) };
+}
+/* その戸別の「いまの打合せ予定」。同上。 */
+function calMeetOf(r){
+  const info = draftInfoOf(r && r.mgmt_no);
+  const mine = (info && info.has) ? String(info.meet || "") : "";
+  const v = (mine || String((r && r.meet) || "")).trim();
+  const m = /^(\d{4}-\d{2}-\d{2})[T ](\d{2}):(\d{2})/.exec(v);
+  if(m) return { date: m[1], time: m[2] + ":" + m[3] };
+  const d = v.slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(d) ? { date: d, time: "" } : null;
+}
+/* カレンダーに出す予定を全部作る。1つの戸別から「工事」と「打合せ」の2つ出ることがある。 */
+function calEvents(){
+  const out = [];
+  getReceptionRows().forEach(r => {
+    if(!r) return;
+    const w = calWorkOf(r);
+    if(w) out.push({ kind:"work", date:w.date, time:w.time, row:r });
+    const t = calMeetOf(r);
+    if(t) out.push({ kind:"meet", date:t.date, time:t.time, row:r });
+  });
+  out.sort((a, b) => (a.date + " " + (a.time || "99:99")).localeCompare(b.date + " " + (b.time || "99:99"))
+                  || String(a.row.mgmt_no || "").localeCompare(String(b.row.mgmt_no || "")));
+  return out;
+}
+function calCtrOf(ev){ return String((ev && ev.row && ev.row.contractor) || "").trim(); }
+function calFilter(list){
+  return (_calCtr === "all") ? list : list.filter(e => calCtrOf(e) === _calCtr);
+}
+/* 会社の絞り込みの一列。会社が1社しか出てこないときは出さない（押すところが無駄に増える）。 */
+function calRenderCtr(){
+  const host = document.getElementById("cal-ctr"); if(!host) return;
+  const all = calEvents();
+  const names = [];
+  all.forEach(e => { const n = calCtrOf(e); if(names.indexOf(n) < 0) names.push(n); });
+  if(names.filter(Boolean).length < 2){ host.innerHTML = ""; host.style.display = "none"; return; }
+  host.style.display = "";
+  const btn = (key, label, color, n) => {
+    const on = (_calCtr === key);
+    const style = on && color ? (' style="background:' + color + ';border-color:' + color + ';color:' + calInk(color) + ';"')
+                : on ? ' style="background:#37474f;border-color:#37474f;color:#fff;"' : '';
+    const dot = color ? '<span class="cal-ctr-dot" style="background:' + color + ';"></span>' : '';
+    return '<button type="button" class="cal-ctr-pick' + (on ? ' on' : '') + '" data-ctr="' + esc(key) + '"'
+      + style + '>' + (on ? '' : dot) + esc(label) + ' ' + n + '</button>';
+  };
+  let h = btn("all", "すべて", "", all.length);
+  calCtrOrder().forEach(n => {
+    const cnt = all.filter(e => calCtrOf(e) === n).length;
+    if(cnt) h += btn(n, calCtrShort(n), calCtrColor(n), cnt);
+  });
+  const none = all.filter(e => !calCtrOf(e)).length;
+  if(none) h += btn("", "会社なし", "#78909c", none);
+  host.innerHTML = h;
+  host.querySelectorAll(".cal-ctr-pick").forEach(b => b.addEventListener("click", () => {
+    _calCtr = b.getAttribute("data-ctr"); calRender();
+  }));
+}
+/* 月のマスと、選んだ日の中身。 */
+function calRender(){
+  const host = document.getElementById("cal-body"); if(!host) return;
+  const rows = getReceptionRows();
+  if(!rows.length){
+    host.innerHTML = '<div class="info" style="text-align:center">受付台帳はまだ取り込まれていません。<br>'
+      + '<b>「台帳」</b>から <b class="fname">現場用_….json</b> を取り込むと、ここに予定が出ます。</div>';
+    const ym = document.getElementById("cal-ym"); if(ym) ym.textContent = "";
+    const ctr = document.getElementById("cal-ctr"); if(ctr){ ctr.innerHTML = ""; ctr.style.display = "none"; }
+    return;
+  }
+  const today = todayStr();
+  if(!_calYM){ const t = today.split("-"); _calYM = { y: +t[0], m: +t[1] }; }
+  if(!_calPick) _calPick = today;
+  calRenderCtr();
+  const evs = calFilter(calEvents());
+  const byDay = Object.create(null);
+  evs.forEach(e => { (byDay[e.date] = byDay[e.date] || []).push(e); });
+
+  const y = _calYM.y, m = _calYM.m;
+  const ymEl = document.getElementById("cal-ym");
+  if(ymEl) ymEl.textContent = y + "年" + m + "月";
+  const first = new Date(y, m - 1, 1);
+  const start = new Date(y, m - 1, 1 - first.getDay());     // その週の日曜から始める
+  const DOW = ["日", "月", "火", "水", "木", "金", "土"];
+  let h = '<div class="cal-grid">'
+    + DOW.map((d, i) => '<div class="cal-dow' + (i === 0 ? ' sun' : i === 6 ? ' sat' : '') + '">' + d + '</div>').join("");
+  for(let i = 0; i < 42; i++){
+    const dt = new Date(start.getFullYear(), start.getMonth(), start.getDate() + i);
+    const ds = calDS(dt.getFullYear(), dt.getMonth() + 1, dt.getDate());
+    const dow = dt.getDay();
+    const list = byDay[ds] || [];
+    const cls = ["cal-cell"];
+    if(dt.getMonth() + 1 !== m) cls.push("out");
+    if(ds === today) cls.push("today");
+    if(ds === _calPick) cls.push("pick");
+    if(dow === 0) cls.push("sun"); else if(dow === 6) cls.push("sat");
+    let chips = "";
+    list.slice(0, 2).forEach(e => {
+      const bg = calCtrColor(calCtrOf(e));
+      /* マスは指1本ぶんの幅しかない。時刻と名前を並べるとどちらも途中で切れて読めないので、
+         時刻があれば時刻だけ、無ければ名前だけを出す。誰なのかは下の一覧で読む。 */
+      const who = String(e.row.name || e.row.mgmt_no || "").trim();
+      const txt = CAL_KIND[e.kind].ch + (e.time ? e.time.replace(/^0/, "") : who);
+      chips += '<span class="cal-chip" style="background:' + bg + ';color:' + calInk(bg) + ';" title="'
+        + esc(CAL_KIND[e.kind].name + (e.time ? ("　" + e.time) : "") + "　" + who) + '">'
+        + esc(txt) + '</span>';
+    });
+    if(list.length > 2) chips += '<span class="cal-more">+' + (list.length - 2) + '</span>';
+    h += '<button type="button" class="' + cls.join(" ") + '" data-cal-day="' + ds + '">'
+      + '<span class="cal-d">' + dt.getDate() + '</span>' + chips + '</button>';
+  }
+  h += '</div>';
+
+  // 選んだ日の中身
+  const day = byDay[_calPick] || [];
+  const md = /^(\d{4})-(\d{2})-(\d{2})$/.exec(_calPick);
+  const dayLabel = md ? (parseInt(md[2], 10) + "月" + parseInt(md[3], 10) + "日（"
+    + DOW[new Date(+md[1], +md[2] - 1, +md[3]).getDay()] + "）") : _calPick;
+  h += '<div class="cal-day">' + esc(dayLabel)
+    + '<span class="cal-day-n">' + (day.length ? (day.length + "件") : "予定なし") + '</span></div>';
+  if(!day.length){
+    // 何も無い日でも手ぶらにしない。次にいつ何があるかを出す。
+    const next = evs.filter(e => e.date > _calPick).slice(0, 3);
+    h += '<div class="cal-none">この日の予定はありません。'
+      + (next.length ? ('<br>次は ' + esc(next.map(e => {
+          const mm = /^\d{4}-(\d{2})-(\d{2})$/.exec(e.date);
+          return (mm ? (parseInt(mm[1], 10) + "/" + parseInt(mm[2], 10)) : e.date)
+            + " " + CAL_KIND[e.kind].name + " " + String(e.row.name || e.row.mgmt_no || "");
+        }).join(" ／ "))) : "")
+      + '</div>';
+  } else {
+    h += day.map(e => {
+      const k = CAL_KIND[e.kind];
+      const ctr = calCtrOf(e);
+      const bg = calCtrColor(ctr);
+      const rf = rowFlowOf(e.row);
+      const top = flowTopPhase(rf);
+      const badges = (e.row.hold ? '<span class="rc-badge hold">保留</span>' : '')
+        + (top ? '<span class="rc-badge ph-' + top.key + '">' + esc(top.badge) + '</span>' : '')
+        + (ctr ? '<span class="cal-ctr-badge" style="background:' + bg + ';color:' + calInk(bg) + ';">'
+                 + esc(calCtrShort(ctr)) + '</span>' : '');
+      const sub = [String(e.row.mgmt_no || ""), String(e.row.addr || "")].filter(Boolean).map(esc).join("　");
+      return '<button type="button" class="cal-ev" data-cal-open="' + esc(String(e.row.mgmt_no || "")) + '">'
+        + '<span class="cal-ev-k" style="background:' + k.color + ';">' + k.ch + '</span>'
+        + '<span class="cal-ev-m">'
+        +   '<span class="cal-ev-t">' + esc((e.time ? (e.time + "　") : "") + (e.row.name || e.row.mgmt_no || "（名前なし）")) + '</span>'
+        +   '<span class="cal-ev-s">' + badges + sub + '</span>'
+        + '</span></button>';
+    }).join("");
+  }
+  host.innerHTML = h;
+  host.querySelectorAll("[data-cal-day]").forEach(b => b.addEventListener("click", () => {
+    _calPick = b.getAttribute("data-cal-day");
+    // 前後の月のマスを押したときは、その月へ移る（押した日はそのまま選ばれた状態にする）
+    const t = _calPick.split("-");
+    if(+t[1] !== _calYM.m || +t[0] !== _calYM.y) _calYM = { y: +t[0], m: +t[1] };
+    calRender();
+  }));
+  host.querySelectorAll("[data-cal-open]").forEach(b => b.addEventListener("click", () => {
+    const no = b.getAttribute("data-cal-open");
+    const row = getReceptionRows().filter(r => String((r && r.mgmt_no) || "") === no)[0];
+    if(!row) return;
+    closeCalModal();
+    openFromReception(row);
+  }));
+}
+function calShift(n){
+  if(!_calYM){ const t = todayStr().split("-"); _calYM = { y: +t[0], m: +t[1] }; }
+  const d = new Date(_calYM.y, _calYM.m - 1 + n, 1);
+  _calYM = { y: d.getFullYear(), m: d.getMonth() + 1 };
+  calRender();
+}
+function openCalModal(){
+  document.getElementById("cal-modal").classList.add("open");
+  const t = todayStr().split("-");
+  _calYM = { y: +t[0], m: +t[1] }; _calPick = todayStr();   // 開いたときは必ず今日から
+  calRender();                                              // まず今ある情報ですぐ出す
+  // 現場で直した予定日・時刻を出すため、下書きの控えを取り直してから出し直す
+  refreshDraftInfo().then(() => { if(document.getElementById("cal-modal").classList.contains("open")) calRender(); })
+                    .catch(() => {});
+}
+function closeCalModal(){ document.getElementById("cal-modal").classList.remove("open"); }
 /* 受付台帳の行をこの端末に保存する。件数を返す。
    受付台帳ファイル単体からも、現場用（ひとまとめ）からも同じ道を通す。 */
 function receptionSaveRows(src){
@@ -5320,6 +5648,7 @@ function receptionSaveRows(src){
     compdoc:!!x.compdoc,                // 完了書（現場では「工事完了書」）受領済み
     note:String(x.note||"")
   })).filter(x=>x.mgmt_no||x.name||x.addr);
+  _calCtrShortMap = null;   // 会社の顔ぶれが変わるので、短い名前は作り直す
   localStorage.setItem(LS_RECEPTION, JSON.stringify({ type:"antenna_reception_ledger",
     importedAt:Date.now(), exportedAt:(src&&src.exportedAt)||"", project:(src&&src.project)||"",
     mainVersion:(src&&src.appVersion)||"", rows:norm }));
@@ -5394,6 +5723,13 @@ document.getElementById("reception-sortdir").addEventListener("click",()=>{
   renderReceptionSort(); receptionRerender();
 });
 document.getElementById("reception-close").addEventListener("click",closeReceptionModal);
+document.getElementById("btn-cal").addEventListener("click",openCalModal);
+document.getElementById("cal-close").addEventListener("click",closeCalModal);
+document.getElementById("cal-prev").addEventListener("click",()=>calShift(-1));
+document.getElementById("cal-next").addEventListener("click",()=>calShift(1));
+document.getElementById("cal-today").addEventListener("click",()=>{
+  const t=todayStr().split("-"); _calYM={y:+t[0],m:+t[1]}; _calPick=todayStr(); calRender();
+});
 document.getElementById("btn-reception2").addEventListener("click",openReceptionModal);
 /* --- 地図 --- */
 document.getElementById("btn-map").addEventListener("click",()=>openMapView(M.chosho_mgmt_no));
