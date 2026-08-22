@@ -889,7 +889,7 @@ const GENBA_SCHEMA_VER = 1;
    （PC側で「現場入力アプリの版」を確認でき、メインとの食い違いに気付ける）。
    ★更新したらこの2行を書き換える。 */
 const APP_NAME_SHORT = "現場入力";
-const APP_VERSION = "2026.08.22b";
+const APP_VERSION = "2026.08.22c";
 function photoContentId(dataUri){
   if(!dataUri || typeof dataUri !== "string") return "";
   let a = 5381, b = 0;
@@ -3370,10 +3370,13 @@ async function saveJsonRun(){
         await navigator.share({files:[file]});
         await markDraftSaved(); saveStateFile();
         // フォルダへ直接は入っていない。PCが読むフォルダへ置いたか確かめてもらう。
-        _lastSaveInfo = { title: "共有しました（フォルダには入っていません）",
-          msg: fname + "\n\nこのファイルは、PCが読み込むフォルダには入っていません。\n"
-             + "共有先から、そのフォルダへ移してください。", warn: true };
-        toast("共有しました："+fname+"（保存先フォルダには入っていません）");
+        /* 共有先がPCの読み込むフォルダなら、これで正しく入っている。
+           どこへ渡したかはこちらでは分からないので、決めつけずに事実だけ書く。 */
+        _lastSaveInfo = { title: "共有で渡しました", msg: fname
+          + "\n\n中身はきちんと入っています（消えていません）。\n\n"
+          + "渡した先が、PCで読み込むフォルダなら\nそのままPCで読めます。\n"
+          + "ちがう場所へ渡したときは、そのフォルダへ移してください。", warn: true };
+        toast("共有で渡しました："+fname);
         return true;
       }
     }catch(e){ if(e && e.name==="AbortError") return false; }
@@ -3384,10 +3387,11 @@ async function saveJsonRun(){
   setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); },4000); // 大量写真でDLダイアログが遅延しても失敗しないよう余裕を持つ
   await markDraftSaved(); saveStateFile();
   // ダウンロードフォルダに落ちただけ。PCが読むフォルダとは別なので、はっきり言う。
-  _lastSaveInfo = { title: "ダウンロードしました（フォルダには入っていません）",
-    msg: fname + "\n\nこのファイルは「ダウンロード」に入りました。\n"
-       + "PCが読み込むフォルダには入っていないので、そこへ移してください。", warn: true };
-  toast("ダウンロードしました："+fname+"（保存先フォルダには入っていません）");
+  _lastSaveInfo = { title: "ダウンロードに入れました", msg: fname
+    + "\n\n中身はきちんと入っています（消えていません）。\n\n"
+    + "この端末の「ダウンロード」に入りました。\n"
+    + "PCで読み込むフォルダとちがう場合は、\nそのフォルダへ移してください。", warn: true };
+  toast("ダウンロードに入れました："+fname);
   return true;
 }
 
