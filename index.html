@@ -482,9 +482,16 @@
   .draft .d-undo:active{transform:scale(.92); background:#fdecea;}
   .draft .d-check{width:24px; height:24px; flex:none;}
   /* バージョン表記（本文の最後・フッターバーの上。目立たせない） */
-  .sb-dest{ margin-left:8px; padding:1px 7px; border-radius:9px; background:#e8f1fb;
-    color:#1e3a5f; font-size:11px; font-weight:700; white-space:nowrap; }
-  .sb-dest.none{ background:#fff3e0; color:#8a4b00; }
+  .sb-dest{ margin-left:8px; padding:3px 9px; border-radius:9px; background:#e8f1fb;
+    color:#1e3a5f; font-size:11px; font-weight:700; white-space:nowrap;
+    border:1px solid #c3d9f2; font-family:inherit; cursor:pointer; min-height:26px;
+    transition:transform var(--t-fast) var(--ease), background var(--t-med) var(--ease); }
+  .sb-dest:active{ transform:scale(.94); background:#d8e8fa; }
+  .sb-dest.none{ background:#fff3e0; color:#8a4b00; border-color:#ffcc80; }
+  .sb-dest.none:active{ background:#ffe9c9; }
+  .sb-dest-x{ margin-left:4px; padding:0 5px; border-radius:7px; font-size:10px;
+    background:rgba(30,58,95,.12); }
+  .sb-dest.none .sb-dest-x{ background:rgba(138,75,0,.14); }
   .hdr-ver{ display:inline-block; margin-left:8px; padding:1px 7px; border-radius:9px;
     background:rgba(255,255,255,.22); color:#fff; font-size:11px; font-weight:700;
     vertical-align:2px; white-space:nowrap; }
@@ -957,7 +964,7 @@ const GENBA_SCHEMA_VER = 1;
    （PC側で「現場入力アプリの版」を確認でき、メインとの食い違いに気付ける）。
    ★更新したらこの2行を書き換える。 */
 const APP_NAME_SHORT = "現場入力";
-const APP_VERSION = "2026.08.22f";
+const APP_VERSION = "2026.08.24a";
 function photoContentId(dataUri){
   if(!dataUri || typeof dataUri !== "string") return "";
   let a = 5381, b = 0;
@@ -3742,13 +3749,39 @@ function renderSaveBar(){
      ここが食い違っていると「保存したのにPCで読めない」になる。
      フォルダを覚えていなければ、そうと分かるように出す。 */
   const dest = saveDirName();
+  /* 押すと保存先を選び直せる。まちがえて覚えさせたときに直すところが無いと、
+     その後ずっと違う場所へ書き込まれ続ける。 */
   const destHtml = dest
-    ? '<span class="sb-dest" title="「保存」を押すと、このフォルダの中の 管理番号.json を上書きします">📁 '
-      + esc(dest) + '</span>'
-    : '<span class="sb-dest none" title="保存先のフォルダを覚えていません。「保存」を押すと、保存先を選ぶ窓が出るか、共有／ダウンロードになります。台帳の「まとめて保存」で一度フォルダを選ぶと、ここに出ます">📁 保存先 未設定</span>';
+    ? '<button type="button" class="sb-dest" id="sb-dest" title="「保存」を押すと、このフォルダの中の 管理番号.json を上書きします。押すと保存先を選び直せます">📁 '
+      + esc(dest) + ' <span class="sb-dest-x">変更</span></button>'
+    : '<button type="button" class="sb-dest none" id="sb-dest" title="保存先のフォルダを覚えていません。押すとここで選べます">📁 保存先 未設定 <span class="sb-dest-x">選ぶ</span></button>';
   el.innerHTML='<span class="sb-dot"></span><span class="sb-main">'+esc(main)+'</span>'
     + destHtml
     + (file ? '<span class="sb-file'+((saveStale()||!_save.fileAt)?" attn":"")+'">'+esc(file)+'</span>' : "");
+  const db = document.getElementById("sb-dest");
+  if(db) db.addEventListener("click", saveDirChange);
+}
+/* 保存先のフォルダを選び直す（保存バーの「📁 …」を押したとき）。
+   ★窓は押した直後にしか開けない★ので、ここでは何も聞かずにすぐ開く。
+   先に確認を出すと、その間に「押した直後」の権利が切れて窓が開かなくなる。 */
+async function saveDirChange(){
+  if(!window.showDirectoryPicker){
+    await uiAlert("この端末では保存先のフォルダを選べません。\n\n"
+      + "「保存」を押したときに、共有またはダウンロードで書き出します。\n"
+      + "渡した先が、PCで読み込むフォルダになるようにしてください。");
+    return;
+  }
+  let dir = null;
+  try{ dir = await window.showDirectoryPicker({ id:"genba-save", mode:"readwrite" }); }
+  catch(e){ if(e && e.name === "AbortError") return; console.warn("保存先を選べませんでした", e); return; }
+  if(!dir) return;
+  if(!(await saveDirOk(dir, true))){
+    await uiAlert("そのフォルダへ書き込む許可が取れませんでした。\n\nもう一度お試しください。");
+    return;
+  }
+  await saveDirSet(dir);
+  renderSaveBar();
+  toast("保存先を「" + (dir.name || "選んだフォルダ") + "」にしました");
 }
 /* 中身の指紋。saveDraft を通さずにモデルが書き換わっても、次に控えるときに
    「変わった」と気づけるようにする。写真は中身ではなくID・名前だけを見る（重いため）。 */
@@ -4152,16 +4185,39 @@ async function saveAllDrafts(mode){
        + missing.slice(0, 6).map(n => "・" + n).join("\n")
        + (missing.length > 6 ? ("\n・ほか " + (missing.length - 6) + " 件") : ""))
     : "";
+  /* このあと必ずフォルダを選ぶ窓が出る、と先に言っておく。
+     いきなり窓が出ると「何を聞かれているのか」が分からない。 */
+  const pickTxt = window.showDirectoryPicker
+    ? ("\n\nこのあと【保存先のフォルダを選ぶ画面】が出ます。\n"
+       + "PCが読み込むフォルダを選んでください。"
+       + (saveDirName() ? ("\n（前回は「" + saveDirName() + "」でした。違う所にしたい時はここで選び直せます）") : ""))
+    : "";
   if(!(await uiConfirm(head + listTxt + otherTxt + missTxt
-      + (noNum && !isAll ? ("\n\n※ 管理番号の無い下書き " + noNum + " 件は対象外です") : "")))) return;
+      + (noNum && !isAll ? ("\n\n※ 管理番号の無い下書き " + noNum + " 件は対象外です") : "")
+      + pickTxt))) return;
 
   setBusy(true);
-  let dir = await saveDirGet();
-  if(dir && !(await saveDirOk(dir, true))) dir = null;   // 許可が切れていたら聞き直す
-  if(!dir && window.showDirectoryPicker){
+  /* ★まとめて保存は、毎回フォルダを選ぶところから始める★
+     覚えているフォルダを黙って使うと、一度まちがえて覚えさせたときに
+     直すところが無く、その後ずっと違う場所へ書き込まれ続ける。
+     ここを必ず通せば、いつでも選び直せる。（選ぶ窓を閉じたら保存はしない） */
+  let dir = null;
+  if(window.showDirectoryPicker){
     try{ dir = await window.showDirectoryPicker({ id:"genba-save", mode:"readwrite" }); }
     catch(e){ setBusy(false); if(e && e.name === "AbortError") return; dir = null; }
-    if(dir) await saveDirSet(dir);
+    if(dir){
+      if(!(await saveDirOk(dir, true))){
+        setBusy(false);
+        await uiAlert("そのフォルダへ書き込む許可が取れませんでした。\n\nもう一度お試しください。");
+        return;
+      }
+      await saveDirSet(dir);      // 「保存」1件ぶんの行き先も、ここで選んだ所にそろえる
+      renderSaveBar();
+    }
+  } else {
+    // フォルダを選べない端末（Android等）。覚えているものがあれば使い、無ければ共有／ダウンロードへ。
+    dir = await saveDirGet();
+    if(dir && !(await saveDirOk(dir, true))) dir = null;
   }
   const okNos = [], ngNos = [];
   let where = "";
