@@ -964,7 +964,7 @@ const GENBA_SCHEMA_VER = 1;
    （PC側で「現場入力アプリの版」を確認でき、メインとの食い違いに気付ける）。
    ★更新したらこの2行を書き換える。 */
 const APP_NAME_SHORT = "現場入力";
-const APP_VERSION = "2026.08.24a";
+const APP_VERSION = "2026.08.25a";
 function photoContentId(dataUri){
   if(!dataUri || typeof dataUri !== "string") return "";
   let a = 5381, b = 0;
@@ -3419,6 +3419,58 @@ async function saveVerify(fileHandle, state){
     return "・読み返せませんでした（" + ((e && e.message) || e) + "）";
   }
 }
+/* ============================================================================
+   Web共有（Androidタブレット等でDropboxへ渡すための道）
+   ----------------------------------------------------------------------------
+   ★Chromeは「共有してよいファイルの種類」を決め打ちで持っている★
+   許されているのは .txt .csv .pdf .png などで、★.json は入っていない★。
+   そのため .json のまま共有しようとすると canShare() が false を返し、
+   共有シートそのものが開かない＝Dropboxが選択肢に出ない、という事が起きる。
+
+   また、AndroidのDropboxアプリはPCと違って「端末内の同期フォルダ」を持たない。
+   ファイル選択に出てくるのは読み込み用で、そこへ書き込むことはできない。
+   つまりAndroidでDropboxへ渡す道は、実質「共有シート」しかない。
+
+   そこで、.json のままで駄目なら .json.txt（中身はそのまま）で共有し直す。
+   PC側（メイン）は .json.txt も戸別ファイルとして読むようにしてある。
+   ============================================================================ */
+const SHARE_TXT_SUFFIX = ".txt";     // .json → 2611A001.json.txt
+/* 渡せる形を順に試して、共有まで済ませる。
+   戻り値 { ok, as, name } … as:"json" そのまま ／ "txt" 名前を変えた ／ null 共有できない
+   ユーザーが共有をやめた時は { aborted:true }。 */
+async function shareFilesSmart(items){
+  // items: [{ name, text }]
+  if(!navigator.canShare || !navigator.share) return { ok:false, as:null };
+  const tries = [
+    { as:"json", type:"application/json", name: n => n },
+    { as:"txt",  type:"text/plain",       name: n => n + SHARE_TXT_SUFFIX }
+  ];
+  for(const t of tries){
+    let fs;
+    try{ fs = items.map(it => new File([it.text], t.name(it.name), { type:t.type })); }
+    catch(_){ continue; }
+    let can = false;
+    try{ can = navigator.canShare({ files: fs }); }catch(_){ can = false; }
+    if(!can) continue;
+    try{
+      await navigator.share({ files: fs });   // iOSはtitle/textを渡すと別テキストが作られるのでfilesのみ
+      return { ok:true, as:t.as, name: fs.map(f => f.name) };
+    }catch(e){
+      if(e && e.name === "AbortError") return { aborted:true };
+      console.warn("共有に失敗", t.as, e);
+      // 次の形へ
+    }
+  }
+  return { ok:false, as:null };
+}
+/* 名前を変えて渡した時の説明。黙って変えると、PCで探すときに混乱する。 */
+function shareRenameNote(as){
+  return (as === "txt")
+    ? ("\n\n※ ファイル名の最後に .txt が付きます（例 2611A001.json.txt）。\n"
+       + "Androidは .json をそのまま共有できないためです。\n"
+       + "中身は今までと同じで、PCの受付台帳はそのまま読み込めます。")
+    : "";
+}
 let _lastSaveInfo = null;      // 直前の保存がどこへ入ったか（暗幕に出す）
 async function saveJsonRun(){
   _lastSaveInfo = null;
@@ -3490,24 +3542,21 @@ async function saveJsonRun(){
     }catch(e){ if(e && e.name==="AbortError") return false; /* 失敗時は下へフォールバック */ }
   }
   // ② Web Share（ファイル共有→Dropbox/ドライブ等）
-  if(navigator.canShare){
-    try{
-      const file=new File([blob],fname,{type:"application/json"});
-      if(navigator.canShare({files:[file]})){
-        // iOSはtitle/textを渡すと別テキストファイルが作られるためfilesのみ共有
-        await navigator.share({files:[file]});
-        await markDraftSaved(); saveStateFile();
-        // フォルダへ直接は入っていない。PCが読むフォルダへ置いたか確かめてもらう。
-        /* 共有先がPCの読み込むフォルダなら、これで正しく入っている。
-           どこへ渡したかはこちらでは分からないので、決めつけずに事実だけ書く。 */
-        _lastSaveInfo = { title: "共有で渡しました", msg: fname + "\n" + sizeTxt
-          + "\n\n中身はきちんと入っています（消えていません）。\n\n"
-          + "渡した先が、PCで読み込むフォルダなら\nそのままPCで読めます。\n"
-          + "ちがう場所へ渡したときは、そのフォルダへ移してください。", warn: true };
-        toast("共有で渡しました："+fname);
-        return true;
-      }
-    }catch(e){ if(e && e.name==="AbortError") return false; }
+  {
+    const sr = await shareFilesSmart([{ name: fname, text: json }]);
+    if(sr.aborted) return false;
+    if(sr.ok){
+      await markDraftSaved(); saveStateFile();
+      /* 共有先がPCの読み込むフォルダなら、これで正しく入っている。
+         どこへ渡したかはこちらでは分からないので、決めつけずに事実だけ書く。 */
+      _lastSaveInfo = { title: "共有で渡しました", msg: (sr.name[0] || fname) + "\n" + sizeTxt
+        + "\n\n中身はきちんと入っています（消えていません）。\n\n"
+        + "渡した先が、PCで読み込むフォルダなら\nそのままPCで読めます。\n"
+        + "ちがう場所へ渡したときは、そのフォルダへ移してください。"
+        + shareRenameNote(sr.as), warn: true };
+      toast("共有で渡しました："+(sr.name[0] || fname));
+      return true;
+    }
   }
   // ③ ダウンロード
   const url=URL.createObjectURL(blob);
@@ -4235,13 +4284,14 @@ async function saveAllDrafts(mode){
   } else {
     // フォルダを選べない端末：まず共有（1回の操作で全部まとめて渡せる）
     let shared = false;
-    try{
-      const fs = files.map(f => new File([f.text], f.name, { type:"application/json" }));
-      if(navigator.canShare && navigator.canShare({ files: fs })){
-        await navigator.share({ files: fs });
-        shared = true; okNos.push.apply(okNos, files); where = "共有先";
+    {
+      const sr = await shareFilesSmart(files.map(f => ({ name:f.name, text:f.text })));
+      if(sr.aborted){ setBusy(false); return; }
+      if(sr.ok){
+        shared = true; okNos.push.apply(okNos, files);
+        where = "共有先" + (sr.as === "txt" ? "（名前の最後に .txt が付きます）" : "");
       }
-    }catch(e){ setBusy(false); if(e && e.name === "AbortError") return; }
+    }
     if(!shared){
       // 最後の手段：ダウンロード（端末の「ダウンロード」フォルダに全部並ぶ）
       for(const f of files){
