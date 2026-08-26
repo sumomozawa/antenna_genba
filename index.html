@@ -497,6 +497,52 @@
     vertical-align:2px; white-space:nowrap; }
   .app-ver{font-size:10.5px; color:#9aa3ad; text-align:center; padding:10px 12px 4px; line-height:1.7;}
   .app-ver b{color:#7c8894; font-weight:600;}
+  /* ---- 特別記録 ---- */
+  .sp-new{ display:block; width:100%; padding:15px; border:0; border-radius:11px; background:#5d4037;
+    color:#fff; font-weight:700; font-size:15px; margin-bottom:10px; font-family:inherit; }
+  .sp-new:active{ transform:scale(.97); }
+  .sp-row{ display:flex; align-items:center; gap:10px; padding:12px 4px; border-bottom:1px solid var(--line); }
+  .sp-row .sp-m{ flex:1; min-width:0; }
+  .sp-row .sp-t{ font-weight:700; font-size:14px; }
+  .sp-row .sp-s{ font-size:12px; color:var(--sub); }
+  .sp-row .sp-open{ background:#5d4037; color:#fff; border:0; border-radius:8px; padding:9px 13px;
+    font-weight:700; flex:none; font-family:inherit; }
+  .sp-kind{ display:inline-block; font-size:10px; font-weight:700; padding:0 6px; border-radius:8px;
+    margin-right:6px; line-height:17px; vertical-align:1px; color:#fff; }
+  .sp-kind.k-in{ background:#00695c; } .sp-kind.k-chk{ background:#1565c0; } .sp-kind.k-etc{ background:#6a1b9a; }
+  .sp-badge{ display:inline-block; font-size:10px; font-weight:700; padding:0 6px; border-radius:8px;
+    margin-left:6px; line-height:17px; }
+  .sp-badge.saved{ background:#e8f5e9; color:#1b5e20; border:1px solid #a5d6a7; }
+  .sp-badge.unsaved{ background:#ffebee; color:#b71c1c; border:1px solid #ef9a9a; }
+  .sp-ed{ }
+  .sp-ed .sp-f{ margin-bottom:11px; }
+  .sp-ed .sp-f > label{ display:block; font-size:12px; font-weight:700; color:#37474f; margin-bottom:4px; }
+  .sp-ed input[type="text"], .sp-ed input[type="date"], .sp-ed textarea{
+    width:100%; box-sizing:border-box; padding:11px 12px; border:1px solid #cdd3da; border-radius:10px;
+    font-size:16px; font-family:inherit; }
+  .sp-ed textarea{ min-height:66px; resize:vertical; }
+  .sp-seg{ display:flex; gap:6px; }
+  .sp-seg button{ flex:1; min-height:46px; border:1px solid #cdd3da; border-radius:10px; background:#fff;
+    color:#37474f; font-weight:700; font-size:13px; font-family:inherit; padding:4px 2px; }
+  .sp-seg button.on{ border-color:transparent; color:#fff; }
+  .sp-seg button.on.k-in{ background:#00695c; }
+  .sp-seg button.on.k-chk{ background:#1565c0; }
+  .sp-seg button.on.k-etc{ background:#6a1b9a; }
+  .sp-photos{ display:grid; grid-template-columns:repeat(auto-fill,minmax(96px,1fr)); gap:7px; margin-top:6px; }
+  .sp-ph{ position:relative; border:1px solid var(--line); border-radius:8px; overflow:hidden; background:#f4f5f7; }
+  .sp-ph img{ display:block; width:100%; height:96px; object-fit:cover; }
+  .sp-ph button{ position:absolute; top:3px; right:3px; width:26px; height:26px; border:0; border-radius:50%;
+    background:rgba(0,0,0,.55); color:#fff; font-size:13px; line-height:26px; padding:0; font-family:inherit; }
+  .sp-add{ display:flex; gap:7px; margin-top:8px; }
+  .sp-add label{ flex:1; text-align:center; padding:13px 6px; border-radius:11px; background:#eef2f7;
+    color:var(--accent); font-weight:700; font-size:14px; }
+  .sp-act{ display:flex; gap:8px; margin-top:14px; }
+  .sp-act button{ flex:1; min-height:52px; border:0; border-radius:11px; font-weight:700; font-size:15px;
+    font-family:inherit; }
+  .sp-act .sp-save{ background:var(--accent); color:#fff; }
+  .sp-act .sp-back{ flex:0 0 90px; background:#eef2f7; color:#37474f; }
+  .sp-del{ display:block; width:100%; margin-top:10px; min-height:42px; border:1px solid #ef9a9a;
+    border-radius:10px; background:#fff; color:#b71c1c; font-weight:700; font-size:13px; font-family:inherit; }
   /* ---- 予定カレンダー ----
      3社が同じ予定を見るので、どの会社の予定かが色と頭文字で分かるようにする。
      指で押すので、日のマスと予定の行は大きめに取る。 */
@@ -742,6 +788,7 @@
     <button id="btn-new">新規</button>
     <button id="btn-reception2">台帳</button>
     <button id="btn-cal">予定</button>
+    <button id="btn-special" title="戸別に属さない写真（資材検収・検査中・イレギュラー）を残します">特別</button>
     <button id="btn-list2">履歴</button>
     <button id="btn-map">地図</button>
   </div>
@@ -787,6 +834,18 @@
     <input type="file" id="flowshare-file" accept=".json,application/json,*/*" multiple style="display:none;">
     <div id="draft-list"></div>
     <button class="closebtn" id="draft-close">閉じる</button>
+  </div>
+</div>
+
+<!-- 特別記録（戸別に属さない写真：資材検収・検査中・イレギュラー） -->
+<div class="modal" id="sp-modal">
+  <div class="sheet">
+    <h3>📦 特別記録</h3>
+    <div class="info">どの戸別にも当てはまらない写真を残す枠です。<b>資材検収</b>・<b>検査中</b>・<b>その他</b>。<br>
+    戸別ではないので、件数・費用・出来高には一切入りません。<br>
+    保存すると <b class="fname">特別記録_….json</b> ができ、PCの<b>写真台帳</b>に専用の枠として出ます。</div>
+    <div id="sp-body"></div>
+    <button class="closebtn" id="sp-close">閉じる</button>
   </div>
 </div>
 
@@ -964,7 +1023,7 @@ const GENBA_SCHEMA_VER = 1;
    （PC側で「現場入力アプリの版」を確認でき、メインとの食い違いに気付ける）。
    ★更新したらこの2行を書き換える。 */
 const APP_NAME_SHORT = "現場入力";
-const APP_VERSION = "2026.08.25a";
+const APP_VERSION = "2026.08.26a";
 function photoContentId(dataUri){
   if(!dataUri || typeof dataUri !== "string") return "";
   let a = 5381, b = 0;
@@ -4765,6 +4824,7 @@ async function openDraftModal(){
   list.innerHTML=`<div class="info" style="text-align:center">読み込み中…</div>`;
   let recs=[];
   try{ recs=await idbGetAll(); }catch(e){ list.innerHTML=`<div class="info">下書きの読込に失敗しました</div>`; return; }
+  recs = recs.filter(r => !spIsRec(r));   // 特別記録は戸別ではないので、ここには出さない
   recs.sort((a,b)=>(b.savedAt||0)-(a.savedAt||0));
   if(!recs.length){ list.innerHTML=`<div class="info" style="text-align:center">下書きはまだありません</div>`; return; }
   list.innerHTML =
@@ -5200,8 +5260,11 @@ function renderReceptionList(q){
     ? `<div class="rc-warn">まだ保存していない戸別が <b>${notHanded}件</b> あります。`
       + `保存しないと、写真以外の入力はPCへ渡りません。`
       + `<button id="rc-saveall" class="rc-saveall" data-label="まとめて保存（${notHanded}件）">まとめて保存（${notHanded}件）</button>`
-      + (dirName ? `<div class="rc-warn-sub">前回のフォルダ「<b>${esc(dirName)}</b>」に入れます</div>`
-                 : `<div class="rc-warn-sub">保存先は1回選べば、次から同じ場所に入ります</div>`)
+      + `<div class="rc-warn-sub">`
+      +   (dirName ? `前回のフォルダ「<b>${esc(dirName)}</b>」が出ます（保存のたびに選び直せます）`
+                   : `押すと保存先を選ぶ画面が出ます`)
+      +   `<br>※ PCで<b>0KB</b>と言われたファイルは、こちらでは直りません（下の「全部保存し直す」を使ってください）`
+      + `</div>`
       + `</div>`
     : "";
   // PCで台帳を直したあとは、戸別ファイルも作り直さないと、メインでフォルダを読み直したときに
@@ -5211,7 +5274,10 @@ function renderReceptionList(q){
     ? `<div class="rc-redo">PCで台帳を直して<b>取り込み直したとき</b>は、<b>全部保存し直して</b>ください。`
       + `<button id="rc-saveall2" data-label="全部保存し直す（${redoCnt}件）">全部保存し直す（${redoCnt}件）</button>`
       + `<div class="rc-redo-sub">台帳の最新（名前・住所・電話・予定日・備考）を入れ直して上書きします。`
-      + `現場で入力したものはそのままです。</div>`
+      + `現場で入力したものはそのままです。<br>`
+      + `<b>PCで「中身が空（0KB）」と言われたファイルも、これで作り直せます。</b>`
+      + `上の「まとめて保存」は<b>まだ保存していない戸別だけ</b>が相手なので、`
+      + `この端末が「保存済み」と思っている戸別は入りません。</div>`
       + `</div>`
     : "";
   // 開いただけ（何も入力していない）の戸別。たまると「入力中」だらけになるのでまとめて戻せる。
@@ -5733,6 +5799,273 @@ function openCalModal(){
                     .catch(() => {});
 }
 function closeCalModal(){ document.getElementById("cal-modal").classList.remove("open"); }
+/* ============================================================================
+   10) 特別記録（戸別に属さない写真）
+   ----------------------------------------------------------------------------
+   資材検収のときの写真、検査中の様子、どの戸別にも当てはまらない写真。
+   これらは「戸別」ではないので、件数・費用・出来高・発注材料には一切入れない。
+
+   ・この端末の下書きと同じ入れ物に、キーを "sp:" で始めて置く
+     （管理番号を持たないので、戸別の集計は元から拾わない。念のため履歴でも出さない）
+   ・書き出しは 特別記録_<種類>_<日付>_<連番>.json
+   ・PCの写真台帳が、この形のファイルを専用の枠として読む
+   ============================================================================ */
+const SP_KINDS = [
+  { key:"material_in",  name:"資材検収（納品）",   short:"資材検収", cls:"k-in",  file:"資材検収" },
+  { key:"material_chk", name:"資材検収（検査中）", short:"検査中",   cls:"k-chk", file:"検査中" },
+  { key:"other",        name:"その他・イレギュラー", short:"その他", cls:"k-etc", file:"その他" }
+];
+function spKindOf(k){ for(const x of SP_KINDS){ if(x.key === k) return x; } return SP_KINDS[0]; }
+let _spCur = null;        // いま編集している特別記録（null なら一覧）
+let _spSeq = 0;
+function spNewId(){ return "sp" + Date.now() + "_" + (++_spSeq); }
+function spKey(id){ return "sp:" + id; }
+function spIsRec(r){ return !!(r && r.sp === true && r.key && String(r.key).indexOf("sp:") === 0); }
+async function spList(){
+  let all = [];
+  try{ all = await idbGetAll(); }catch(e){ console.warn("特別記録の読み取りに失敗", e); return []; }
+  return (all || []).filter(spIsRec).sort((a, b) => (b.savedAt || 0) - (a.savedAt || 0));
+}
+function spBlank(){
+  return { key: "", sp: true, id: "", kind: "material_in", title: "", date: todayStr(), note: "",
+           photos: [], fileName: "", savedAt: 0, fileSavedAt: 0, rev: 0, fileRev: 0 };
+}
+/* 書き出すファイルの名前。一度決めたら変えない（変えるとフォルダに増えてしまう）。 */
+function spFileName(rec){
+  if(rec.fileName) return rec.fileName;
+  const k = spKindOf(rec.kind);
+  const d = String(rec.date || todayStr()).replace(/-/g, "");
+  return "特別記録_" + k.file + "_" + d + "_" + String(rec.id || "").slice(-4) + ".json";
+}
+/* 書き出す中身。戸別JSONとは別物だと分かるよう _recordType を入れる。 */
+function spBuildState(rec){
+  const k = spKindOf(rec.kind);
+  return {
+    _recordType: "special",
+    _schemaVer: 1,
+    _appVersion: APP_VERSION,
+    special_id: rec.id,
+    special_kind: rec.kind,
+    special_kind_name: k.name,
+    special_title: String(rec.title || ""),
+    special_date: String(rec.date || ""),
+    special_note: String(rec.note || ""),
+    chosho_photos: (rec.photos || []).map(p => {
+      const dataUri = p.dataUri || null;
+      const o = { label: String(p.label || ""), dataUri };
+      const id = p.id || (dataUri ? photoContentId(dataUri) : "");
+      if(id) o.id = id;
+      return o;
+    }),
+    editedAt: new Date().toISOString()
+  };
+}
+/* bump=false … 中身を変えていない書き直し（ファイルへ書き出した直後など）。
+   ここで「直した回数」を進めると、書き出した直後なのに「未保存」に見える。 */
+async function spPersist(rec, bump){
+  rec.savedAt = Date.now();
+  if(bump !== false) rec.rev = (rec.rev | 0) + 1;
+  await idbPut({ key: rec.key, sp: true, id: rec.id, kind: rec.kind, title: rec.title,
+    date: rec.date, note: rec.note, photos: rec.photos, fileName: rec.fileName,
+    savedAt: rec.savedAt, fileSavedAt: rec.fileSavedAt || 0, rev: rec.rev, fileRev: rec.fileRev | 0 });
+}
+/* 特別記録をファイルへ書き出す。行き先の探し方は戸別の「保存」と同じ順。 */
+async function spSaveFile(rec){
+  const state = spBuildState(rec);
+  const json = JSON.stringify(state);
+  const fname = spFileName(rec);
+  rec.fileName = fname;
+  const sizeTxt = saveSizeText(json, state);
+  // ① 覚えているフォルダ
+  let dir = await saveDirGet();
+  if(dir && !(await saveDirOk(dir, false))) dir = null;
+  if(dir){
+    try{
+      const fh = await dir.getFileHandle(fname, { create:true });
+      const w = await fh.createWritable();
+      await w.write(new Blob([json], { type:"application/json" })); await w.close();
+      rec.fileSavedAt = Date.now(); rec.fileRev = rec.rev | 0;
+      await spPersist(rec, false);
+      return { ok:true, title:"保存しました",
+        msg: "「" + (dir.name || "選んだフォルダ") + "」の中\n" + fname + "\n" + sizeTxt, warn:false };
+    }catch(e){ console.warn("特別記録：覚えているフォルダへ書けませんでした", e); }
+  }
+  // ② 保存先を選ぶ
+  if(window.showSaveFilePicker){
+    try{
+      const h = await window.showSaveFilePicker({ suggestedName: fname,
+        types:[{ description:"特別記録JSON", accept:{ "application/json":[".json"] } }] });
+      const w = await h.createWritable();
+      await w.write(new Blob([json], { type:"application/json" })); await w.close();
+      rec.fileSavedAt = Date.now(); rec.fileRev = rec.rev | 0;
+      await spPersist(rec, false);
+      return { ok:true, title:"保存しました", msg:(h.name || fname) + "\n" + sizeTxt
+        + "\n（保存先を選んで保存しました）", warn:false };
+    }catch(e){ if(e && e.name === "AbortError") return { ok:false, aborted:true }; }
+  }
+  // ③ 共有（Androidはここ）
+  {
+    const sr = await shareFilesSmart([{ name: fname, text: json }]);
+    if(sr.aborted) return { ok:false, aborted:true };
+    if(sr.ok){
+      rec.fileSavedAt = Date.now(); rec.fileRev = rec.rev | 0;
+      await spPersist(rec, false);
+      return { ok:true, title:"共有で渡しました", msg:(sr.name[0] || fname) + "\n" + sizeTxt
+        + "\n\n中身はきちんと入っています（消えていません）。\n\n"
+        + "渡した先が、PCで読み込むフォルダなら\nそのままPCで読めます。"
+        + shareRenameNote(sr.as), warn:true };
+    }
+  }
+  // ④ ダウンロード
+  const url = URL.createObjectURL(new Blob([json], { type:"application/json" }));
+  const a = document.createElement("a"); a.href = url; a.download = fname;
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 4000);
+  rec.fileSavedAt = Date.now(); rec.fileRev = rec.rev | 0;
+  await spPersist(rec, false);
+  return { ok:true, title:"ダウンロードに入れました", msg: fname + "\n" + sizeTxt
+    + "\n\n中身はきちんと入っています（消えていません）。\n\n"
+    + "この端末の「ダウンロード」に入りました。\n"
+    + "PCで読み込むフォルダとちがう場合は、\nそのフォルダへ移してください。", warn:true };
+}
+function spStale(rec){ return !rec.fileSavedAt || (rec.rev | 0) > (rec.fileRev | 0); }
+/* ---- 画面 ---- */
+async function openSpecialModal(){
+  document.getElementById("sp-modal").classList.add("open");
+  _spCur = null;
+  await renderSpecial();
+}
+function closeSpecialModal(){
+  document.getElementById("sp-modal").classList.remove("open");
+  _spCur = null;
+}
+async function renderSpecial(){
+  const host = document.getElementById("sp-body"); if(!host) return;
+  if(_spCur){ renderSpecialEdit(host); return; }
+  const recs = await spList();
+  let h = '<button type="button" class="sp-new" id="sp-new">＋ 新しく記録する</button>';
+  if(!recs.length){
+    h += '<div class="info" style="text-align:center">まだ記録はありません。<br>'
+      + '上の「＋ 新しく記録する」から、資材検収などの写真を残せます。</div>';
+  } else {
+    h += recs.map(r => {
+      const k = spKindOf(r.kind);
+      const n = (r.photos || []).filter(p => p && p.dataUri).length;
+      const stale = spStale(r);
+      return '<div class="sp-row">'
+        + '<div class="sp-m">'
+        +   '<div class="sp-t"><span class="sp-kind ' + k.cls + '">' + esc(k.short) + '</span>'
+        +     esc(r.title || "（件名なし）")
+        +     '<span class="sp-badge ' + (stale ? "unsaved" : "saved") + '">'
+        +       (stale ? "未保存" : "保存済") + '</span></div>'
+        +   '<div class="sp-s">' + esc(r.date || "") + '　写真 ' + n + '枚'
+        +     (r.fileName ? ('　' + esc(r.fileName)) : "") + '</div>'
+        + '</div>'
+        + '<button type="button" class="sp-open" data-sp-open="' + esc(r.id) + '">開く</button>'
+        + '</div>';
+    }).join("");
+  }
+  host.innerHTML = h;
+  const nb = document.getElementById("sp-new");
+  if(nb) nb.addEventListener("click", async () => {
+    const r = spBlank(); r.id = spNewId(); r.key = spKey(r.id);
+    _spCur = r; await renderSpecial();
+  });
+  host.querySelectorAll("[data-sp-open]").forEach(b => b.addEventListener("click", async () => {
+    const rec = (await spList()).filter(x => x.id === b.getAttribute("data-sp-open"))[0];
+    if(!rec) return;
+    _spCur = Object.assign(spBlank(), rec);
+    await renderSpecial();
+  }));
+}
+function renderSpecialEdit(host){
+  const r = _spCur;
+  const n = (r.photos || []).filter(p => p && p.dataUri).length;
+  let h = '<div class="sp-ed">';
+  h += '<div class="sp-f"><label>種類</label><div class="sp-seg" id="sp-kind">'
+    + SP_KINDS.map(k => '<button type="button" class="' + k.cls + (r.kind === k.key ? " on" : "")
+        + '" data-sp-kind="' + k.key + '">' + esc(k.name) + '</button>').join("")
+    + '</div></div>';
+  h += '<div class="sp-f"><label>件名</label>'
+    + '<input type="text" id="sp-title" maxlength="60" value="' + esc(r.title || "")
+    + '" placeholder="例）20素子アンテナ 100基 検収"></div>';
+  h += '<div class="sp-f"><label>日付</label>'
+    + '<input type="date" id="sp-date" value="' + esc(r.date || "") + '"></div>';
+  h += '<div class="sp-f"><label>備考</label>'
+    + '<textarea id="sp-note" maxlength="400" placeholder="立会者・数量・気づいたことなど">'
+    + esc(r.note || "") + '</textarea></div>';
+  h += '<div class="sp-f"><label>写真（' + n + '枚）</label>'
+    + '<div class="sp-photos">'
+    + (r.photos || []).map((p, i) => '<div class="sp-ph"><img src="' + esc(p.dataUri || "") + '" alt="">'
+        + '<button type="button" data-sp-photodel="' + i + '" title="この写真を消す">✕</button></div>').join("")
+    + '</div>'
+    + '<div class="sp-add">'
+    +   '<label for="sp-cam">📷 撮る</label>'
+    +   '<label for="sp-pick">🖼 選ぶ</label>'
+    + '</div>'
+    + '<input type="file" id="sp-cam" accept="image/*" capture="environment" multiple style="display:none;">'
+    + '<input type="file" id="sp-pick" accept="image/*" multiple style="display:none;">'
+    + '</div>';
+  h += '<div class="sp-act">'
+    + '<button type="button" class="sp-back" id="sp-back">戻る</button>'
+    + '<button type="button" class="sp-save" id="sp-save">保存</button>'
+    + '</div>';
+  if(r.savedAt) h += '<button type="button" class="sp-del" id="sp-delrec">この記録を消す（この端末から）</button>';
+  h += '</div>';
+  host.innerHTML = h;
+
+  const keep = async () => { await spPersist(r); };
+  host.querySelectorAll("[data-sp-kind]").forEach(b => b.addEventListener("click", async () => {
+    r.kind = b.getAttribute("data-sp-kind"); await keep(); renderSpecialEdit(host);
+  }));
+  document.getElementById("sp-title").addEventListener("input", e => { r.title = e.target.value; });
+  document.getElementById("sp-title").addEventListener("change", keep);
+  document.getElementById("sp-date").addEventListener("change", async e => { r.date = e.target.value; await keep(); });
+  document.getElementById("sp-note").addEventListener("input", e => { r.note = e.target.value; });
+  document.getElementById("sp-note").addEventListener("change", keep);
+  host.querySelectorAll("[data-sp-photodel]").forEach(b => b.addEventListener("click", async () => {
+    r.photos.splice(+b.getAttribute("data-sp-photodel"), 1); await keep(); renderSpecialEdit(host);
+  }));
+  const take = async files => {
+    const arr = Array.from(files || []).filter(f => f && (/^image\//i.test(f.type || "")
+      || /\.(jpe?g|png|heic|heif|webp|gif|bmp|tiff?)$/i.test(f.name || "")));
+    if(!arr.length){ if((files || []).length) toast("画像として認識できませんでした"); return; }
+    let fail = 0;
+    for(const f of arr){
+      try{
+        const dataUri = await readImageAsDataURI(f);
+        r.photos.push({ label:"", dataUri, id: photoContentId(dataUri) });
+      }catch(e){ console.error("特別記録：写真を読めませんでした", e); fail++; }
+    }
+    if(fail) toast(fail + "枚は読み込めませんでした");
+    await keep(); renderSpecialEdit(host);
+  };
+  document.getElementById("sp-cam").addEventListener("change", e => { take(e.target.files); e.target.value = ""; });
+  document.getElementById("sp-pick").addEventListener("change", e => { take(e.target.files); e.target.value = ""; });
+  document.getElementById("sp-back").addEventListener("click", async () => { _spCur = null; await renderSpecial(); });
+  document.getElementById("sp-save").addEventListener("click", async () => {
+    if(!(r.photos || []).length && !String(r.title || "").trim()){
+      await uiAlert("件名か写真のどちらかを入れてください。"); return;
+    }
+    const btn = document.getElementById("sp-save");
+    btn.disabled = true; btn.textContent = "保存中…";
+    let res;
+    try{ res = await spSaveFile(r); }
+    finally{ btn.disabled = false; btn.textContent = "保存"; }
+    if(res && res.aborted) return;
+    if(res && res.ok){
+      saveOverlayShow(spFileName(r)); saveOverlayDone(res);
+      _spCur = null; await renderSpecial();
+    }
+  });
+  const dl = document.getElementById("sp-delrec");
+  if(dl) dl.addEventListener("click", async () => {
+    if(!(await uiConfirm("この記録をこの端末から消します。\n\n"
+      + "すでにフォルダへ書き出したファイルは消えません。\n\nよろしいですか？"))) return;
+    try{ await idbDel(r.key); }catch(e){ console.warn("特別記録の削除に失敗", e); }
+    _spCur = null; await renderSpecial();
+  });
+}
 /* 受付台帳の行をこの端末に保存する。件数を返す。
    受付台帳ファイル単体からも、現場用（ひとまとめ）からも同じ道を通す。 */
 function receptionSaveRows(src){
@@ -5830,6 +6163,8 @@ document.getElementById("reception-sortdir").addEventListener("click",()=>{
 });
 document.getElementById("reception-close").addEventListener("click",closeReceptionModal);
 document.getElementById("btn-cal").addEventListener("click",openCalModal);
+document.getElementById("btn-special").addEventListener("click",openSpecialModal);
+document.getElementById("sp-close").addEventListener("click",closeSpecialModal);
 document.getElementById("cal-close").addEventListener("click",closeCalModal);
 document.getElementById("cal-prev").addEventListener("click",()=>calShift(-1));
 document.getElementById("cal-next").addEventListener("click",()=>calShift(1));
