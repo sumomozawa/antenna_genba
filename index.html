@@ -528,11 +528,16 @@
   .sp-seg button.on.k-in{ background:#00695c; }
   .sp-seg button.on.k-chk{ background:#1565c0; }
   .sp-seg button.on.k-etc{ background:#6a1b9a; }
-  .sp-photos{ display:grid; grid-template-columns:repeat(auto-fill,minmax(96px,1fr)); gap:7px; margin-top:6px; }
+  .sp-lblnote{ font-size:11px; color:var(--sub); line-height:1.7; margin:2px 0 6px; }
+  .sp-lblnote b{ color:#37474f; }
+  .sp-photos{ display:grid; grid-template-columns:repeat(auto-fill,minmax(112px,1fr)); gap:8px; margin-top:6px; }
   .sp-ph{ position:relative; border:1px solid var(--line); border-radius:8px; overflow:hidden; background:#f4f5f7; }
   .sp-ph img{ display:block; width:100%; height:96px; object-fit:cover; }
-  .sp-ph button{ position:absolute; top:3px; right:3px; width:26px; height:26px; border:0; border-radius:50%;
+  .sp-ph > button{ position:absolute; top:3px; right:3px; width:26px; height:26px; border:0; border-radius:50%;
     background:rgba(0,0,0,.55); color:#fff; font-size:13px; line-height:26px; padding:0; font-family:inherit; }
+  .sp-ph .sp-lbl{ display:block; width:100%; box-sizing:border-box; border:0; border-top:1px solid var(--line);
+    padding:7px 6px; font-size:12px; font-family:inherit; background:#fff; }
+  .sp-ph .sp-lbl:focus{ outline:2px solid var(--accent); outline-offset:-2px; }
   .sp-add{ display:flex; gap:7px; margin-top:8px; }
   .sp-add label{ flex:1; text-align:center; padding:13px 6px; border-radius:11px; background:#eef2f7;
     color:var(--accent); font-weight:700; font-size:14px; }
@@ -1023,7 +1028,7 @@ const GENBA_SCHEMA_VER = 1;
    （PC側で「現場入力アプリの版」を確認でき、メインとの食い違いに気付ける）。
    ★更新したらこの2行を書き換える。 */
 const APP_NAME_SHORT = "現場入力";
-const APP_VERSION = "2026.08.26a";
+const APP_VERSION = "2026.08.26b";
 function photoContentId(dataUri){
   if(!dataUri || typeof dataUri !== "string") return "";
   let a = 5381, b = 0;
@@ -5816,6 +5821,24 @@ const SP_KINDS = [
   { key:"other",        name:"その他・イレギュラー", short:"その他", cls:"k-etc", file:"その他" }
 ];
 function spKindOf(k){ for(const x of SP_KINDS){ if(x.key === k) return x; } return SP_KINDS[0]; }
+/* 写真1枚ごとに付ける品名の候補。
+   資材検収は品目ごとに何枚も撮るので、内訳書の材料をそのまま候補にしておく。
+   （打ち込んでもよい。候補はあくまで入れやすくするためのもの） */
+const SP_LABELS_MATERIAL = [
+  "UHFアンテナ 14素子", "UHFアンテナ 20素子",
+  "サイドベース SB22S", "サイドベース SB3230",
+  "マスト 25A 1.6m", "マスト 32A 1.8m",
+  "ラインブースター UB18L", "増幅器 3UB43-A04",
+  "2分配器WP SP2CW", "ハイパスフィルター",
+  "同軸ケーブル S5CFB", "雑材・消耗品",
+  "納品書", "荷姿・全体", "数量確認", "型番確認", "外観確認"
+];
+const SP_LABELS_CHK = ["検査状況", "立会", "数量確認", "型番確認", "外観確認", "measure"];
+function spLabelsFor(kind){
+  if(kind === "material_in")  return SP_LABELS_MATERIAL;
+  if(kind === "material_chk") return SP_LABELS_MATERIAL.concat(["検査状況", "立会"]);
+  return ["全体", "近景", "遠景", "状況"];
+}
 let _spCur = null;        // いま編集している特別記録（null なら一覧）
 let _spSeq = 0;
 function spNewId(){ return "sp" + Date.now() + "_" + (++_spSeq); }
@@ -5994,10 +6017,20 @@ function renderSpecialEdit(host){
   h += '<div class="sp-f"><label>備考</label>'
     + '<textarea id="sp-note" maxlength="400" placeholder="立会者・数量・気づいたことなど">'
     + esc(r.note || "") + '</textarea></div>';
+  const labs = spLabelsFor(r.kind);
   h += '<div class="sp-f"><label>写真（' + n + '枚）</label>'
+    + '<div class="sp-lblnote">写真ごとに<b>品名</b>を入れられます（資材検収は品目ごとに何枚でもどうぞ）。'
+    + '欄を押すと候補が出ます。PCへ書き出すとき、この品名がファイル名に付きます。</div>'
+    + '<datalist id="sp-lbl-list">'
+    +   labs.map(x => '<option value="' + esc(x) + '"></option>').join("")
+    + '</datalist>'
     + '<div class="sp-photos">'
-    + (r.photos || []).map((p, i) => '<div class="sp-ph"><img src="' + esc(p.dataUri || "") + '" alt="">'
-        + '<button type="button" data-sp-photodel="' + i + '" title="この写真を消す">✕</button></div>').join("")
+    + (r.photos || []).map((p, i) => '<div class="sp-ph">'
+        + '<img src="' + esc(p.dataUri || "") + '" alt="">'
+        + '<button type="button" data-sp-photodel="' + i + '" title="この写真を消す">✕</button>'
+        + '<input type="text" class="sp-lbl" list="sp-lbl-list" data-sp-lbl="' + i + '" maxlength="40"'
+        +   ' value="' + esc(p.label || "") + '" placeholder="品名・内容">'
+        + '</div>').join("")
     + '</div>'
     + '<div class="sp-add">'
     +   '<label for="sp-cam">📷 撮る</label>'
@@ -6026,6 +6059,13 @@ function renderSpecialEdit(host){
   host.querySelectorAll("[data-sp-photodel]").forEach(b => b.addEventListener("click", async () => {
     r.photos.splice(+b.getAttribute("data-sp-photodel"), 1); await keep(); renderSpecialEdit(host);
   }));
+  /* 品名は打つたびに控えるが、画面は描き直さない（描き直すと入力中の欄から指が離れる） */
+  host.querySelectorAll("[data-sp-lbl]").forEach(inp => {
+    const put = () => { const i = +inp.getAttribute("data-sp-lbl");
+      if(r.photos[i]) r.photos[i].label = inp.value; };
+    inp.addEventListener("input", put);
+    inp.addEventListener("change", async () => { put(); await keep(); });
+  });
   const take = async files => {
     const arr = Array.from(files || []).filter(f => f && (/^image\//i.test(f.type || "")
       || /\.(jpe?g|png|heic|heif|webp|gif|bmp|tiff?)$/i.test(f.name || "")));
