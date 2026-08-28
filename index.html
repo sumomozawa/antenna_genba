@@ -1028,7 +1028,7 @@ const GENBA_SCHEMA_VER = 1;
    （PC側で「現場入力アプリの版」を確認でき、メインとの食い違いに気付ける）。
    ★更新したらこの2行を書き換える。 */
 const APP_NAME_SHORT = "現場入力";
-const APP_VERSION = "2026.08.26b";
+const APP_VERSION = "2026.08.28a";
 function photoContentId(dataUri){
   if(!dataUri || typeof dataUri !== "string") return "";
   let a = 5381, b = 0;
@@ -5077,7 +5077,7 @@ function draftInfoOf(no){
   if(!d) return null;
   // 古い下書き（回数を持たない）は 0>0 で false ＝「保存済み」扱い。次に直せば 1>0 で変更ありになる。
   return { done: d.done, flow: d.flow, photos: d.photos, has: true, touched: d.touched, fileAt: d.fileAt,
-           other: d.other || "", meet: d.meet || "", time: d.time || "",
+           other: d.other || "", meet: d.meet || "", time: d.time || "", date: d.date || "",
            stale: !!(d.fileAt && (d.rev|0) > (d.fileRev|0)) };
 }
 /* この戸別をPCに渡せているか。
@@ -5463,7 +5463,16 @@ async function receptionApplyToDrafts(){
     const no = toHalfWidthAn(rec.mgmt || "").trim();
     if(!no || no === openNo || !byNo[no]) continue;
     if(!receptionApplyToModel(rec.model, byNo[no])) continue;
-    rec.rev = (rec.rev | 0) + 1;          // 中身が変わった＝戸別ファイルを保存し直す対象になる
+    /* ★「直した回数」は中身（model._rev）が持ち主★
+       控えの rec.rev だけを進めると、その戸別を開いたときに
+       model._rev（進めていない古い回数）で控えが書き直され、
+       「保存し直す対象」の印が消えてしまう（＝まとめて保存の件数が減る）。
+       開いても消えないよう、中身の側を進めて、控えはそれに合わせる。 */
+    rec.model._rev = (rec.model._rev | 0) + 1;
+    rec.model._touched = true;
+    rec.rev = rec.model._rev;             // 中身が変わった＝戸別ファイルを保存し直す対象になる
+    rec.touched = true;
+    rec.sig = stateSig(rec.model);        // 指紋も今の中身に合わせる（古いままだと二重に数える）
     rec.flow = flowOf(rec.model);         // 工程の控えも合わせる（一覧・地図の印がすぐ合う）
     try{ await idbPut(rec); applied++; }catch(e){ console.warn("下書きへの反映に失敗", no, e); }
   }
