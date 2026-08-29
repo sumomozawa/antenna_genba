@@ -1028,7 +1028,7 @@ const GENBA_SCHEMA_VER = 1;
    （PC側で「現場入力アプリの版」を確認でき、メインとの食い違いに気付ける）。
    ★更新したらこの2行を書き換える。 */
 const APP_NAME_SHORT = "現場入力";
-const APP_VERSION = "2026.08.28a";
+const APP_VERSION = "2026.08.28b";
 function photoContentId(dataUri){
   if(!dataUri || typeof dataUri !== "string") return "";
   let a = 5381, b = 0;
@@ -4256,7 +4256,12 @@ async function saveAllDrafts(mode){
       } else {
         const rec = byNo[no];
         if(rec && rec.model && receptionApplyToModel(rec.model, row)){
-          rec.rev = (rec.rev | 0) + 1; applied++;
+          // 回数の持ち主は中身（model._rev）。控えだけ進めると、開いたときに巻き戻る
+          rec.model._rev = (rec.model._rev | 0) + 1;
+          rec.model._touched = true;
+          rec.rev = rec.model._rev; rec.touched = true;
+          rec.sig = stateSig(rec.model);
+          applied++;
           try{ await idbPut(rec); }catch(e){ console.warn("下書きの更新に失敗", no, e); }
         }
       }
@@ -4670,7 +4675,10 @@ async function flowShareItemsApply(items, byNo, openNo){
     if(isOpen) continue;                       // 開いている戸別は最後に persistDraft でまとめて控える
     if(!changed && !markChanged) continue;
     if(changed){
-      rec.rev = (rec.rev | 0) + 1; rec.touched = true;
+      /* flowApplyShared が中身の回数（model._rev）を進めている。
+         控えはそれに合わせる（別々に進めると、開いたときにズレる）。 */
+      rec.rev = rec.model._rev | 0; rec.touched = true;
+      rec.sig = stateSig(rec.model);
       rec.flow = flowOf(rec.model); rec.surveyDone = !!rec.model.survey_done;
     }
     rec.other = rec.model._otherFile || "";
@@ -5031,10 +5039,14 @@ async function refreshDraftInfo(force){
                   fileAt: rec.fileSavedAt || 0, savedAt: rec.savedAt || 0,
                   rev: rec.rev | 0, fileRev: rec.fileRev | 0, tick: 0 };
     });
-    // 読んでいる間に直した分（ビラを済みにした等）は、読み取り前の中身で上書きしない
+    /* 読んでいる間に直した分（ビラを済みにした等）は、読み取り前の中身で上書きしない。
+       ★「読み取りを始めたより後」だけを残す（tick0 と同じ番号は読み取り前のもの）★
+       ここを >= にしていたため、直前に控えた1件が毎回そのまま残り、
+       画面を通さずに書き換えた分（工程の引き継ぎ・台帳の入れ直し）が
+       読み直しても反映されず、「保存し直す対象」に出てこなかった。 */
     Object.keys(_draftInfo).forEach(no => {
       const cur = _draftInfo[no];
-      if(cur && (cur.tick | 0) >= tick0 && (cur.tick | 0) > 0) map[no] = cur;
+      if(cur && (cur.tick | 0) > tick0) map[no] = cur;
     });
     _draftInfo = map;
     _draftInfoReady = true;
