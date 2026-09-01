@@ -1028,7 +1028,9 @@ const GENBA_SCHEMA_VER = 1;
    （PC側で「現場入力アプリの版」を確認でき、メインとの食い違いに気付ける）。
    ★更新したらこの2行を書き換える。 */
 const APP_NAME_SHORT = "現場入力";
-const APP_VERSION = "2026.08.28b";
+/* 版は「増えていくだけの通し番号」。メイン（積算・図面）と同じ番号体系で、
+   番号が小さいほうが古い。 */
+const APP_VERSION = "120";
 function photoContentId(dataUri){
   if(!dataUri || typeof dataUri !== "string") return "";
   let a = 5381, b = 0;
