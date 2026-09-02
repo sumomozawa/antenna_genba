@@ -736,6 +736,14 @@
   .apw-chips button.on{background:#e60012;border-color:#e60012;color:#fff;}
   .apw-chips button:disabled{opacity:.4;cursor:not-allowed;}
   .apw-note{font-size:12px;color:var(--text-secondary,#888);margin-bottom:12px;min-height:16px;}
+  /* 柱まわりの選択（どの柱を使うか）。部品ではないのでチェックで選ぶ */
+  .apw-opts{display:flex;flex-wrap:wrap;gap:6px 14px;margin:-4px 0 12px;}
+  .apw-opts:empty{display:none;margin:0;}
+  .apw-opts label{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;
+    background:#eef4fb;border:1px solid #bcd8ef;border-radius:4px;padding:3px 10px;cursor:pointer;color:#1e5b8f;}
+  .apw-opts label:hover{background:#e2edf9;}
+  .apw-opts label.on{background:#1e5b8f;border-color:#17496f;color:#fff;font-weight:700;}
+  .apw-opts input{margin:0;cursor:pointer;}
   .apw-body{display:flex;gap:20px;flex-wrap:wrap;align-items:flex-start;}
   .apw-canvas{position:relative;flex:1 1 300px;min-width:260px;max-width:400px;}
   .apw-canvas svg{width:100%;height:auto;display:block;}
@@ -1030,7 +1038,7 @@ const GENBA_SCHEMA_VER = 1;
 const APP_NAME_SHORT = "現場入力";
 /* 版は「増えていくだけの通し番号」。メイン（積算・図面）と同じ番号体系で、
    番号が小さいほうが古い。 */
-const APP_VERSION = "120";
+const APP_VERSION = "122";
 function photoContentId(dataUri){
   if(!dataUri || typeof dataUri !== "string") return "";
   let a = 5381, b = 0;
@@ -1285,12 +1293,21 @@ function flowWhen(iso){
   var ROOF_545='<g stroke="var(--text-primary,#111)" stroke-width="3.5" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M40 300 L210 236 L378 306"/><path d="M52 332 L210 268 L366 336"/><path d="M40 300 L52 332"/><path d="M378 306 L366 336"/><path d="M105 310 L105 545"/><path d="M330 320 L330 545"/></g>';
   var ROOF_600='<g stroke="var(--text-primary,#111)" stroke-width="3.5" fill="none" stroke-linecap="round" stroke-linejoin="round"><path d="M40 300 L210 236 L378 306"/><path d="M52 332 L210 268 L366 336"/><path d="M40 300 L52 332"/><path d="M378 306 L366 336"/><path d="M105 310 L105 600"/><path d="M330 320 L330 600"/></g>';
 
+  // ---- 柱まわりの選択（どの柱を使うか）。部品ではないのでチェックで選ぶ。
+  //      チェックしたものが積算に「取付ガイド」由来の行として出る。 ----
+  var POLE_OPTIONS=[
+    {key:'poleNew',  label:'ポール新設',             unit:'本', tip:'ｶﾗｰM63ﾎﾟｰﾙ（XDDC1263MKA）を新設で計上します。'},
+    {key:'catvKeep', label:'CATV柱既存の位置で使用', unit:'式', tip:'既存のCATV柱を、いまの位置のまま使います。'},
+    {key:'catvMove', label:'CATV柱移設して使用',     unit:'式', tip:'既存のCATV柱を移設して使います。'}
+  ];
+
   // ---- pattern configs (data-driven scenes) ----
   var PATTERN_CONFIGS=[
     {
       id:'pole', label:'柱', viewBox:'0 0 400 650', structure:POLE_STRUCT,
       extraLabels:[{x:92,y:577,a:'end',text:'柱'}],
       note:'マストの径に応じて接続金具（MJ32S-P／MJ25S／MJ3225）が自動で決まります。架台はRALA固定です。',
+      options:POLE_OPTIONS,
       joint:{upKey:'mastUp', lowKey:'mastLow', cx:235, cy:270},
       parts:[
         {key:'mastUp', kind:'mast', x:235, y1:100, y2:270, optionsMode:'fixed', optionsFixed:MST, def:'M182Z32', badge:{x:235,y:160}},
@@ -1375,7 +1392,8 @@ function flowWhen(iso){
 
   var KIND_ORDER={wires:0, mast:1, base:2, brk:2, rsg:3, tb:4, ant:5};
   var KIND_LABEL={ant:'アンテナ', mast:'マスト', brk:'取付架台', base:'ルーフベース', rsg:'支線止め金具', wires:'アンテナ支線', tb:'ターンバックル'};
-  var ROW_ORDER={'アンテナ':0,'マスト':1,'取付架台':2,'接続金具':3,'ルーフベース':4,'支線止め金具':5,'アンテナ支線':6,'ターンバックル':7};
+  var ROW_ORDER={'アンテナ':0,'マスト':1,'取付架台':2,'接続金具':3,'ルーフベース':4,'支線止め金具':5,'アンテナ支線':6,'ターンバックル':7,'柱':8};
+  var OPT_KIND='柱';
 
   function findPatternConfig(id){
     for(var i=0;i<PATTERN_CONFIGS.length;i++){ if(PATTERN_CONFIGS[i].id===id) return PATTERN_CONFIGS[i]; }
@@ -1423,6 +1441,9 @@ function flowWhen(iso){
     });
     var joint=getJointInfo(scene);
     if(joint) add('接続金具', joint.product);
+    (scene.config.options||[]).forEach(function(op){
+      if(scene.options && scene.options[op.key]) add(OPT_KIND, op.label, 1, op.unit||'式');
+    });
     rows.sort(function(a,b){ return (ROW_ORDER[a.kind]-ROW_ORDER[b.kind]) || a.product.localeCompare(b.product); });
     return {rows:rows, installCount:installCount};
   }
@@ -1529,6 +1550,14 @@ function flowWhen(iso){
   // ---- 状態モデルのヘルパー（公開APIの土台） ----
   // savedParts（{key:{placed,product}}）から、cfg.parts の並びで各キーの状態を作る。
   // 保存値が無い/不正なキーは未設置＋既定型番で補う。
+  // 柱まわりの選択の初期化。そのパターンに無い選択肢は捨てる（別パターンの残りを持ち込まない）。
+  function buildSceneOptions(cfg, savedOptions){
+    var o={};
+    (cfg.options||[]).forEach(function(op){
+      o[op.key] = !!(savedOptions && savedOptions[op.key]);
+    });
+    return o;
+  }
   function buildSceneState(cfg, savedParts){
     var s={};
     cfg.parts.forEach(function(part){
@@ -1543,9 +1572,12 @@ function flowWhen(iso){
   }
   // 外部保存データ（JSON等）の形不正を既定値へ正規化する。{ver:1, pattern:<id|null>, parts:{...}}
   function normalizeAntennaGuide(g){
-    var out = {ver:1, pattern:null, parts:{}};
+    var out = {ver:1, pattern:null, parts:{}, options:{}};
     if(g && typeof g==='object'){
       if(typeof g.pattern==='string' && findPatternConfig(g.pattern)) out.pattern=g.pattern;
+      if(g.options && typeof g.options==='object'){
+        Object.keys(g.options).forEach(function(k){ if(g.options[k]) out.options[k]=true; });
+      }
       if(g.parts && typeof g.parts==='object'){
         Object.keys(g.parts).forEach(function(k){
           var p=g.parts[k];
@@ -1557,10 +1589,14 @@ function flowWhen(iso){
     }
     return out;
   }
-  // パターンが選択され、かつ部品が1つ以上設置されていれば true（積算計上の要否判定用）
+  // パターンが選択され、部品が1つ以上設置されている（または柱まわりの選択がある）なら true
+  // （積算計上の要否判定用）。柱だけ選んで部品を置いていない戸別も計上対象にする。
   function antennaGuideActive(g){
     var norm = normalizeAntennaGuide(g);
     if(!norm.pattern) return false;
+    var cfg = findPatternConfig(norm.pattern);
+    var opts = buildSceneOptions(cfg || {}, norm.options);   // そのパターンが持つ選択肢だけに絞る
+    if(Object.keys(opts).some(function(k){ return opts[k]; })) return true;
     return Object.keys(norm.parts).some(function(k){ return norm.parts[k] && norm.parts[k].placed; });
   }
 
@@ -1577,6 +1613,7 @@ function flowWhen(iso){
       + '<div class="apw-head"><strong>アンテナ取付ガイド</strong></div>'
       + '<div class="apw-chips"></div>'
       + '<div class="apw-note"></div>'
+      + '<div class="apw-opts"></div>'
       + '<div class="apw-body">'
       +   '<div class="apw-canvas"><svg class="apw-svg" viewBox="0 0 400 650" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="アンテナ取付ガイド"></svg></div>'
       +   '<div class="apw-side">'
@@ -1591,6 +1628,7 @@ function flowWhen(iso){
     var svg=hostEl.querySelector('.apw-svg');
     var chipsEl=hostEl.querySelector('.apw-chips');
     var noteEl=hostEl.querySelector('.apw-note');
+    var optsEl=hostEl.querySelector('.apw-opts');
     var bomEl=hostEl.querySelector('.apw-bom-body');
     var totalEl=hostEl.querySelector('.apw-total-num');
     var canvasEl=hostEl.querySelector('.apw-canvas');
@@ -1602,11 +1640,14 @@ function flowWhen(iso){
       var norm = normalizeAntennaGuide(rawState);
       var cfg = findPatternConfig(norm.pattern) || PATTERN_CONFIGS[0];
       currentId = cfg.id;
-      scene = { config: cfg, state: buildSceneState(cfg, norm.parts) };
+      scene = { config: cfg, state: buildSceneState(cfg, norm.parts),
+                options: buildSceneOptions(cfg, norm.options) };
       reconcileScene(scene);
     }
     function serialize(){
-      return { ver:1, pattern: currentId, parts: JSON.parse(JSON.stringify(scene.state)) };
+      return { ver:1, pattern: currentId,
+               parts: JSON.parse(JSON.stringify(scene.state)),
+               options: JSON.parse(JSON.stringify(scene.options||{})) };
     }
     function commit(){
       renderScene();
@@ -1624,7 +1665,8 @@ function flowWhen(iso){
           if(currentId===cfg.id) return;
           // パターン切替：他パターンの編集は破棄し、新パターンは全部品未設置から開始（採用1パターンのみ運用）
           currentId=cfg.id;
-          scene = { config: cfg, state: buildSceneState(cfg, null) };
+          scene = { config: cfg, state: buildSceneState(cfg, null),
+                    options: buildSceneOptions(cfg, null) };
           reconcileScene(scene);
           closeMenu();
           commit();
@@ -1646,6 +1688,28 @@ function flowWhen(iso){
       totalEl.textContent=res.installCount;
     }
 
+    // 柱まわりの選択（どの柱を使うか）。選択肢を持たないパターンでは何も出さない。
+    function renderOpts(){
+      var list = scene.config.options || [];
+      optsEl.innerHTML='';
+      if(!list.length) return;
+      list.forEach(function(op){
+        var on = !!(scene.options && scene.options[op.key]);
+        var lb=document.createElement('label');
+        if(on) lb.className='on';
+        if(op.tip) lb.title=op.tip;
+        var cb=document.createElement('input');
+        cb.type='checkbox'; cb.checked=on; cb.setAttribute('data-opt', op.key);
+        cb.addEventListener('change', function(){
+          scene.options[op.key]=!!cb.checked;
+          closeMenu();
+          commit();
+        });
+        lb.appendChild(cb);
+        lb.appendChild(document.createTextNode(op.label));
+        optsEl.appendChild(lb);
+      });
+    }
     function renderScene(){
       var cfg=scene.config;
       svg.setAttribute('viewBox', cfg.viewBox);
@@ -1662,6 +1726,7 @@ function flowWhen(iso){
       }
       svg.innerHTML=html;
       renderBom();
+      renderOpts();
       noteEl.textContent=cfg.note;
       renderChips();
     }
@@ -1757,6 +1822,7 @@ function flowWhen(iso){
         reconcileScene(scene);
       } else if(btn.getAttribute('data-act')==='reset'){
         scene.state=buildSceneState(scene.config, null);
+        scene.options=buildSceneOptions(scene.config, null);
       }
       closeMenu();
       commit();
@@ -1808,7 +1874,8 @@ function flowWhen(iso){
   function renderAntennaGuideBomRows(state){
     var norm = normalizeAntennaGuide(state);
     var cfg = findPatternConfig(norm.pattern) || PATTERN_CONFIGS[0];
-    var sc = { config: cfg, state: buildSceneState(cfg, norm.parts) };
+    var sc = { config: cfg, state: buildSceneState(cfg, norm.parts),
+               options: buildSceneOptions(cfg, norm.options) };
     return computeBom(sc).rows;
   }
 
