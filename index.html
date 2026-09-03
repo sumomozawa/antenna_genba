@@ -595,6 +595,9 @@
   .rc-badge.prov{background:#f9a825; color:#5d4037;}
   /* 保留：PC（受付台帳・地図の「保」マーク）と同じ橙色 */
   .rc-badge.hold{background:#e65100;}
+  /* アパート（集合住宅）の世帯。何号室かが一目で分かるようにする */
+  .rc-badge.apt{background:#6a1b9a;}
+  .rc-badge.apt.rep{background:#4a148c;}
   /* いま済みにしたばかりの戸別（絞り込みから外れても、この一覧では残して見せる） */
   .rc-badge.just{background:#0d47a1;}
   /* 絞り込みで隠れている件数。ここを見れば「消えた」のではなく「隠れている」と分かる */
@@ -1038,7 +1041,7 @@ const GENBA_SCHEMA_VER = 1;
 const APP_NAME_SHORT = "現場入力";
 /* 版は「増えていくだけの通し番号」。メイン（積算・図面）と同じ番号体系で、
    番号が小さいほうが古い。 */
-const APP_VERSION = "122";
+const APP_VERSION = "131";
 function photoContentId(dataUri){
   if(!dataUri || typeof dataUri !== "string") return "";
   let a = 5381, b = 0;
@@ -4132,6 +4135,50 @@ function buildStateOf(model){
 
    控えが無い古い下書きでは、台帳が空の項目では上書きしない。ただし工事予定日だけは
    空も反映する（前の版が勝手に入れてしまった日付を、PC側から消せるようにするため）。 */
+/* アパート（集合住宅）の受付台帳の行かどうか。2〜12世帯のときだけ。 */
+function rcAptUnits(r){
+  const n = parseInt((r && r.apt_units) || "", 10);
+  return (n >= 2 && n <= 12) ? n : 0;
+}
+function rcIsApt(r){ return rcAptUnits(r) > 0; }
+function rcAptIdx(r){
+  const u = rcAptUnits(r); if(!u) return 0;
+  const n = parseInt((r && r.apt_idx) || "", 10);
+  return (n >= 1 && n <= u) ? n : 1;
+}
+/* 「203号室」。部屋番号が空なら「3世帯目」。 */
+function rcAptUnitLabel(r){
+  const room = String((r && r.apt_room) || "").trim();
+  return room || (rcAptIdx(r) + "世帯目");
+}
+/* 建物名。空なら建物キー（代表番号）。 */
+function rcAptBldgName(r){
+  const n = String((r && r.apt_name) || "").trim();
+  return n || String((r && r.apt_bldg) || "").trim();
+}
+/* アパートの戸別に付ける情報。同じ棟の世帯が管理番号だけで並ぶのを防ぐ。 */
+function rcAptFields(row){
+  const o = {};
+  ["apt_units","apt_idx","apt_bldg","apt_name","apt_room",
+   "apt_common","apt_common_done","apt_owner_name","apt_owner_tel"].forEach(k=>{
+    const v = String((row && row[k]) || "").trim();
+    if(v) o[k] = v;
+  });
+  return o;
+}
+/* アパートの欄をモデルの持ち越し（_passthrough）へ入れる。
+   現場入力はこれらの欄を編集しないが、書き出す戸別JSONには必ず残す。
+   ここで入れておかないと、PCがフォルダを読み直したとき建物のまとまりが消える。 */
+function rcAptToModel(m, row){
+  if(!m || !row) return false;
+  const f = rcAptFields(row);
+  if(!m._passthrough || typeof m._passthrough !== "object") m._passthrough = {};
+  let changed = false;
+  for(const k in f){
+    if(String(m._passthrough[k] || "") !== f[k]){ m._passthrough[k] = f[k]; changed = true; }
+  }
+  return changed;
+}
 function receptionApplyToModel(m, row){
   if(!m || !row) return false;
   let changed = false;
@@ -4150,6 +4197,7 @@ function receptionApplyToModel(m, row){
     }
     m[k] = v; changed = true;
   };
+  if(rcAptToModel(m, row)) changed = true;   // アパートの欄は台帳が持ち主。常にPCに合わせる
   set("chosho_cust_name", "name", false);
   set("chosho_cust_addr", "addr", false);
   set("chosho_cust_tel",  "tel",  false);
@@ -5316,7 +5364,9 @@ function renderReceptionList(q){
   }
   if(!rows.length){ host.innerHTML=`<div class="info" style="text-align:center">受付台帳はまだ取り込まれていません。<br>上のボタンから <b class="fname">現場用_….json</b> を選んでください。</div>`; return; }
   const kw=(q||"").trim().toLowerCase();
-  const byKw=kw ? rows.filter(r=>((r.mgmt_no||"")+" "+(r.name||"")+" "+(r.addr||"")+" "+(r.tel||"")).toLowerCase().includes(kw)) : rows;
+  // アパートは建物名・部屋番号でも探せるようにする（「さくら荘」「203」で引ける）
+  const byKw=kw ? rows.filter(r=>((r.mgmt_no||"")+" "+(r.name||"")+" "+(r.addr||"")+" "+(r.tel||"")
+    +" "+(r.apt_name||"")+" "+(r.apt_room||"")+" "+(r.apt_bldg||"")).toLowerCase().includes(kw)) : rows;
   // いまの工程で絞る（「今日はビラ配り」の日に、ビラの済んでいない戸別だけ出す）
   const flt=rcFilterDef();
   // いま済みにしたばかりの戸別は、絞り込みから外れても残す（消えたように見せない）
@@ -5383,10 +5433,21 @@ function renderReceptionList(q){
   host.innerHTML=fltBar+warn+redoBar+undoBar+filtered.map(r=>{
     const idx=rows.indexOf(r);
     const info=draftInfoOf(r.mgmt_no);
-    const sub=[r.addr, rcPlanText(r), rcMeetText(r), r.contractor].filter(Boolean).map(esc).join("・");
+    // アパートは同じ住所の世帯が並ぶので、建物名＋部屋番号を副題の先頭に出す
+    const aptSub = rcIsApt(r) ? (rcAptBldgName(r) + " " + rcAptUnitLabel(r)) : "";
+    const sub=[aptSub, r.addr, rcPlanText(r), rcMeetText(r), r.contractor].filter(Boolean).map(esc).join("・");
     const badge = r.status==="provisional" ? '<span class="rc-badge prov">仮</span>' : '';
     // 保留は工程とは別枠。PCで保留にした戸別は現場でも一目で分かるようにする
     const hold = r.hold ? '<span class="rc-badge hold">保留</span>' : '';
+    // アパートの世帯。何号室かを管理番号の前に出す（同じ棟が並ぶと番号だけでは見分けが付かない）
+    const aptRep = rcIsApt(r) && rcAptIdx(r) === 1;
+    const apt = rcIsApt(r)
+      ? `<span class="rc-badge apt${aptRep ? " rep" : ""}" title="${esc(rcAptBldgName(r)
+          + "　" + rcAptUnitLabel(r) + "（" + rcAptUnits(r) + "世帯の" + rcAptIdx(r) + "世帯目"
+          + (aptRep ? "・代表" : "") + "）"
+          + (r.apt_owner_name ? "\n大家： " + r.apt_owner_name : "")
+          + "\n同意書は大家に1つ（建物で共有）／工事完了書は世帯ごと")}">🏢${esc(rcAptUnitLabel(r))}</span>`
+      : '';
     // いまどこまで進んだか。下・ビ・工・完 の4つ並び＋いちばん進んだ工程のバッジ。
     const rf = rowFlowOf(r);
     const top = flowTopPhase(rf);
@@ -5442,7 +5503,7 @@ function renderReceptionList(q){
     // この端末で工程を進めた戸別だけ「見直す」（PCの台帳で済んでいるだけの戸別は「開く」）
     const act = `<div class="d-act"><button class="d-open" data-recopen="${idx}">${(info&&flowAny(info.flow))?"見直す":"開く"}</button>${act2}</div>`;
     return `<div class="draft${cls}${soon?" rc-soon":""}${consentOnly?" rc-consent":""}${unsaved?" rc-unsaved":""}"><div class="d-main" data-recopen="${idx}">
-      <div class="d-no">${dots}${phase}${soonBadge}${just}${started}${other}${unsaved}${hold}${badge}${esc(r.mgmt_no||"（番号なし）")}${r.name?(" ／ "+esc(r.name)):""}</div>
+      <div class="d-no">${dots}${phase}${soonBadge}${just}${started}${other}${unsaved}${hold}${apt}${badge}${esc(r.mgmt_no||"（番号なし）")}${r.name?(" ／ "+esc(r.name)):""}</div>
       <div class="d-sub">${sub}${ph}${fileNote}</div>${noteHtml}</div>${act}</div>`;
   }).join("");
   const sa = document.getElementById("rc-saveall");
@@ -5514,6 +5575,7 @@ async function openFromReception(row){
     if(sh){ flowApplyShared(m, sh); if(sh.from) m._otherFile=sh.from; } }
   if(mgmt){ delete m._draftId; m._lastDraftKey="no:"+mgmt; }
   if(row.note) m.chosho_note = String(row.note);  // 備考はPCと共通の欄。台帳の内容から始める
+  rcAptToModel(m, row);                           // アパートの欄を戸別JSONに残す（PCで建物がばらけないように）
   m._rcSrc = rcSrcOf(row);                        // 次に「PCが直したか」を見分けるための控え
   m._touched=false;                               // 台帳の値を写しただけ。まだ現場で入力していない
   M=m; ensureModelShape(M); resetOpenState(); render(); appSwap();
@@ -6215,7 +6277,18 @@ function receptionSaveRows(src){
     flyer:!!x.flyer,                    // ビラ配布済み
     consent:!!x.consent,                // 承諾書（現場では「同意書」）受領済み
     compdoc:!!x.compdoc,                // 完了書（現場では「工事完了書」）受領済み
-    note:String(x.note||"")
+    note:String(x.note||""),
+    // アパート（集合住宅）。PC側の受付台帳ファイル version 4 から来る。
+    // 古い書き出しファイルには無いので空のまま＝戸建て扱いになる。
+    apt_units:String(x.apt_units||""),
+    apt_idx:String(x.apt_idx||""),
+    apt_bldg:String(x.apt_bldg||""),
+    apt_name:String(x.apt_name||""),
+    apt_room:String(x.apt_room||""),
+    apt_common:String(x.apt_common||""),
+    apt_common_done:String(x.apt_common_done||""),
+    apt_owner_name:String(x.apt_owner_name||""),
+    apt_owner_tel:String(x.apt_owner_tel||"")
   })).filter(x=>x.mgmt_no||x.name||x.addr);
   _calCtrShortMap = null;   // 会社の顔ぶれが変わるので、短い名前は作り直す
   localStorage.setItem(LS_RECEPTION, JSON.stringify({ type:"antenna_reception_ledger",
