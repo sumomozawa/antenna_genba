@@ -597,7 +597,35 @@
   .rc-badge.hold{background:#e65100;}
   /* アパート（集合住宅）の世帯。何号室かが一目で分かるようにする */
   .rc-badge.apt{background:#6a1b9a;}
+  /* 完了確認書をもらえないまま期限で切り替えた世帯 */
+  .rc-badge.waived{background:#ef6c00;}
+  .aptnote .an-waived{background:#fff3e0; border:1px solid #ffb74d; border-radius:8px;
+    padding:5px 8px; margin-top:6px; color:#e65100;}
+  .aptnote .an-waived .an-t{background:#ef6c00;}
   .rc-badge.apt.rep{background:#4a148c;}
+  /* 台帳の一覧で、同じアパートの世帯をひとまとまりに見せる帯 */
+  .rc-aptband{margin:12px 0 4px; padding:8px 11px; border-radius:10px 10px 0 0;
+    background:#f3e5f5; color:#4a148c; font-size:12.5px; font-weight:700; line-height:1.6;
+    border:1px solid #ce93d8; border-bottom:none;}
+  .rc-aptband .ab-n{background:#6a1b9a; color:#fff; border-radius:9px; padding:1px 7px;
+    font-size:11px; margin-left:6px;}
+  .rc-aptband .ab-sub{display:block; font-weight:500; font-size:11.5px; margin-top:3px;}
+  .rc-aptband .ab-doc{color:#6a1b9a; font-weight:600;}
+  /* 開いている戸別がアパートの世帯のときの案内 */
+  .aptnote{margin:0 0 12px; padding:10px 12px; border-radius:10px;
+    background:#f3e5f5; border:1px solid #ce93d8; color:#4a148c; line-height:1.7;}
+  .aptnote .an-h{font-size:14px; font-weight:800;}
+  .aptnote .an-room{margin-left:8px; font-size:15px;}
+  .aptnote .an-n{background:#6a1b9a; color:#fff; border-radius:9px; padding:1px 8px;
+    font-size:11px; margin-left:8px; vertical-align:2px;}
+  .aptnote .an-r{font-size:12.5px; margin-top:5px;}
+  .aptnote .an-k{display:inline-block; min-width:6.5em; color:#6a1b9a; font-weight:700;}
+  .aptnote .an-doc .an-t{display:inline-block; min-width:6.5em; background:#6a1b9a; color:#fff;
+    border-radius:8px; padding:0 8px; font-size:11px; font-weight:700; margin-right:6px;
+    text-align:center;}
+  .aptnote .an-tel{color:#1565c0; text-decoration:none; font-weight:700; margin-left:6px;}
+  .aptnote .an-note{margin-top:7px; padding-top:6px; border-top:1px dashed #ce93d8;
+    font-size:11.5px; font-weight:500;}
   /* いま済みにしたばかりの戸別（絞り込みから外れても、この一覧では残して見せる） */
   .rc-badge.just{background:#0d47a1;}
   /* 絞り込みで隠れている件数。ここを見れば「消えた」のではなく「隠れている」と分かる */
@@ -1015,7 +1043,11 @@ const DEFAULTS = {
   chosho_mgmt_no:"",chosho_date:"",chosho_time:"",chosho_meet_at:"",chosho_cust_name:"",chosho_cust_addr:"",chosho_cust_tel:"",
   chosho_note:"",
   chosho_status:"provisional",tax_mode:"excl",misc_fee:"include",
-  outsource_fee_on:false,outsource_fee_amount:0,outsource_fee_auto:false,
+  outsource_fee_on:false,outsource_fee_amount:0,
+  // 「物件の諸経費を使う」。現場入力では触らない項目なので、既定は false ではなく
+  // null＝「この端末では決めていない」。false にすると、現場を通しただけで
+  // PC側の追従が外れてしまう（物件の額に戻らなくなる）。
+  outsource_fee_auto:null,
 };
 
 /* ============================================================================
@@ -1041,7 +1073,7 @@ const GENBA_SCHEMA_VER = 1;
 const APP_NAME_SHORT = "現場入力";
 /* 版は「増えていくだけの通し番号」。メイン（積算・図面）と同じ番号体系で、
    番号が小さいほうが古い。 */
-const APP_VERSION = "131";
+const APP_VERSION = "132";
 function photoContentId(dataUri){
   if(!dataUri || typeof dataUri !== "string") return "";
   let a = 5381, b = 0;
@@ -1897,7 +1929,7 @@ function flowWhen(iso){
 // show: (m)=>bool  条件表示
 const SECTIONS = [
   // 現場の流れ（下見→ビラ配り→工事→完了）。いちばん上・最初から開いた状態にする。
-  { id:"flow", ico:"🚩", title:"工程", open:true, fields:[{custom:"flow"}] },
+  { id:"flow", ico:"🚩", title:"工程", open:true, fields:[{custom:"apt"}, {custom:"flow"}] },
   { id:"chosho", ico:"📋", title:"調書・顧客", open:true, fields:[
     {id:"chosho_mgmt_no", type:"text", label:"管理番号", req:true, hint:"ファイル名・写真フォルダ名になります（例 245001）"},
     {id:"chosho_date", type:"date", label:"工事予定日",
@@ -2150,6 +2182,7 @@ function secBadge(sec){
 function renderField(f){
   if(f.sub) return `<div class="subhdr">${f.sub}</div>`;
   if(f.custom==="flow") return `<div id="flowbox">${renderFlow()}</div>`;
+  if(f.custom==="apt") return renderAptNote();
   if(f.custom==="tvrows") return `<div id="tvrows">${renderTvRows()}</div>`;
   if(f.custom==="wires") return renderWires();
   if(f.custom==="photos") return renderPhotos();
@@ -2195,6 +2228,59 @@ function renderField(f){
   return `<div class="fld${f.req?" req":""}${agCls}"><label>${esc(f.label)}</label>${inner}${f.hint?`<div class="hint">${esc(f.hint)}</div>`:""}</div>`;
 }
 
+/* いま開いている戸別のアパートの欄。現場入力では書き替えない項目なので、
+   台帳から受け取ったまま _passthrough に置いてある（そのまま戸別JSONへ戻る）。 */
+function mAptFields(){
+  return (M && M._passthrough && typeof M._passthrough === "object") ? M._passthrough : {};
+}
+/* いま開いている戸別がアパートの世帯かどうか */
+function mIsApt(){ return rcAptUnits(mAptFields()) > 0; }
+/* アパートの世帯を開いたときに、いちばん上に出す案内。
+   「何号室か」「大家は誰か」「同意書は誰から、完了確認書は誰から」を現場で迷わないようにする。 */
+function renderAptNote(){
+  if(!mIsApt()) return "";
+  const A = mAptFields();
+  const u = rcAptUnits(A), i = rcAptIdx(A);
+  const rep1 = (i === 1);
+  const common = String(A.apt_common || "") === "yes";
+  const tel = String(A.apt_owner_tel || "").trim();
+  return '<div class="aptnote">'
+    + '<div class="an-h">🏢 ' + esc(rcAptBldgName(A) || "アパート")
+    +   '<span class="an-room">' + esc(rcAptUnitLabel(A)) + '</span>'
+    +   '<span class="an-n">' + u + '世帯の ' + i + '世帯目' + (rep1 ? '（代表）' : '') + '</span>'
+    + '</div>'
+    + '<div class="an-r"><span class="an-k">大家・不動産</span>'
+    +   esc(A.apt_owner_name || "―")
+    +   (tel ? ' <a class="an-tel" href="tel:' + esc(tel.replace(/[^0-9+]/g,"")) + '">📞 ' + esc(tel) + '</a>' : '')
+    + '</div>'
+    + '<div class="an-r"><span class="an-k">共用部</span>'
+    +   (common ? '<b>あり</b>（外のボックスに増幅器・電源部・分配器・ブレーカー）'
+               : '<b>なし</b>（世帯ごとに電源部 BPS6W・小型漏電遮断機・コンセント）')
+    + '</div>'
+    + '<div class="an-r an-doc">'
+    +   '<span class="an-t">同意書</span>大家から1通（建物ぶん）。この世帯では要りません'
+    + '</div>'
+    + (String(A.compdoc_waived || "") === "yes"
+        ? ('<div class="an-r an-doc an-waived">'
+           + '<span class="an-t">工事完了書</span><b>この世帯は「書なしで完了」にしています</b>'
+           + (A.compdoc_waived_at ? '（切替日 ' + esc(A.compdoc_waived_at) + '）' : '')
+           + '<br>連絡が取れないまま期限で切り替えた世帯です。工事完了書は受け取らなくて構いません。'
+           + (A.compdoc_waived_note ? '<br>' + esc(A.compdoc_waived_note) : '')
+           + '</div>')
+        : ('<div class="an-r an-doc">'
+           + '<span class="an-t">工事完了書</span>入居者ごとに1通。<b>この世帯のぶんを受け取ってください</b>'
+           + '</div>'))
+    + '<div class="an-r an-doc">'
+    +   '<span class="an-t">ビラ</span>入居者へ配ります。大家へは配りません'
+    + '</div>'
+    + (rep1
+        ? '<div class="an-note">この世帯は<b>代表</b>です。アンテナ・増幅器・共用部のボックスなど'
+          + '「建物に1つ」の材料は、この世帯の積算に入っています。</div>'
+        : '<div class="an-note">建物に1つの材料（アンテナ・増幅器・ボックス）は代表の世帯に入っています。'
+          + 'この世帯は宅内の切替とチャンネル調整だけです。</div>')
+    + '</div>';
+}
+
 // ---- 工程（下見 → ビラ配り → 工事 → 完了）----
 // 上の帯で「いま何合目か」、下の行で1つずつ済み／未済を切り替える。
 function renderFlow(){
@@ -2211,13 +2297,16 @@ function renderFlow(){
   });
   strip += '</div>';
   // 1工程ぶんの行（右のボタンで済み／未済が入れ替わる）
+  // アパートのときだけ、誰からもらう書類なのかを行の名前に添える
+  const APT_TAIL = { consent:"（大家から1通・建物ぶん）", compdoc:"（この世帯ぶん）", flyer:"（入居者へ）" };
   const rowOf = (s, ph, num) => {
     const on = !!f[s.key];
     const isNext = !!(next && next.key===s.key);
     const when = on ? flowWhen(M[s.at]) : "";
     const sub = on ? ("済" + (when?("　"+when):"")) : (isNext ? "次はここ" : "まだ");
+    const nm = s.name + (mIsApt() && APT_TAIL[s.key] ? APT_TAIL[s.key] : "");
     return '<div class="flowrow'+(s.doc?" doc":"")+((isNext&&!on)?" next":"")+'">'
-      + '<div class="fr-main"><div class="fr-nm">'+esc((num?num+" ":"")+s.name)+'</div>'
+      + '<div class="fr-main"><div class="fr-nm">'+esc((num?num+" ":"")+nm)+'</div>'
       + '<div class="fr-at">'+esc(sub)+'</div></div>'
       + '<button type="button" class="fr-btn'+(on?" on":"")+'" data-flowstep="'+esc(s.key)+'"'
       + (on?(' style="background:'+ph.color+'"'):'')
@@ -2851,7 +2940,8 @@ function buildState(){
   s.misc_fee=M.misc_fee||"include";
   s.outsource_fee_on=!!M.outsource_fee_on;
   s.outsource_fee_amount=Math.max(0,parseFloat(M.outsource_fee_amount)||0);
-  s.outsource_fee_auto=!!M.outsource_fee_auto;
+  // 決めていない(null/undefined)なら書き出さない＝PC側の既定（追従）に委ねる
+  if(M.outsource_fee_auto === true || M.outsource_fee_auto === false) s.outsource_fee_auto=!!M.outsource_fee_auto;
   s.tv_rooms=M.tv_rooms.slice();
   s.tv_bd=M.tv_bd.map(Boolean);
   s.tv_sp=M.tv_sp.slice();
@@ -2868,6 +2958,7 @@ function buildState(){
     const o={label:String(p.label||""),dataUri};
     const id=p.id||(dataUri?photoContentId(dataUri):"");
     if(id) o.id=id;   // 安定な写真ID（PC側での重複突合に使う）
+    if(p.chosho) o.chosho=true;   // PCで付けた「工事調書に載せる」印を消さずに持ち帰る
     return o;
   });
   s.asbestos=Object.assign({},M.asbestos);
@@ -3718,7 +3809,8 @@ async function loadStateInto(s){
   if(s.misc_fee) m.misc_fee=s.misc_fee;
   m.outsource_fee_on=!!s.outsource_fee_on;
   m.outsource_fee_amount=+s.outsource_fee_amount||0;
-  m.outsource_fee_auto=!!s.outsource_fee_auto;
+  m.outsource_fee_auto=(s.outsource_fee_auto===undefined||s.outsource_fee_auto===null)
+    ? null : !!s.outsource_fee_auto;   // 無い項目を false に丸めない（PCの追従を消さない）
   if(Array.isArray(s.tv_rooms)) m.tv_rooms=s.tv_rooms.slice();
   if(Array.isArray(s.tv_bd)) m.tv_bd=s.tv_bd.map(Boolean);
   if(Array.isArray(s.tv_sp)) m.tv_sp=s.tv_sp.map(v=>v===true?"new":(v===false?"no":v));
@@ -3736,6 +3828,7 @@ async function loadStateInto(s){
         const o={label:String((p&&p.label)||""),dataUri};
         const id=(p&&p.id)||(dataUri?photoContentId(dataUri):"");
         if(id) o.id=id;   // 安定な写真IDを維持（無ければ算出）
+        if(p&&p.chosho) o.chosho=true;   // PCで付けた「工事調書に載せる」印を維持
         return o;
       })
       .filter(p=>p.dataUri && /^data:image\//i.test(p.dataUri)); // data:image/ 形式のみ許可（細工JSONの属性インジェクション防止）
@@ -4160,7 +4253,9 @@ function rcAptBldgName(r){
 function rcAptFields(row){
   const o = {};
   ["apt_units","apt_idx","apt_bldg","apt_name","apt_room",
-   "apt_common","apt_common_done","apt_owner_name","apt_owner_tel"].forEach(k=>{
+   "apt_common","apt_common_done","apt_owner_name","apt_owner_tel",
+   "apt_owner_addr","apt_consent_at",
+   "compdoc_waived","compdoc_waived_at","compdoc_waived_note"].forEach(k=>{
     const v = String((row && row[k]) || "").trim();
     if(v) o[k] = v;
   });
@@ -4169,6 +4264,72 @@ function rcAptFields(row){
 /* アパートの欄をモデルの持ち越し（_passthrough）へ入れる。
    現場入力はこれらの欄を編集しないが、書き出す戸別JSONには必ず残す。
    ここで入れておかないと、PCがフォルダを読み直したとき建物のまとまりが消える。 */
+/* 予定（カレンダー）に出す呼び名。アパートは名前だけだと同じ建物の世帯を見分けられないので、
+   「さくら荘 103号室」を先に出す（入居者の名前が分かっていればそのあとに続ける）。 */
+function rcCalWho(row){
+  const nm = String((row && row.name) || "").trim();
+  if(rcIsApt(row)){
+    const b = String(rcAptBldgName(row) || "").trim();
+    return (b ? b + " " : "") + rcAptUnitLabel(row) + (nm ? "　" + nm : "");
+  }
+  return nm || String((row && row.mgmt_no) || "");
+}
+/* 建物のまとまりを表す鍵。台帳の apt_bldg（無ければ管理番号の枝番を落としたもの）。 */
+function rcAptKey(r){
+  if(!rcIsApt(r)) return "";
+  const b = String((r && r.apt_bldg) || "").trim();
+  if(b) return b;
+  const mg = String((r && r.mgmt_no) || "").trim();
+  const m = mg.match(/^(.+)-(\d{1,2})$/);
+  return m ? m[1] : mg;
+}
+/* 並び順を崩さずに、同じ建物の世帯を最初の1件の位置へ寄せる（PC側 aptRegroup と同じ考え方）。 */
+function rcAptRegroup(rows){
+  const out = [], placed = new Set(), byKey = new Map();
+  (rows || []).forEach(r => {
+    const k = rcAptKey(r); if(!k) return;
+    if(!byKey.has(k)) byKey.set(k, []);
+    byKey.get(k).push(r);
+  });
+  byKey.forEach(a => a.sort((x, y) => {
+    const xi = rcAptIdx(x), yi = rcAptIdx(y);
+    if(xi !== yi) return xi - yi;
+    return String(x.mgmt_no || "").localeCompare(String(y.mgmt_no || ""), "ja", { numeric: true });
+  }));
+  (rows || []).forEach(r => {
+    const k = rcAptKey(r);
+    if(!k){ out.push(r); return; }
+    if(placed.has(k)) return;
+    placed.add(k);
+    byKey.get(k).forEach(x => out.push(x));
+  });
+  return out;
+}
+/* 台帳の一覧に挟む建物の帯。「ここからここまでが1棟」「大家は誰か」
+   「同意書は大家から1通・工事完了書は入居者ごと・ビラは入居者へ」を現場でも分かるようにする。 */
+function rcAptBandHtml(row, members){
+  const n = members.length;
+  const units = rcAptUnits(row) || n;
+  const done = members.filter(r => flowPhaseDone(rowFlowOf(r), "done")).length;
+  const waived = members.filter(r => String(r.compdoc_waived || "") === "yes").length;
+  const consent = members.some(r => !!rowFlowOf(r).consent);
+  const consentAt = String((row && row.apt_consent_at) || "").trim();
+  const owner = String((row && row.apt_owner_name) || "").trim();
+  const tel = String((row && row.apt_owner_tel) || "").trim();
+  const common = String((row && row.apt_common) || "") === "yes";
+  return '<div class="rc-aptband">🏢 ' + esc(rcAptBldgName(row) || "アパート")
+    + '<span class="ab-n">' + n + (n !== units ? ' / ' + units : '') + '世帯</span>'
+    + '<span class="ab-sub">大家・不動産 ' + esc(owner || "―")
+    +   (tel ? '（' + esc(tel) + '）' : '')
+    +   '　／　共用部' + (common ? 'あり' : 'なし')
+    +   '　／　工事完了 ' + done + ' / ' + n + ' 世帯</span>'
+    + '<span class="ab-sub ab-doc">同意書は大家から1通'
+    +   (consent ? ('（受取済' + (consentAt ? ' ' + esc(consentAt) : '') + '）') : '（まだ）')
+    +   '　／　工事完了書は入居者ごと'
+    +   (waived ? '（うち書なし完了 ' + waived + '）' : '')
+    +   '　／　ビラは入居者へ（大家へは配りません）</span>'
+    + '</div>';
+}
 function rcAptToModel(m, row){
   if(!m || !row) return false;
   const f = rcAptFields(row);
@@ -5430,8 +5591,20 @@ function renderReceptionList(q){
     : "";
   // 他の端末で進めた分の引き継ぎは「📋 履歴」の中に置いてある（毎日使うものではないので、
   // 台帳の一覧の上には出さない）。引き継いだ戸別には行に「他端末」が付く。
-  host.innerHTML=fltBar+warn+redoBar+undoBar+filtered.map(r=>{
+  // アパートは同じ建物の世帯を隣どうしに寄せ、建物ごとに帯を1本挟む
+  const ordered = rcAptRegroup(filtered);
+  const aptGrp = new Map();
+  ordered.forEach(r => { const k = rcAptKey(r); if(!k) return;
+    if(!aptGrp.has(k)) aptGrp.set(k, []); aptGrp.get(k).push(r); });
+  const aptSeen = new Set();
+  host.innerHTML=fltBar+warn+redoBar+undoBar+ordered.map(r=>{
     const idx=rows.indexOf(r);
+    const aptKey = rcAptKey(r);
+    let bandHtml = "";
+    if(aptKey && !aptSeen.has(aptKey)){
+      aptSeen.add(aptKey);
+      bandHtml = rcAptBandHtml(r, aptGrp.get(aptKey) || [r]);
+    }
     const info=draftInfoOf(r.mgmt_no);
     // アパートは同じ住所の世帯が並ぶので、建物名＋部屋番号を副題の先頭に出す
     const aptSub = rcIsApt(r) ? (rcAptBldgName(r) + " " + rcAptUnitLabel(r)) : "";
@@ -5439,6 +5612,14 @@ function renderReceptionList(q){
     const badge = r.status==="provisional" ? '<span class="rc-badge prov">仮</span>' : '';
     // 保留は工程とは別枠。PCで保留にした戸別は現場でも一目で分かるようにする
     const hold = r.hold ? '<span class="rc-badge hold">保留</span>' : '';
+    /* 連絡が取れないまま期限で切り替えた世帯。工事は終わっているが工事完了書は受け取れていない。
+       完了書をもらった世帯とは扱いが違うので、一覧でもはっきり分ける。 */
+    const waived = String(r.compdoc_waived || "") === "yes"
+      ? '<span class="rc-badge waived" title="' + esc("完了確認書をもらえないまま、期限で切り替えた世帯です。"
+          + (r.compdoc_waived_at ? "\n切替日: " + r.compdoc_waived_at : "")
+          + (r.compdoc_waived_note ? "\n事情: " + r.compdoc_waived_note : "")
+          + "\n工事完了書は受け取らなくて構いません。") + '">書なし完了</span>'
+      : '';
     // アパートの世帯。何号室かを管理番号の前に出す（同じ棟が並ぶと番号だけでは見分けが付かない）
     const aptRep = rcIsApt(r) && rcAptIdx(r) === 1;
     const apt = rcIsApt(r)
@@ -5502,8 +5683,8 @@ function renderReceptionList(q){
       : "";
     // この端末で工程を進めた戸別だけ「見直す」（PCの台帳で済んでいるだけの戸別は「開く」）
     const act = `<div class="d-act"><button class="d-open" data-recopen="${idx}">${(info&&flowAny(info.flow))?"見直す":"開く"}</button>${act2}</div>`;
-    return `<div class="draft${cls}${soon?" rc-soon":""}${consentOnly?" rc-consent":""}${unsaved?" rc-unsaved":""}"><div class="d-main" data-recopen="${idx}">
-      <div class="d-no">${dots}${phase}${soonBadge}${just}${started}${other}${unsaved}${hold}${apt}${badge}${esc(r.mgmt_no||"（番号なし）")}${r.name?(" ／ "+esc(r.name)):""}</div>
+    return bandHtml + `<div class="draft${cls}${soon?" rc-soon":""}${consentOnly?" rc-consent":""}${unsaved?" rc-unsaved":""}"><div class="d-main" data-recopen="${idx}">
+      <div class="d-no">${dots}${phase}${soonBadge}${just}${started}${other}${unsaved}${hold}${waived}${apt}${badge}${esc(r.mgmt_no||"（番号なし）")}${r.name?(" ／ "+esc(r.name)):""}</div>
       <div class="d-sub">${sub}${ph}${fileNote}</div>${noteHtml}</div>${act}</div>`;
   }).join("");
   const sa = document.getElementById("rc-saveall");
@@ -5875,7 +6056,7 @@ function calRender(){
       const bg = calCtrColor(calCtrOf(e));
       /* マスは指1本ぶんの幅しかない。時刻と名前を並べるとどちらも途中で切れて読めないので、
          時刻があれば時刻だけ、無ければ名前だけを出す。誰なのかは下の一覧で読む。 */
-      const who = String(e.row.name || e.row.mgmt_no || "").trim();
+      const who = rcCalWho(e.row);
       const txt = CAL_KIND[e.kind].ch + (e.time ? e.time.replace(/^0/, "") : who);
       chips += '<span class="cal-chip" style="background:' + bg + ';color:' + calInk(bg) + ';" title="'
         + esc(CAL_KIND[e.kind].name + (e.time ? ("　" + e.time) : "") + "　" + who) + '">'
@@ -5919,7 +6100,7 @@ function calRender(){
       return '<button type="button" class="cal-ev" data-cal-open="' + esc(String(e.row.mgmt_no || "")) + '">'
         + '<span class="cal-ev-k" style="background:' + k.color + ';">' + k.ch + '</span>'
         + '<span class="cal-ev-m">'
-        +   '<span class="cal-ev-t">' + esc((e.time ? (e.time + "　") : "") + (e.row.name || e.row.mgmt_no || "（名前なし）")) + '</span>'
+        +   '<span class="cal-ev-t">' + esc((e.time ? (e.time + "　") : "") + (rcCalWho(e.row) || "（名前なし）")) + '</span>'
         +   '<span class="cal-ev-s">' + badges + sub + '</span>'
         + '</span></button>';
     }).join("");
@@ -6288,7 +6469,13 @@ function receptionSaveRows(src){
     apt_common:String(x.apt_common||""),
     apt_common_done:String(x.apt_common_done||""),
     apt_owner_name:String(x.apt_owner_name||""),
-    apt_owner_tel:String(x.apt_owner_tel||"")
+    apt_owner_tel:String(x.apt_owner_tel||""),
+    apt_owner_addr:String(x.apt_owner_addr||""),
+    apt_consent_at:String(x.apt_consent_at||""),      // 同意書を受け取った日（建物に1通）
+    // 連絡が取れないまま期限で切り替えた世帯（完了確認書はもらえていない）
+    compdoc_waived:String(x.compdoc_waived||""),
+    compdoc_waived_at:String(x.compdoc_waived_at||""),
+    compdoc_waived_note:String(x.compdoc_waived_note||"")
   })).filter(x=>x.mgmt_no||x.name||x.addr);
   _calCtrShortMap = null;   // 会社の顔ぶれが変わるので、短い名前は作り直す
   localStorage.setItem(LS_RECEPTION, JSON.stringify({ type:"antenna_reception_ledger",
