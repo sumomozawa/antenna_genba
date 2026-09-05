@@ -1073,7 +1073,7 @@ const GENBA_SCHEMA_VER = 1;
 const APP_NAME_SHORT = "現場入力";
 /* 版は「増えていくだけの通し番号」。メイン（積算・図面）と同じ番号体系で、
    番号が小さいほうが古い。 */
-const APP_VERSION = "133";
+const APP_VERSION = "134";
 function photoContentId(dataUri){
   if(!dataUri || typeof dataUri !== "string") return "";
   let a = 5381, b = 0;
@@ -5749,12 +5749,15 @@ async function openFromReception(row){
   if(row.time) m.chosho_time=String(row.time);   // 工事の時刻。写し忘れると空で書き出してPCの時刻を消す
   if(row.meet) m.chosho_meet_at=String(row.meet);
   if(row.status) m.chosho_status=String(row.status);
-  // PCの受付台帳で既に済んでいる工程（ビラ・工事・承諾書・完了書）を引き継ぐ。
-  // いつ済んだかは台帳に無いので、日付は空のまま（画面には「済」とだけ出る）。
+  // PCの受付台帳で既に済んでいる工程（下見・ビラ・工事・承諾書・完了書）を引き継ぐ。
+  // 下見だけは日時も台帳に載っている（PCが戸別ファイルから拾って返してくる）ので、それも入れる。
+  // 他はいつ済んだかが台帳に無いので、日付は空のまま（画面には「済」とだけ出る）。
   { const rf=receptionFlowOf(row);
-    ["flyer","work","consent","compdoc"].forEach(k=>{
+    ["survey","flyer","work","consent","compdoc"].forEach(k=>{
       if(!rf[k]) return;
-      const st=flowStep(k); if(st) m[st.flag]=true;
+      const st=flowStep(k); if(!st) return;
+      m[st.flag]=true;
+      if(k==="survey" && row.survey_at) m[st.at]=String(row.survey_at);
     }); }
   // 他の端末の保存ファイルから引き継いだ印も入れる（一覧に出ているとおりの状態で開く）。
   // その戸別のファイルは他の端末が持っているので、うっかり上書きしないよう控えておく。
@@ -6461,6 +6464,8 @@ function receptionSaveRows(src){
     contractor:String(x.contractor||""),
     hold:!!x.hold,                      // 保留（古い書き出しファイルには無いので false 扱い）
     // 工程（PCの受付台帳が持っている分）。古い書き出しファイルには無いので false 扱い。
+    survey:!!x.survey,                  // 下見済み（現場で押した印を、PCが戸別ファイルから拾って台帳に載せて返してくる）
+    survey_at:String(x.survey_at||""),  // 下見した日時
     flyer:!!x.flyer,                    // ビラ配布済み
     consent:!!x.consent,                // 承諾書（現場では「同意書」）受領済み
     compdoc:!!x.compdoc,                // 完了書（現場では「工事完了書」）受領済み
