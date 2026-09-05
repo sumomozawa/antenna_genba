@@ -1073,7 +1073,7 @@ const GENBA_SCHEMA_VER = 1;
 const APP_NAME_SHORT = "現場入力";
 /* 版は「増えていくだけの通し番号」。メイン（積算・図面）と同じ番号体系で、
    番号が小さいほうが古い。 */
-const APP_VERSION = "138";
+const APP_VERSION = "139";
 function photoContentId(dataUri){
   if(!dataUri || typeof dataUri !== "string") return "";
   let a = 5381, b = 0;
@@ -3633,6 +3633,10 @@ function saveSizeText(json, state){
 /* 書き出したファイルを読み返して、書いたはずの中身が入っているか確かめる。
    合っていれば "" を返す。合わないところがあれば、その説明を返す。 */
 async function saveVerify(fileHandle, state){
+  /* 読み返せない相手（このブラウザが getFile を持たない・共有先が返してくれない等）は
+     「確かめられない」だけで、失敗ではない。ここで失敗にすると、正しく保存できているのに
+     毎回「中身が合いません」と出てしまう。 */
+  if(!fileHandle || typeof fileHandle.getFile !== "function") return "";
   try{
     const f = await fileHandle.getFile();
     const o = JSON.parse(await f.text());
@@ -3739,10 +3743,11 @@ async function saveJsonRun(){
       const fh = await dir.getFileHandle(fname, { create:true });
       const w = await fh.createWritable();
       await w.write(blob); await w.close();
-      await markDraftSaved(); saveStateFile();
       /* ★書いたあと、そのファイルを読み返して確かめる★
          「保存したのに、PCで開いても中身が入っていない」を、その場で捕まえるため。
-         黙って成功したことにすると、現場では気づきようがない。 */
+         黙って成功したことにすると、現場では気づきようがない。
+         ★確かめてから💾を付けること★ 先に付けてしまうと、中身が合っていなくても
+         「PCへ渡した」扱いになり、「まとめて保存」の対象から外れて取り残される。 */
       const bad = await saveVerify(fh, state);
       if(bad){
         _lastSaveInfo = { title: "⚠ 保存できていないかもしれません",
@@ -3751,8 +3756,9 @@ async function saveJsonRun(){
              + "書いたあとに読み返したところ、中身が合いませんでした。\n" + bad
              + "\n\nもう一度「保存」を押すか、\n台帳の「まとめて保存」をお試しください。", warn: true };
         toast("⚠ 保存を確かめられませんでした：" + fname);
-        return true;
+        return true;                       // 💾は付けない＝「まとめて保存」に残す
       }
+      await markDraftSaved(); saveStateFile();
       _lastSaveInfo = { title: "保存しました", msg: "「" + (dir.name || "選んだフォルダ") + "」の中\n" + fname
         + "\n" + sizeTxt
         + "\n（書いたあと読み返して、中身が入っていることを確かめました）", warn: false };
@@ -3769,9 +3775,19 @@ async function saveJsonRun(){
       });
       const w=await handle.createWritable();
       await w.write(blob); await w.close();
-      await markDraftSaved(); saveStateFile();   // ← 書込成功後にだけ💾
+      // 覚えているフォルダへ書いたときと同じように、読み返して中身を確かめる
+      const bad2 = await saveVerify(handle, state);
+      if(bad2){
+        _lastSaveInfo = { title: "⚠ 保存できていないかもしれません",
+          msg: (handle.name || fname) + "\n\n" + sizeTxt + "\n\n"
+             + "書いたあとに読み返したところ、中身が合いませんでした。\n" + bad2
+             + "\n\nもう一度「保存」を押すか、\n台帳の「まとめて保存」をお試しください。", warn: true };
+        toast("⚠ 保存を確かめられませんでした：" + fname);
+        return true;                             // 💾は付けない＝「まとめて保存」に残す
+      }
+      await markDraftSaved(); saveStateFile();   // ← 読み返して確かめてから💾
       _lastSaveInfo = { title: "保存しました", msg: (handle.name || fname) + "\n" + sizeTxt
-        + "\n（保存先を選んで保存しました）", warn: false };
+        + "\n（書いたあと読み返して、中身が入っていることを確かめました）", warn: false };
       toast("保存しました："+fname);
       return true;
     }catch(e){ if(e && e.name==="AbortError") return false; /* 失敗時は下へフォールバック */ }
@@ -3883,7 +3899,9 @@ document.getElementById("import-file").addEventListener("change",e=>{
 // 写真を含む大きな下書きを確実に保存するため IndexedDB を使用（localStorageは約5MBで溢れるため）
 const IDB_NAME="field_input_db_v1", IDB_STORE="drafts", IDB_MAPS="maps";
 function idb(){ return new Promise((res,rej)=>{ const r=indexedDB.open(IDB_NAME,2); r.onupgradeneeded=()=>{ if(!r.result.objectStoreNames.contains(IDB_STORE)) r.result.createObjectStore(IDB_STORE,{keyPath:"key"}); if(!r.result.objectStoreNames.contains(IDB_MAPS)) r.result.createObjectStore(IDB_MAPS,{keyPath:"key"}); }; r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
-async function idbMapPut(rec){ const db=await idb(); return new Promise((res,rej)=>{ const tx=db.transaction(IDB_MAPS,"readwrite"); tx.objectStore(IDB_MAPS).put(rec); tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error); }); }
+/* 地図は画像なので大きい。取り消し(onabort)を受け取らないと、容量不足のときに
+   約束が宙づりになって「取り込み中」のまま止まる。 */
+async function idbMapPut(rec){ const db=await idb(); return new Promise((res,rej)=>{ const tx=db.transaction(IDB_MAPS,"readwrite"); tx.objectStore(IDB_MAPS).put(rec); tx.oncomplete=()=>res(); tx.onabort=()=>rej(tx.error||new Error("aborted")); tx.onerror=()=>rej(tx.error); }); }
 async function idbMapGet(key){ const db=await idb(); return new Promise((res,rej)=>{ const tx=db.transaction(IDB_MAPS,"readonly"); const rq=tx.objectStore(IDB_MAPS).get(key); rq.onsuccess=()=>res(rq.result||null); rq.onerror=()=>rej(rq.error); }); }
 /* 取引が取り消された(onabort)ときも必ず失敗として返すこと。
    返さないと約束が宙づりになり、persistDraft の catch まで届かないので、
@@ -4576,8 +4594,9 @@ async function saveAllDrafts(mode){
   nos.forEach(no => {
     const rec = byNo[draftNoKey(no)];
     if(!rec || !rec.model){ missing.push(no); return; }
+    const st = buildStateOf(rec.model);
     files.push({ no, key: rec.key, name: sanitizeFilename(draftNoKey(no) || no) + ".json",
-                 text: JSON.stringify(buildStateOf(rec.model)),
+                 text: JSON.stringify(st), state: st,   // state＝書いたあと読み返して確かめるため
                  other: (rec.model && rec.model._otherFile) || "" });
   });
   if(!files.length){ await uiAlert("まとめて保存できる戸別はありません。"); return; }
@@ -4644,6 +4663,11 @@ async function saveAllDrafts(mode){
         const w = await fh.createWritable();
         await w.write(new Blob([f.text], { type:"application/json" }));
         await w.close();
+        /* ★1件ずつと同じように、書いたあと読み返して確かめる★
+           確かめずに💾を付けると、中身が入っていないファイルでも
+           「PCへ渡した」扱いになり、次の「まとめて保存」からも外れて取り残される。 */
+        const bad = await saveVerify(fh, f.state);
+        if(bad){ console.warn("まとめて保存 読み返し不一致", f.name, bad); ngNos.push(f.no); continue; }
         okNos.push(f);
       }catch(e){ console.warn("まとめて保存 失敗", f.name, e); ngNos.push(f.no); }
     }
