@@ -1073,7 +1073,7 @@ const GENBA_SCHEMA_VER = 1;
 const APP_NAME_SHORT = "現場入力";
 /* 版は「増えていくだけの通し番号」。メイン（積算・図面）と同じ番号体系で、
    番号が小さいほうが古い。 */
-const APP_VERSION = "137";
+const APP_VERSION = "138";
 function photoContentId(dataUri){
   if(!dataUri || typeof dataUri !== "string") return "";
   let a = 5381, b = 0;
@@ -3885,15 +3885,18 @@ const IDB_NAME="field_input_db_v1", IDB_STORE="drafts", IDB_MAPS="maps";
 function idb(){ return new Promise((res,rej)=>{ const r=indexedDB.open(IDB_NAME,2); r.onupgradeneeded=()=>{ if(!r.result.objectStoreNames.contains(IDB_STORE)) r.result.createObjectStore(IDB_STORE,{keyPath:"key"}); if(!r.result.objectStoreNames.contains(IDB_MAPS)) r.result.createObjectStore(IDB_MAPS,{keyPath:"key"}); }; r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
 async function idbMapPut(rec){ const db=await idb(); return new Promise((res,rej)=>{ const tx=db.transaction(IDB_MAPS,"readwrite"); tx.objectStore(IDB_MAPS).put(rec); tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error); }); }
 async function idbMapGet(key){ const db=await idb(); return new Promise((res,rej)=>{ const tx=db.transaction(IDB_MAPS,"readonly"); const rq=tx.objectStore(IDB_MAPS).get(key); rq.onsuccess=()=>res(rq.result||null); rq.onerror=()=>rej(rq.error); }); }
+/* 取引が取り消された(onabort)ときも必ず失敗として返すこと。
+   返さないと約束が宙づりになり、persistDraft の catch まで届かないので、
+   容量不足の警告も出ないまま「保存したつもり」で終わってしまう。 */
 async function idbPut(rec){
-  _draftInfoStale = true; const db=await idb(); return new Promise((res,rej)=>{ const tx=db.transaction(IDB_STORE,"readwrite"); tx.objectStore(IDB_STORE).put(rec); tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error); }); }
+  _draftInfoStale = true; const db=await idb(); return new Promise((res,rej)=>{ const tx=db.transaction(IDB_STORE,"readwrite"); tx.objectStore(IDB_STORE).put(rec); tx.oncomplete=()=>res(); tx.onabort=()=>rej(tx.error||new Error("aborted")); tx.onerror=()=>rej(tx.error); }); }
 async function idbGet(key){ const db=await idb(); return new Promise((res,rej)=>{ const tx=db.transaction(IDB_STORE,"readonly"); const rq=tx.objectStore(IDB_STORE).get(key); rq.onsuccess=()=>res(rq.result||null); rq.onerror=()=>rej(rq.error); }); }
 async function idbGetAll(){ const db=await idb(); return new Promise((res,rej)=>{ const tx=db.transaction(IDB_STORE,"readonly"); const rq=tx.objectStore(IDB_STORE).getAll(); rq.onsuccess=()=>res(rq.result||[]); rq.onerror=()=>rej(rq.error); }); }
 /* 下書きを1件でも書き換えたら、控えの読み直しが要る、という印。
    ここに置けば書き換えを取りこぼさない。1件ずつ控えを直せた場合（draftInfoNote）は、
    その直後に元へ戻すので、読み直しは起きない。 */
 let _draftInfoStale = true;
-async function idbDel(key){ const db=await idb(); return new Promise((res,rej)=>{ const tx=db.transaction(IDB_STORE,"readwrite"); tx.objectStore(IDB_STORE).delete(key); tx.oncomplete=()=>res(); tx.onerror=()=>rej(tx.error); }); }
+async function idbDel(key){ const db=await idb(); return new Promise((res,rej)=>{ const tx=db.transaction(IDB_STORE,"readwrite"); tx.objectStore(IDB_STORE).delete(key); tx.oncomplete=()=>res(); tx.onabort=()=>rej(tx.error||new Error("aborted")); tx.onerror=()=>rej(tx.error); }); }
 
 let _persistTimer=null;
 function draftKey(){ return M.chosho_mgmt_no ? ("no:"+M.chosho_mgmt_no) : (M._draftId||(M._draftId="tmp:"+Date.now())); }
@@ -6506,9 +6509,21 @@ function receptionSaveRows(src){
     compdoc_waived_note:String(x.compdoc_waived_note||"")
   })).filter(x=>x.mgmt_no||x.name||x.addr);
   _calCtrShortMap = null;   // 会社の顔ぶれが変わるので、短い名前は作り直す
+  /* ★端末に入らなかったら黙って終わらせないこと★
+     受付台帳はこの端末の localStorage が唯一の置き場。空き容量が足りずに書けないと、
+     取り込んだつもりで一覧が空のまま（アプリを閉じると完全に消える）。
+     呼び出し側は失敗を握りつぶすので、ここで気付けるようにしておく。 */
+  try {
   localStorage.setItem(LS_RECEPTION, JSON.stringify({ type:"antenna_reception_ledger",
     importedAt:Date.now(), exportedAt:(src&&src.exportedAt)||"", project:(src&&src.project)||"",
     mainVersion:(src&&src.appVersion)||"", rows:norm }));
+  } catch(e){
+    console.warn("受付台帳の保存に失敗", e);
+    uiAlert("⚠ 受付台帳をこの端末に保存できませんでした（空き容量が足りないかもしれません）。\n\n"
+      + "このまま使うと、アプリを閉じたときに台帳が消えます。\n"
+      + "写真の多い下書きを「保存」でファイルに出してから消すと、空きが増えます。");
+    return 0;
+  }
   try{ renderReceptionSort(); }catch(_){}
   try{ renderReceptionList(document.getElementById("reception-search").value||""); }catch(_){}
   try{ renderAppVer(); }catch(_){}
