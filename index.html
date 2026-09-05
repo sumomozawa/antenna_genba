@@ -1073,7 +1073,7 @@ const GENBA_SCHEMA_VER = 1;
 const APP_NAME_SHORT = "現場入力";
 /* 版は「増えていくだけの通し番号」。メイン（積算・図面）と同じ番号体系で、
    番号が小さいほうが古い。 */
-const APP_VERSION = "134";
+const APP_VERSION = "136";
 function photoContentId(dataUri){
   if(!dataUri || typeof dataUri !== "string") return "";
   let a = 5381, b = 0;
@@ -2244,15 +2244,23 @@ function renderAptNote(){
   const rep1 = (i === 1);
   const common = String(A.apt_common || "") === "yes";
   const tel = String(A.apt_owner_tel || "").trim();
+  const atel = String(A.apt_agent_tel || "").trim();
   return '<div class="aptnote">'
     + '<div class="an-h">🏢 ' + esc(rcAptBldgName(A) || "アパート")
     +   '<span class="an-room">' + esc(rcAptUnitLabel(A)) + '</span>'
     +   '<span class="an-n">' + u + '世帯の ' + i + '世帯目' + (rep1 ? '（代表）' : '') + '</span>'
     + '</div>'
-    + '<div class="an-r"><span class="an-k">大家・不動産</span>'
+    + '<div class="an-r"><span class="an-k">大家</span>'
     +   esc(A.apt_owner_name || "―")
     +   (tel ? ' <a class="an-tel" href="tel:' + esc(tel.replace(/[^0-9+]/g,"")) + '">📞 ' + esc(tel) + '</a>' : '')
     + '</div>'
+    /* 不動産（管理会社）に任せている建物では、打合せの相手はこちら。居なければ出さない。 */
+    + ((String(A.apt_agent_name || "").trim() || atel)
+        ? ('<div class="an-r"><span class="an-k">不動産</span>'
+           + esc(A.apt_agent_name || "―")
+           + (atel ? ' <a class="an-tel" href="tel:' + esc(atel.replace(/[^0-9+]/g,"")) + '">📞 ' + esc(atel) + '</a>' : '')
+           + '</div>')
+        : '')
     + '<div class="an-r"><span class="an-k">共用部</span>'
     +   (common ? '<b>あり</b>（外のボックスに増幅器・電源部・分配器・ブレーカー）'
                : '<b>なし</b>（世帯ごとに電源部 BPS6W・小型漏電遮断機・コンセント）')
@@ -4254,7 +4262,7 @@ function rcAptFields(row){
   const o = {};
   ["apt_units","apt_idx","apt_bldg","apt_name","apt_room",
    "apt_common","apt_common_done","apt_owner_name","apt_owner_tel",
-   "apt_owner_addr","apt_consent_at",
+   "apt_owner_addr","apt_agent_name","apt_agent_tel","apt_agent_addr","apt_consent_at",
    "compdoc_waived","compdoc_waived_at","compdoc_waived_note"].forEach(k=>{
     const v = String((row && row[k]) || "").trim();
     if(v) o[k] = v;
@@ -4316,11 +4324,15 @@ function rcAptBandHtml(row, members){
   const consentAt = String((row && row.apt_consent_at) || "").trim();
   const owner = String((row && row.apt_owner_name) || "").trim();
   const tel = String((row && row.apt_owner_tel) || "").trim();
+  // 不動産（管理会社）が居る建物では、打合せの窓口はこちらになる
+  const agent = String((row && row.apt_agent_name) || "").trim();
+  const agentTel = String((row && row.apt_agent_tel) || "").trim();
   const common = String((row && row.apt_common) || "") === "yes";
   return '<div class="rc-aptband">🏢 ' + esc(rcAptBldgName(row) || "アパート")
     + '<span class="ab-n">' + n + (n !== units ? ' / ' + units : '') + '世帯</span>'
-    + '<span class="ab-sub">大家・不動産 ' + esc(owner || "―")
+    + '<span class="ab-sub">大家 ' + esc(owner || "―")
     +   (tel ? '（' + esc(tel) + '）' : '')
+    +   ((agent || agentTel) ? ('　／　不動産 ' + esc(agent || "―") + (agentTel ? '（' + esc(agentTel) + '）' : '')) : '')
     +   '　／　共用部' + (common ? 'あり' : 'なし')
     +   '　／　工事完了 ' + done + ' / ' + n + ' 世帯</span>'
     + '<span class="ab-sub ab-doc">同意書は大家から1通'
@@ -5632,6 +5644,7 @@ function renderReceptionList(q){
           + "　" + rcAptUnitLabel(r) + "（" + rcAptUnits(r) + "世帯の" + rcAptIdx(r) + "世帯目"
           + (aptRep ? "・代表" : "") + "）"
           + (r.apt_owner_name ? "\n大家： " + r.apt_owner_name : "")
+          + (r.apt_agent_name ? "\n不動産： " + r.apt_agent_name : "")
           + "\n同意書は大家に1つ（建物で共有）／工事完了書は世帯ごと")}">🏢${esc(rcAptUnitLabel(r))}</span>`
       : '';
     // いまどこまで進んだか。下・ビ・工・完 の4つ並び＋いちばん進んだ工程のバッジ。
@@ -6482,6 +6495,10 @@ function receptionSaveRows(src){
     apt_owner_name:String(x.apt_owner_name||""),
     apt_owner_tel:String(x.apt_owner_tel||""),
     apt_owner_addr:String(x.apt_owner_addr||""),
+    // 不動産（管理会社）。大家が管理を任せているときの窓口。居なければ空のまま。
+    apt_agent_name:String(x.apt_agent_name||""),
+    apt_agent_tel:String(x.apt_agent_tel||""),
+    apt_agent_addr:String(x.apt_agent_addr||""),
     apt_consent_at:String(x.apt_consent_at||""),      // 同意書を受け取った日（建物に1通）
     // 連絡が取れないまま期限で切り替えた世帯（完了確認書はもらえていない）
     compdoc_waived:String(x.compdoc_waived||""),
