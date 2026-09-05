@@ -1073,7 +1073,7 @@ const GENBA_SCHEMA_VER = 1;
 const APP_NAME_SHORT = "現場入力";
 /* 版は「増えていくだけの通し番号」。メイン（積算・図面）と同じ番号体系で、
    番号が小さいほうが古い。 */
-const APP_VERSION = "139";
+const APP_VERSION = "140";
 function photoContentId(dataUri){
   if(!dataUri || typeof dataUri !== "string") return "";
   let a = 5381, b = 0;
@@ -3566,6 +3566,7 @@ async function mapImportFile(file){
   if(p && p.type === "antenna_genba_set"){
     if(p.ledger && Array.isArray(p.ledger.rows) && p.ledger.rows.length){
       try { addedLedger = receptionSaveRows(p.ledger); } catch(_){}
+      if(addedLedger && !(await _rcLastKept)) await uiAlert(RC_KEEP_NG);
     }
     p = p.map || null;
     if(!p){
@@ -3898,7 +3899,18 @@ document.getElementById("import-file").addEventListener("change",e=>{
    ============================================================================ */
 // 写真を含む大きな下書きを確実に保存するため IndexedDB を使用（localStorageは約5MBで溢れるため）
 const IDB_NAME="field_input_db_v1", IDB_STORE="drafts", IDB_MAPS="maps";
-function idb(){ return new Promise((res,rej)=>{ const r=indexedDB.open(IDB_NAME,2); r.onupgradeneeded=()=>{ if(!r.result.objectStoreNames.contains(IDB_STORE)) r.result.createObjectStore(IDB_STORE,{keyPath:"key"}); if(!r.result.objectStoreNames.contains(IDB_MAPS)) r.result.createObjectStore(IDB_MAPS,{keyPath:"key"}); }; r.onsuccess=()=>res(r.result); r.onerror=()=>rej(r.error); }); }
+/* ★開くのは一度だけ★ これまでは保存のたびに新しく開いていた。別々の接続になると
+   ・同じ下書きへの書き込みの順番が保証されない（あとから書いたはずの方が負ける）
+   ・次に版を上げるとき、残った接続が邪魔をして開けなくなる（onblocked）
+   という壊れ方をする。開いた接続と、開いている最中の約束を覚えて使い回す。 */
+let _idbDb = null, _idbOpening = null;
+function idb(){
+  if(_idbDb) return Promise.resolve(_idbDb);
+  if(_idbOpening) return _idbOpening;
+  _idbOpening = new Promise((res,rej)=>{ const r=indexedDB.open(IDB_NAME,2); r.onupgradeneeded=()=>{ if(!r.result.objectStoreNames.contains(IDB_STORE)) r.result.createObjectStore(IDB_STORE,{keyPath:"key"}); if(!r.result.objectStoreNames.contains(IDB_MAPS)) r.result.createObjectStore(IDB_MAPS,{keyPath:"key"}); }; r.onsuccess=()=>{ _idbDb=r.result; _idbOpening=null; res(_idbDb); }; r.onerror=()=>{ _idbOpening=null; rej(r.error); }; });
+  _idbOpening.catch(()=>{});   // 誰も受け取らなかった失敗で警告が出ないように（本来の呼び出し側へは失敗のまま伝わる）
+  return _idbOpening;
+}
 /* 地図は画像なので大きい。取り消し(onabort)を受け取らないと、容量不足のときに
    約束が宙づりになって「取り込み中」のまま止まる。 */
 async function idbMapPut(rec){ const db=await idb(); return new Promise((res,rej)=>{ const tx=db.transaction(IDB_MAPS,"readwrite"); tx.objectStore(IDB_MAPS).put(rec); tx.oncomplete=()=>res(); tx.onabort=()=>rej(tx.error||new Error("aborted")); tx.onerror=()=>rej(tx.error); }); }
@@ -4729,26 +4741,68 @@ async function saveAllDrafts(mode){
    ・下書きが無い戸別は、この控えだけを持つ。あとで開いたときに印を引き継ぎ、
      「その戸別のファイルは他の端末のもの」も覚えておく（うっかり上書きしないため）。
    ============================================================================ */
-const LS_FLOWSHARE = "field_flow_shared_v1";   // 引き継いだ印の控え（文字だけ・localStorage）
+const LS_FLOWSHARE = "field_flow_shared_v1";   // 起動直後に出すための写し（本体ではない）
+const FS_KEY = "flowshare";                    // ★本体★ IndexedDB(maps) に置く
+/* 写しに置いてよい大きさの上限。localStorage は全部で約5MBしか無いので、
+   件数の多い台帳を写すと、それだけで他の小さな設定（並び順・保存先の名前など）まで
+   書けなくしてしまう。大きくなったものは本体（IndexedDB）だけに置く。 */
+const LS_COPY_MAX = 64 * 1024;
+/* 写しを取る。取れたら true。大きすぎるものは最初から取らない（＝false）。 */
+function lsCopy(key, str){
+  if(String(str).length > LS_COPY_MAX){ try{ localStorage.removeItem(key); }catch(_){} return false; }
+  try{ localStorage.setItem(key, str); return true; }catch(_){ return false; }
+}
 /* 控えの形
      { v:1, updatedAt:<ms>,
        rows:  { "<管理番号>": { flow:{survey…}, at:{survey:"<ISO>"…},
                                 editedAt:"<ISO>", from:"<ファイル名>", got:<ms> } },
        files: { "<ファイル名>": "<更新日時>:<大きさ>" } }   ← 前と同じファイルは開き直さない */
+function flowShareNorm(j){
+  if(j && j.rows && typeof j.rows === "object"){
+    if(!j.files || typeof j.files !== "object") j.files = {};
+    return j;
+  }
+  return null;
+}
 function flowShareLoad(){
-  try{
-    const j = JSON.parse(localStorage.getItem(LS_FLOWSHARE) || "null");
-    if(j && j.rows && typeof j.rows === "object"){
-      if(!j.files || typeof j.files !== "object") j.files = {};
-      return j;
-    }
-  }catch(_){}
-  return { v:1, updatedAt:0, rows:{}, files:{} };
+  try{ return flowShareNorm(JSON.parse(localStorage.getItem(LS_FLOWSHARE) || "null")) || { v:1, updatedAt:0, rows:{}, files:{} }; }
+  catch(_){ return { v:1, updatedAt:0, rows:{}, files:{} }; }
 }
 let _flowShare = flowShareLoad();
+/* 引き継いだ印を残す。★本体は IndexedDB★（localStorage は約5MBしか無く、
+   台数と件数が増えると先に破れる。破れても「空き容量を空けてください」としか
+   言えないので、利用者にできることが無い）。写しが取れなくても本体が入れば成功。 */
 function flowShareSave(){
-  try{ _flowShare.updatedAt = Date.now(); localStorage.setItem(LS_FLOWSHARE, JSON.stringify(_flowShare)); return true; }
-  catch(e){ console.warn("引き継いだ印を控えられませんでした", e); return false; }
+  _flowShare.updatedAt = Date.now();
+  const str = JSON.stringify(_flowShare);
+  const lsOk = lsCopy(LS_FLOWSHARE, str);   // 写しは取れなくてよい
+  let pr;
+  try{ pr = idbMapPut({ key: FS_KEY, data: JSON.parse(str), savedAt: Date.now() }); }
+  catch(e){ pr = Promise.reject(e); }
+  /* 返すのは「本当に端末に残せたか」の約束（Promise<boolean>）。決して reject しない＝
+     待たない呼び出しでも警告は出ない。残せたかを利用者に伝える場面だけ待てばよい。 */
+  return pr.then(() => true, e => {
+    console.warn("引き継いだ印を本体に残せませんでした", e);
+    return lsOk;                      // 写しには入った＝閉じても消えない
+  });
+}
+/* 起動時に本体（IndexedDB）を読む。写しより新しければ入れ替える。
+   本体がまだ無く写しだけある（前の版で使っていた）ときは、本体へ移す。 */
+async function flowShareLoadFromIdb(){
+  let rec = null;
+  try{ rec = await idbMapGet(FS_KEY); }catch(_){ rec = null; }
+  const body = rec && flowShareNorm(rec.data);
+  if(body){
+    if(!(_flowShare && _flowShare.updatedAt > (body.updatedAt || 0))){
+      _flowShare = body;
+      lsCopy(LS_FLOWSHARE, JSON.stringify(body));
+    }
+    return true;
+  }
+  if(_flowShare && Object.keys(_flowShare.rows || {}).length){
+    try{ await idbMapPut({ key: FS_KEY, data: JSON.parse(JSON.stringify(_flowShare)), savedAt: Date.now() }); }catch(_){}
+  }
+  return false;
 }
 /* その管理番号の控え（無ければ null） */
 function flowShareOf(no){
@@ -4947,9 +5001,10 @@ async function flowShareRead(list, fromDir){
     });
     if(!adds.length){
       flowShareItemsApply(items, byNo, openNo);
-      flowShareSave();
+      const kept0 = await flowShareSave();
       await flowShareAfter();
-      await uiAlert(items.length + "件の戸別ファイルを読みました。\n\n新しく付く印はありませんでした。");
+      await uiAlert(items.length + "件の戸別ファイルを読みました。\n\n新しく付く印はありませんでした。"
+        + (kept0 ? "" : "\n\n⚠ ただし、読んだ覚えをこの端末に残せませんでした。次に開くと、また同じファイルを読みます。"));
       return;
     }
     const listTxt = adds.slice(0, 8).map(a => "・" + a.no + "（" + a.names.join("・") + "）").join("\n")
@@ -4961,8 +5016,13 @@ async function flowShareRead(list, fromDir){
         + (mineCnt ? ("\n\n※ このうち " + mineCnt + "件は、この端末でも入力している戸別です。印だけを足します。") : "")))) return;
     // ---- 反映 ----
     const done = await flowShareItemsApply(items, byNo, openNo);
-    flowShareSave();
+    const kept = await flowShareSave();
     await flowShareAfter();
+    if(!kept){
+      await uiAlert("⚠ 引き継いだ印をこの端末に残せませんでした。\n\n"
+        + "画面には出ていますが、アプリを閉じると消えます。\n"
+        + "写真の多い下書きを「保存」でファイルに出してから消すと、置き場所が空きます。");
+    }
     toast(adds.length + "件の印を引き継ぎました"
       + (done.drafts ? ("（下書き " + done.drafts + "件に反映）") : ""));
   }catch(e){
@@ -5286,8 +5346,66 @@ document.getElementById("draft-modal").addEventListener("click",e=>{ if(e.target
 /* ============================================================================
    受付台帳（PCから取込）から選んで入力開始
    ============================================================================ */
-const LS_RECEPTION = "field_reception_ledger_v1"; // PCから取り込んだ受付台帳（テキストのみ・localStorage）
-function getReceptionData(){ try{ const j=JSON.parse(localStorage.getItem(LS_RECEPTION)||"null"); return (j&&Array.isArray(j.rows))?j:null; }catch(_){ return null; } }
+/* ============================================================================
+   受付台帳の置き場所
+   ★本体は IndexedDB★
+   localStorage は約5MBしか無く、いっぱいになっても利用者にできることが何も無い
+   （「空き容量を空けてください」と言われても、どこを空ければよいのか分からない）。
+   IndexedDB は桁違いに大きく、写真の入った下書きを何十件も置けている実績がある。
+   なので台帳の本体はそちらに置く。
+   localStorage には同じものを写しておくが、これは
+   「起動直後、IndexedDB を読み終える前でも台帳が出る」ためのおまけ。
+   写せなくても台帳は失われない。
+   ============================================================================ */
+const LS_RECEPTION = "field_reception_ledger_v1"; // 起動直後に出すための写し（本体ではない）
+const RC_KEY = "reception";                       // IndexedDB(maps) に置く本体
+let _rcData;                                      // 画面が使う控え（undefined＝まだ読んでいない）
+function getReceptionData(){
+  if(_rcData !== undefined) return _rcData;
+  try{ const j=JSON.parse(localStorage.getItem(LS_RECEPTION)||"null");
+       _rcData = (j&&Array.isArray(j.rows))?j:null; }
+  catch(_){ _rcData = null; }
+  return _rcData;
+}
+/* 台帳を残す。本体（IndexedDB）に入れば成功。
+   返すのは「本当に端末に残せたか」の約束（Promise<boolean>）。決して reject しない。
+   知らせるのは呼んだ側の役目（取り込みの結果と一緒に見せたいため）。 */
+function rcPersist(data){
+  /* ★まず画面が見るものを差し替える★ 写しが取れないほど大きい台帳や、
+     localStorage を使えない端末では、ここで入れ替えないと
+     「取り込んだのに一覧が空のまま」になる（次に開き直すまで出てこない）。 */
+  _rcData = data;
+  const lsOk = lsCopy(LS_RECEPTION, JSON.stringify(data));   // 写しが取れなくても本体は下で残す
+  let pr;
+  try{ pr = idbMapPut({ key: RC_KEY, data: data, savedAt: Date.now() }); }
+  catch(e){ pr = Promise.reject(e); }
+  return pr.then(() => true, e => {
+    console.warn("受付台帳の保存に失敗", e);
+    return lsOk;                     // 写しには入った＝閉じても消えない
+  });
+}
+/* 直前の rcPersist の結果。receptionSaveRows は件数を返す決まりなので、
+   「残せたか」はここから待つ。 */
+let _rcLastKept = Promise.resolve(true);
+const RC_KEEP_NG = "⚠ ただし、受付台帳をこの端末に残せませんでした。\n\n"
+  + "このまま使えますが、アプリを閉じると台帳が消えます。\n"
+  + "写真の多い下書きを「保存」でファイルに出してから消すと、置き場所が空きます。";
+/* 起動時に本体（IndexedDB）を読む。写し（localStorage）より新しければ入れ替える。
+   前の版で写しにしか入っていなかった台帳は、ここで本体へ移す。 */
+async function rcLoadFromIdb(){
+  let rec = null;
+  try{ rec = await idbMapGet(RC_KEY); }catch(_){ return; }
+  const cur = getReceptionData();
+  if(rec && rec.data && Array.isArray(rec.data.rows)){
+    const a = rec.data.importedAt | 0, b = (cur && cur.importedAt | 0) || 0;
+    if(!cur || a >= b){
+      _rcData = rec.data;
+      lsCopy(LS_RECEPTION, JSON.stringify(rec.data));
+    }
+  } else if(cur){
+    try{ await idbMapPut({ key: RC_KEY, data: cur, savedAt: Date.now() }); }catch(_){}
+  }
+}
 function getReceptionRows(){ const d=getReceptionData(); return d?d.rows:[]; }
 /* 画面下部の版表記（このアプリ＋取り込んだ受付台帳から分かるメイン側の版）。目立たせない。 */
 function renderAppVer(){
@@ -6533,21 +6651,11 @@ function receptionSaveRows(src){
     compdoc_waived_note:String(x.compdoc_waived_note||"")
   })).filter(x=>x.mgmt_no||x.name||x.addr);
   _calCtrShortMap = null;   // 会社の顔ぶれが変わるので、短い名前は作り直す
-  /* ★端末に入らなかったら黙って終わらせないこと★
-     受付台帳はこの端末の localStorage が唯一の置き場。空き容量が足りずに書けないと、
-     取り込んだつもりで一覧が空のまま（アプリを閉じると完全に消える）。
-     呼び出し側は失敗を握りつぶすので、ここで気付けるようにしておく。 */
-  try {
-  localStorage.setItem(LS_RECEPTION, JSON.stringify({ type:"antenna_reception_ledger",
+  /* 本体は IndexedDB（容量が大きい）。localStorage は起動直後に出すための写し。
+     どちらに入ったかは rcPersist が面倒を見る。 */
+  _rcLastKept = rcPersist({ type:"antenna_reception_ledger",
     importedAt:Date.now(), exportedAt:(src&&src.exportedAt)||"", project:(src&&src.project)||"",
-    mainVersion:(src&&src.appVersion)||"", rows:norm }));
-  } catch(e){
-    console.warn("受付台帳の保存に失敗", e);
-    uiAlert("⚠ 受付台帳をこの端末に保存できませんでした（空き容量が足りないかもしれません）。\n\n"
-      + "このまま使うと、アプリを閉じたときに台帳が消えます。\n"
-      + "写真の多い下書きを「保存」でファイルに出してから消すと、空きが増えます。");
-    return 0;
-  }
+    mainVersion:(src&&src.appVersion)||"", rows:norm });
   try{ renderReceptionSort(); }catch(_){}
   try{ renderReceptionList(document.getElementById("reception-search").value||""); }catch(_){}
   try{ renderAppVer(); }catch(_){}
@@ -6582,13 +6690,15 @@ document.getElementById("reception-file").addEventListener("change",e=>{
       let n;
       try{ n = receptionSaveRows({ rows, project, exportedAt, appVersion:mainVersion }); }
       catch(err){ await uiAlert("取り込んだ台帳の保存に失敗しました（空き容量不足かも）："+err.message); return; }
+      const kept = await _rcLastKept;
       const diff = receptionDiffCount(beforeRows, getReceptionRows());
       let applied = 0;
       try{ applied = await receptionApplyToDrafts(); }catch(e){ console.warn("下書きへの反映に失敗", e); }
       try{ renderReceptionList(document.getElementById("reception-search").value||""); }catch(_){}
       // 小さなトーストだと見落とすので、何がどう変わったかを出して確かめられるようにする
       const when = rcWhenText(exportedAt);
-      await uiAlert("✅ 受付台帳を取り込みました（"+n+"件）"
+      await uiAlert((kept ? "✅ 受付台帳を取り込みました（" : "受付台帳を読み込みました（")+n+"件）"
+        + (kept ? "" : "\n\n" + RC_KEEP_NG + "\n")
         + (project ? ("\n物件："+project) : "")
         + (when ? ("\nPCで書き出した日時："+when) : "")
         + (gotMap ? ("\n地図も取り込みました（建物 "+gotMap+"件）") : "")
@@ -6687,6 +6797,18 @@ window.addEventListener("pagehide", flushPersist);
     }
   }catch(e){ console.warn("boot draft load failed",e); }
   try{ await mapPackLoad(); }catch(e){ console.warn("boot map load failed",e); }
+  /* 引き継いだ印の本体（IndexedDB）を読む。受付台帳を描く前に済ませる。 */
+  try{
+    await flowShareLoadFromIdb();
+    try{ renderFlowShareNote(); }catch(_){}
+  }catch(e){ console.warn("boot flowshare load failed",e); }
+  /* 受付台帳の本体（IndexedDB）を読む。写しより新しければ入れ替えて描き直す。 */
+  try{
+    await rcLoadFromIdb();
+    try{ renderReceptionSort(); }catch(_){}
+    try{ renderReceptionList(document.getElementById("reception-search").value||""); }catch(_){}
+    try{ renderAppVer(); }catch(_){}
+  }catch(e){ console.warn("boot reception load failed",e); }
   // 保存先フォルダの手がかりを先に読んでおく（「他の端末の保存を読み込む」を押した時に
   // await を挟まずに済ませるため。スマホは覚えられないので null のまま）
   try{ await saveDirGet(); }catch(e){ console.warn("boot savedir load failed",e); }
