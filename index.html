@@ -1073,7 +1073,7 @@ const GENBA_SCHEMA_VER = 1;
 const APP_NAME_SHORT = "現場入力";
 /* 版は「増えていくだけの通し番号」。メイン（積算・図面）と同じ番号体系で、
    番号が小さいほうが古い。 */
-const APP_VERSION = "141";
+const APP_VERSION = "142";
 function photoContentId(dataUri){
   if(!dataUri || typeof dataUri !== "string") return "";
   let a = 5381, b = 0;
@@ -4280,10 +4280,13 @@ function buildStateOf(model){
 
    控えが無い古い下書きでは、台帳が空の項目では上書きしない。ただし工事予定日だけは
    空も反映する（前の版が勝手に入れてしまった日付を、PC側から消せるようにするため）。 */
-/* アパート（集合住宅）の受付台帳の行かどうか。2〜12世帯のときだけ。 */
+/* アパート（集合住宅）の受付台帳の行かどうか。2〜18世帯のときだけ。
+   ★上限はメイン（APT_MAX_UNITS）と同じにすること★ ここが小さいと、PCで18世帯にした建物が
+   現場では帯にまとまらず、ばらばらの戸建てに見える。 */
+const RC_APT_MAX_UNITS = 18;
 function rcAptUnits(r){
   const n = parseInt((r && r.apt_units) || "", 10);
-  return (n >= 2 && n <= 12) ? n : 0;
+  return (n >= 2 && n <= RC_APT_MAX_UNITS) ? n : 0;
 }
 function rcIsApt(r){ return rcAptUnits(r) > 0; }
 function rcAptIdx(r){
