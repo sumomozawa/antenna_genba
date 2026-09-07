@@ -1073,7 +1073,7 @@ const GENBA_SCHEMA_VER = 1;
 const APP_NAME_SHORT = "現場入力";
 /* 版は「増えていくだけの通し番号」。メイン（積算・図面）と同じ番号体系で、
    番号が小さいほうが古い。 */
-const APP_VERSION = "140";
+const APP_VERSION = "141";
 function photoContentId(dataUri){
   if(!dataUri || typeof dataUri !== "string") return "";
   let a = 5381, b = 0;
@@ -1135,6 +1135,17 @@ function freshModel(){
 }
 function todayStr(){
   const d=new Date(); const p=n=>String(n).padStart(2,"0");
+  return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate());
+}
+/* ★日時の表示は、必ずこの端末の時刻で★
+   保存してある日時は世界時のISO文字列。文字のまま日付を切り出すと、
+   朝9時より前は前の日になる。Date に直してから読む。
+   「2026-09-04」のように時刻の無い日付は、そのまま返す。 */
+function fmtLocalYmd(v){
+  const str=String(v==null?"":v).trim(); if(!str) return "";
+  if(/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+  const d=new Date(str); if(isNaN(d.getTime())) return str.slice(0,10);
+  const p=n=>String(n).padStart(2,"0");
   return d.getFullYear()+"-"+p(d.getMonth()+1)+"-"+p(d.getDate());
 }
 // tv_count に合わせて各室配列を伸縮（既定部屋名で埋める）
@@ -5679,7 +5690,7 @@ function renderReceptionList(q){
   if(meta){
     if(data){
       meta.style.display="";
-      const dt=data.exportedAt?String(data.exportedAt).slice(0,10):"";
+      const dt=data.exportedAt?fmtLocalYmd(data.exportedAt):"";
       const held=rows.filter(r=>r&&r.hold).length;
       meta.textContent="取込済み："+rows.length+"件"+(held?("（保留 "+held+"）"):"")+(data.project?("／物件："+data.project):"")+(dt?("／書出 "+dt):"");
     }
