@@ -1086,7 +1086,7 @@ const GENBA_SCHEMA_VER = 1;
 const APP_NAME_SHORT = "現場入力";
 /* 版は「増えていくだけの通し番号」。メイン（積算・図面）と同じ番号体系で、
    番号が小さいほうが古い。 */
-const APP_VERSION = "149";
+const APP_VERSION = "150";
 function photoContentId(dataUri){
   if(!dataUri || typeof dataUri !== "string") return "";
   let a = 5381, b = 0;
@@ -2824,17 +2824,32 @@ async function flowToggle(key){
 }
 
 /* ============================================================================
-   5.5) 電波測定 CSV取込（LCV4A）
+   5.5) 電波測定 CSV取込（LCV4A / LCT5 / LCT6）
    測定表1ブロック目・UHF行のみを対象に、フォームのCH構成(measurements.channels)へ
    dB/MER/BERを流し込む。CH構成そのものは変更しない（未対応CHは通知のみ）。
+   ★測定器で見出しの言い方が違う★
+     LCV4A … 「チャンネル,バンド,LEVEL(dBμV),MER,BER」
+     LCT5/6 … 「チャンネル,測定放送,周波数(MHz),LEVEL(dBuV),MER(dB),BER,受信判定」
+   どちらも読めるように、見出しは「その言葉で始まるか」で見つける。
+   また LCT は測り切れないとき「>32」のように書く。数字だけを取り出して入れ、
+   何件そうだったかを最後に知らせる（黙って 32 と入れない）。
    ============================================================================ */
 function _han(s){ return String(s==null?"":s)
   .replace(/[０-９．＋]/g,ch=>String.fromCharCode(ch.charCodeAt(0)-0xFEE0))
   .replace(/[−–—－]/g,"-"); }
-function parseMeasNum(s){ s=_han(s).trim();
-  if(s===""||/^-+$/.test(s)||s==="---") return ""; const n=parseFloat(s); return isNaN(n)?"":n; }
-function parseMeasBer(s){ s=_han(s).trim();
-  if(s===""||/^-+$/.test(s)||s==="---") return ""; const n=parseFloat(s); return isNaN(n)?"":n; }
+/* 「>32」「≧32」「<20」のような「以上・以下」の書き方から数字を取り出す。
+   取り出せたら { v:32, over:true }、ふつうの数字なら { v:32, over:false }、空なら { v:"", over:false }。
+   測定器が測り切れなかった印なので、数字にして入れつつ「そうだった件数」を数えて必ず知らせる。 */
+function parseMeasCell(s){
+  s = _han(s).trim();
+  if(s === "" || /^-+$/.test(s) || s === "---") return { v:"", over:false };
+  const m = s.match(/^[><≧≦≥≤=]+\s*(-?\d+(?:\.\d+)?(?:[eE][-+]?\d+)?)/);
+  if(m){ const n = parseFloat(m[1]); return isNaN(n) ? { v:"", over:false } : { v:n, over:true }; }
+  const n = parseFloat(s);
+  return isNaN(n) ? { v:"", over:false } : { v:n, over:false };
+}
+function parseMeasNum(s){ return parseMeasCell(s).v; }
+function parseMeasBer(s){ return parseMeasCell(s).v; }
 function readFileAsArrayBuffer(file){ return new Promise((res,rej)=>{
   const r=new FileReader(); r.onload=()=>res(r.result); r.onerror=()=>rej(r.error);
   r.readAsArrayBuffer(file); }); }
@@ -2853,15 +2868,17 @@ function parseLcv4aCsv(text){
     const c=lines[i].split(",").map(s=>s.trim());
     if(c.some(x=>/チャンネル/.test(x)) && c.some(x=>/LEVEL|dBuV/i.test(x))){ H=i; head=c; break; }
   }
-  if(H<0) throw new Error("測定表のヘッダーが見つかりません（LCV4AのCSVですか？）");
+  if(H<0) throw new Error("測定表のヘッダーが見つかりません（LCV4A・LCT5・LCT6 のCSVですか？）");
   const find=pred=>{ for(let j=0;j<head.length;j++) if(pred(head[j])) return j; return -1; };
   const chCol   = find(x=>/チャンネル/.test(x));
-  const bandCol = find(x=>/バンド/.test(x));
-  const levelCol= find(x=>/LEVEL|dBuV/i.test(x) && !/下限|上限/.test(x));
-  const merCol  = find(x=> x==="MER");
-  const berCol  = find(x=> x==="BER");
+  /* 放送の種類の欄。LCV4Aは「バンド」、LCT5/6は「測定放送」。 */
+  const bandCol = find(x=>/バンド|測定放送/.test(x));
+  const levelCol= find(x=>/LEVEL|dB[uμ]V/i.test(x) && !/下限|上限/.test(x));
+  /* LCT5/6 は「MER(dB)」のように単位が付く。ぴったり一致では見つからないので、始まりで見る。 */
+  const merCol  = find(x=> /^MER/i.test(x));
+  const berCol  = find(x=> /^BER/i.test(x));
   if(chCol<0||levelCol<0) throw new Error("チャンネル列またはLEVEL列が見つかりません");
-  const rows=[];
+  const rows=[]; let over=0;
   for(let i=H+1;i<lines.length;i++){
     const raw=lines[i];
     if(raw.trim()==="") break;
@@ -2869,12 +2886,13 @@ function parseLcv4aCsv(text){
     if((c[0]||"").startsWith("#")) break;
     const ch=parseInt(_han(c[chCol]||""),10);
     if(!Number.isFinite(ch)) continue;
-    rows.push({ band: bandCol>=0?(c[bandCol]||""):"", ch,
-      db: parseMeasNum(c[levelCol]||""),
-      mer: merCol>=0 ? parseMeasNum(c[merCol]||"") : "",
-      ber: berCol>=0 ? parseMeasBer(c[berCol]||"") : "" });
+    const db  = parseMeasCell(c[levelCol]||"");
+    const mer = merCol>=0 ? parseMeasCell(c[merCol]||"") : { v:"", over:false };
+    const ber = berCol>=0 ? parseMeasCell(c[berCol]||"") : { v:"", over:false };
+    if(db.over || mer.over || ber.over) over++;
+    rows.push({ band: bandCol>=0?(c[bandCol]||""):"", ch, db: db.v, mer: mer.v, ber: ber.v });
   }
-  return { rows, hasMer:merCol>=0, hasBer:berCol>=0 };
+  return { rows, hasMer:merCol>=0, hasBer:berCol>=0, over:over };
 }
 async function handleMeasCsv(file, cat){
   const labelMap={antenna:"① アンテナ出力",amplifier:"② 増幅器出力",terminal:"③ 宅内末端"};
@@ -2901,6 +2919,14 @@ async function handleMeasCsv(file, cat){
   else { await persistModel(model); }           // 別戸別へ切替済み→読込元を直接確定保存（混入/喪失防止）
   toast(labelMap[cat]+"に "+applyList.length+"CH取込（未対応CH: "
     +(unmatched.length?unmatched.join(","):"なし")+"）");
+  /* 「>32」のように測り切れなかった行は、その数字で入れている。黙って入れない。 */
+  if(parsed.over){
+    await uiAlert("取り込みました。\n\n"
+      + "ただし " + parsed.over + " 行は「>32」のように\n"
+      + "「その値より上（下）」という書き方でした。\n\n"
+      + "その数字（例: 32）で入れてあります。\n"
+      + "紙に出すときは、必要なら手で直してください。");
+  }
 }
 document.getElementById("csv-input").addEventListener("change",async e=>{
   const f=e.target.files[0]; e.target.value="";
