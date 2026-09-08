@@ -1086,7 +1086,7 @@ const GENBA_SCHEMA_VER = 1;
 const APP_NAME_SHORT = "現場入力";
 /* 版は「増えていくだけの通し番号」。メイン（積算・図面）と同じ番号体系で、
    番号が小さいほうが古い。 */
-const APP_VERSION = "148";
+const APP_VERSION = "149";
 function photoContentId(dataUri){
   if(!dataUri || typeof dataUri !== "string") return "";
   let a = 5381, b = 0;
@@ -3829,6 +3829,7 @@ async function saveJsonRun(){
         + "\n\n中身はきちんと入っています（消えていません）。\n\n"
         + "渡した先が、PCで読み込むフォルダなら\nそのままPCで読めます。\n"
         + "ちがう場所へ渡したときは、そのフォルダへ移してください。"
+        + saveHintLine()
         + shareRenameNote(sr.as), warn: true };
       toast("共有で渡しました："+(sr.name[0] || fname));
       return true;
@@ -3843,7 +3844,8 @@ async function saveJsonRun(){
   _lastSaveInfo = { title: "ダウンロードに入れました", msg: fname + "\n" + sizeTxt
     + "\n\n中身はきちんと入っています（消えていません）。\n\n"
     + "この端末の「ダウンロード」に入りました。\n"
-    + "PCで読み込むフォルダとちがう場合は、\nそのフォルダへ移してください。", warn: true };
+    + "PCで読み込むフォルダとちがう場合は、\nそのフォルダへ移してください。"
+    + saveHintLine(), warn: true };
   toast("ダウンロードに入れました："+fname);
   return true;
 }
@@ -4102,7 +4104,10 @@ function renderSaveBar(){
   const destHtml = dest
     ? '<button type="button" class="sb-dest" id="sb-dest" title="「保存」を押すと、このフォルダの中の 管理番号.json を上書きします。押すと保存先を選び直せます">📁 '
       + esc(dest) + ' <span class="sb-dest-x">変更</span></button>'
-    : '<button type="button" class="sb-dest none" id="sb-dest" title="保存先のフォルダを覚えていません。押すとここで選べます">📁 保存先 未設定 <span class="sb-dest-x">選ぶ</span></button>';
+    : (saveHintName()
+      ? '<button type="button" class="sb-dest" id="sb-dest" title="この端末ではフォルダを掴めません。保存のたびに、この名前のフォルダに入れるよう出します。押すと変えられます">📁 '
+        + esc(saveHintName()) + ' に入れる <span class="sb-dest-x">変更</span></button>'
+      : '<button type="button" class="sb-dest none" id="sb-dest" title="保存先のフォルダを覚えていません。押すとここで選べます">📁 保存先 未設定 <span class="sb-dest-x">選ぶ</span></button>');
   el.innerHTML='<span class="sb-dot"></span><span class="sb-main">'+esc(main)+'</span>'
     + destHtml
     + (file ? '<span class="sb-file'+((saveStale()||!_save.fileAt)?" attn":"")+'">'+esc(file)+'</span>' : "");
@@ -4114,9 +4119,24 @@ function renderSaveBar(){
    先に確認を出すと、その間に「押した直後」の権利が切れて窓が開かなくなる。 */
 async function saveDirChange(){
   if(!window.showDirectoryPicker){
-    await uiAlert("この端末では保存先のフォルダを選べません。\n\n"
-      + "「保存」を押したときに、共有またはダウンロードで書き出します。\n"
-      + "渡した先が、PCで読み込むフォルダになるようにしてください。");
+    /* フォルダは掴めないが、入れる場所の名前だけは覚えておける。
+       保存のたびに名前を出せば、端末の保存画面で選ぶ場所を間違えにくくなる。 */
+    const now = saveHintName();
+    const v = window.prompt("この端末では保存先のフォルダを選べません。\n"
+      + "「保存」を押すと、共有またはダウンロードで書き出します。\n\n"
+      + "入れる場所の名前を覚えておけます（保存のたびに出します）。\n"
+      + "例： リスト", now);
+    if(v === null) return;                       // やめた
+    saveHintSet(v);
+    renderSaveBar();
+    await uiAlert(saveHintName()
+      ? ("覚えました。保存のたびに「" + saveHintName() + "」と出します。\n\n"
+         + "端末の保存画面で、そのフォルダを選んでください。")
+      /* ★押して何も起きない、を作らない★ 名前を消したときも、この端末では何が起きるのかを必ず言う。 */
+      : ("この端末では保存先のフォルダを選べません。\n"
+         + "「保存」を押すと、共有またはダウンロードで書き出します。\n\n"
+         + "入れる場所の名前は覚えていません。\n"
+         + "渡した先が、PCで読み込むフォルダになるようにしてください。"));
     return;
   }
   let dir = null;
@@ -4127,6 +4147,20 @@ async function saveDirChange(){
     await uiAlert("そのフォルダへ書き込む許可が取れませんでした。\n\nもう一度お試しください。");
     return;
   }
+  /* 工事フォルダの直下を選んでしまいがち（受付台帳がそこにあるため）。
+     中のフォルダの方に戸別ファイルが多ければ、そちらを勧める。 */
+  try{
+    const better = await saveDirSuggestInner(dir);
+    if(better && await uiConfirm("選んだ「" + dir.name + "」には戸別ファイルが " + better.here + " 件、\n"
+        + "その中の「" + better.name + "」には " + better.n + " 件あります。\n\n"
+        + "「" + better.name + "」の方に入れますか？")){
+      dir = better.dir;
+      if(!(await saveDirOk(dir, true))){
+        await uiAlert("「" + better.name + "」へ書き込む許可が取れませんでした。\n\nもう一度お試しください。");
+        return;
+      }
+    }
+  }catch(_){ /* 数えられなくても保存先は選べる */ }
   await saveDirSet(dir);
   renderSaveBar();
   toast("保存先を「" + (dir.name || "選んだフォルダ") + "」にしました");
@@ -4242,6 +4276,11 @@ async function markDraftSaved(){
    ============================================================================ */
 const SAVEDIR_KEY  = "savedir";                   // IndexedDB(maps)に置くフォルダの手がかり
 const LS_SAVEDIR   = "field_savedir_name_v1";     // 画面に出す用のフォルダ名
+/* ★入れる場所の名前★ iPad・Android は保存のたびに端末の保存画面が出て、その既定は
+   「最後に使った場所」になる。受付台帳（現場用_….json）を工事フォルダの直下から選ぶと、
+   そのあとの戸別の保存も直下に落ち、本当は「リスト」に入れたいのに散らばってしまう。
+   フォルダを選べない端末では、せめて入れる場所の名前を覚えておき、保存のたびに名前を出す。 */
+const LS_SAVEHINT  = "field_savedir_hint_v1";
 // この画面が覚えているフォルダ。IndexedDBに残せない端末でも、1回選べばその後は聞かない。
 let _saveDir = null;
 async function saveDirGet(){
@@ -4261,7 +4300,45 @@ function saveDirName(){
   if(_saveDir && _saveDir.name) return _saveDir.name;
   try{ return localStorage.getItem(LS_SAVEDIR) || ""; }catch(_){ return ""; }
 }
+/* 入れる場所の名前（フォルダを掴めない端末で、保存のたびに出す目印） */
+function saveHintName(){
+  try{ return (localStorage.getItem(LS_SAVEHINT) || "").trim(); }catch(_){ return ""; }
+}
+function saveHintSet(v){
+  try{ localStorage.setItem(LS_SAVEHINT, String(v == null ? "" : v).trim()); }catch(_){}
+}
+/* 保存のあとの案内に添える一文（名前を覚えていなければ空） */
+function saveHintLine(){
+  const n = saveHintName();
+  return n ? ("\n\n★入れる場所： 「" + n + "」フォルダ★\nここに入れないと、PCが読み込めません。") : "";
+}
 /* フォルダへ書く許可があるか。ask=true なら聞き直す（許可はブラウザを閉じると切れることがある） */
+/* そのフォルダの直下にある戸別ファイル（管理番号.json）の数をざっと数える（多いフォルダで止める） */
+async function saveDirCountCases(dir, cap){
+  let n = 0;
+  try{
+    for await (const [name, h] of dir.entries()){
+      if(h && h.kind === "file" && /\.json$/i.test(name) && !/^現場用|^受付台帳/.test(name)) n++;
+      if(n >= (cap || 200)) break;
+    }
+  }catch(_){}
+  return n;
+}
+/* 選んだフォルダより、その中のフォルダの方に戸別ファイルが多ければ、それを返す */
+async function saveDirSuggestInner(dir){
+  const here = await saveDirCountCases(dir, 200);
+  let best = null, looked = 0;
+  try{
+    for await (const [name, h] of dir.entries()){
+      if(!h || h.kind !== "directory") continue;
+      if(/^_/.test(name)) continue;                 // 控えなどの作業用フォルダは勧めない
+      if(++looked > 20) break;
+      const n = await saveDirCountCases(h, 200);
+      if(n > here && (!best || n > best.n)) best = { dir: h, name: name, n: n, here: here };
+    }
+  }catch(_){}
+  return best;
+}
 async function saveDirOk(h, ask){
   if(!h || !h.queryPermission) return false;
   try{
