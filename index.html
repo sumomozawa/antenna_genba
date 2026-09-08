@@ -671,6 +671,18 @@
   .rc-badge.soon{background:#0277bd;}
   /* 受付台帳一覧の「いまの工程で絞る」 */
   /* 6つ全部が見えるように折り返す（横スクロールだと隠れた分に気付けない） */
+  /* 受付台帳を「施工会社」で絞る一列。カレンダーの会社チップと同じ色・同じ頭文字を使う。
+     3社が同じ台帳を見るので、自分の会社の戸別だけをすぐ出せるようにする。 */
+  .rc-ctr{display:flex; flex-wrap:wrap; gap:5px; padding:0 0 8px;}
+  .rc-ctr button{flex:none; border:1px solid #cdd3da; border-radius:999px; background:#fff; color:#37474f;
+    padding:5px 11px; min-height:34px; font-size:12.5px; font-weight:700; font-family:inherit;}
+  .rc-ctr button:active{transform:scale(.93);}
+  .rc-ctr button.on{border-color:transparent; color:#fff;}
+  .rc-ctr .rc-ctr-dot{display:inline-block; width:9px; height:9px; border-radius:50%; margin-right:5px;
+    vertical-align:-1px;}
+  /* 行の左端に会社の色。並べ替えなくても、どの会社の戸別かが一目で分かる。
+     会社が1社しか出てこない端末では付けない（意味の無い色になるため）。 */
+  .draft.rc-ctrbar{padding-left:11px; box-shadow:inset 5px 0 0 var(--rc-ctr, transparent);}
   .rc-filter{display:flex; flex-wrap:wrap; gap:6px; padding:2px 0 10px;}
   .rc-filter button{flex:none; min-height:38px; padding:0 12px; border-radius:19px; font-family:inherit;
     border:1.5px solid #cdd3da; background:#fff; color:#5b6673; font-weight:700; font-size:13px;
@@ -922,7 +934,8 @@
     <span class="sub">※ 「まとめて保存」などの説明は、一覧の上にそれぞれ出ます。地図の無い <b class="fname">受付台帳_….json</b> でも取り込めます。</span></div>
     <button id="btn-reception-import" style="width:100%; padding:15px; border:0; border-radius:11px; background:#00695c; color:#fff; font-weight:700; font-size:15px; margin-bottom:10px;">現場用_….json を選ぶ</button>
     <input type="file" id="reception-file" accept=".json,application/json,*/*" style="display:none;">
-    <input type="search" id="reception-search" placeholder="管理番号・氏名・住所で絞り込み" style="width:100%; box-sizing:border-box; padding:11px 12px; border:1px solid #cdd3da; border-radius:10px; font-size:15px; margin-bottom:10px;">
+    <input type="search" id="reception-search" placeholder="管理番号・氏名・住所・会社で絞り込み" style="width:100%; box-sizing:border-box; padding:11px 12px; border:1px solid #cdd3da; border-radius:10px; font-size:15px; margin-bottom:10px;">
+    <div class="rc-ctr" id="reception-ctr"></div>
     <div class="rc-filter" id="reception-filter"></div>
     <div class="rc-sort" id="reception-sort-bar" style="display:none;">
       <span>並び</span>
@@ -1073,7 +1086,7 @@ const GENBA_SCHEMA_VER = 1;
 const APP_NAME_SHORT = "現場入力";
 /* 版は「増えていくだけの通し番号」。メイン（積算・図面）と同じ番号体系で、
    番号が小さいほうが古い。 */
-const APP_VERSION = "146";
+const APP_VERSION = "147";
 function photoContentId(dataUri){
   if(!dataUri || typeof dataUri !== "string") return "";
   let a = 5381, b = 0;
@@ -5500,6 +5513,7 @@ function renderAppVer(){
 function openReceptionModal(){
   document.getElementById("reception-modal").classList.add("open");
   const s=document.getElementById("reception-search"); if(s) s.value="";
+  renderReceptionCtr();                          // 会社の絞り込みチップ（この端末の会社を覚えている）
   renderReceptionFilter();                       // 工程の絞り込みボタン
   renderReceptionSort();                         // 並び替えの一列
   renderReceptionList("");                       // まず今ある情報ですぐ出す
@@ -5632,6 +5646,56 @@ function isUntouchedHere(info){
 /* ---- 一覧を「いまの工程」で絞る ----
    下見の日／ビラ配りの日／工事の日…と、その日にやる戸別だけを出せるようにする。
    選んだ絞り込みはこの端末に覚えておく（次に開いた時も同じ絞り込みで出る）。 */
+/* ================= 受付台帳を「施工会社」で絞る =================
+   3社が同じ受付台帳を取り込んで使うので、自分の会社の戸別を探すのに時間がかかっていた。
+   選んだ会社はこの端末に覚える（次に開いたときも同じ会社で出る）。「すべて」でいつでも戻せる。
+   覚え書きはカレンダーの会社の絞り込みと共通＝「この端末の会社」は1つ、という考え方。
+   ★絞り込みで隠れている件数は必ず一覧の上に出す（消えたと思わせない）★ */
+const LS_RCCTR = "field_reception_ctr_v1";
+let _rcCtr = (()=>{ try{ const v = localStorage.getItem(LS_RCCTR); return (v == null) ? "all" : v; }
+                    catch(_){ return "all"; } })();
+function rcCtrOf(r){ return String((r && r.contractor) || "").trim(); }
+/* 会社を選び直す。カレンダー側の絞り込みも同じ会社にそろえる。 */
+function rcCtrSet(v){
+  _rcCtr = String(v == null ? "all" : v);
+  try{ localStorage.setItem(LS_RCCTR, _rcCtr); }catch(_){}
+  try{ _calCtr = _rcCtr; }catch(_){}
+}
+/* いま選んでいる会社の呼び名（一覧の上の案内に出す） */
+function rcCtrLabel(){
+  if(_rcCtr === "all") return "";
+  return _rcCtr ? (calCtrShort(_rcCtr) + "（会社）") : "会社なし";
+}
+/* 台帳に2社以上出てくるか。1社しか無い端末では、チップも行の色も出さない。 */
+function rcCtrMany(){ return calCtrOrder().length >= 2; }
+/* 会社の一列。カレンダーの chips と同じ見た目・同じ色にそろえる。 */
+function renderReceptionCtr(){
+  const host = document.getElementById("reception-ctr"); if(!host) return;
+  const rows = getReceptionRows();
+  if(!rows.length || !rcCtrMany()){ host.innerHTML = ""; host.style.display = "none"; return; }
+  host.style.display = "";
+  const btn = (key, label, color, n) => {
+    const on = (_rcCtr === key);
+    const style = on && color ? (' style="background:' + color + ';border-color:' + color + ';color:' + calInk(color) + ';"')
+                : on ? ' style="background:#37474f;border-color:#37474f;color:#fff;"' : '';
+    const dot = color ? '<span class="rc-ctr-dot" style="background:' + color + ';"></span>' : '';
+    return '<button type="button" class="rc-ctr-pick' + (on ? ' on' : '') + '" data-rcctr="' + esc(key) + '"'
+      + style + '>' + (on ? '' : dot) + esc(label) + ' ' + n + '</button>';
+  };
+  let h = btn("all", "すべて", "", rows.length);
+  calCtrOrder().forEach(n => {
+    const cnt = rows.filter(r => rcCtrOf(r) === n).length;
+    if(cnt) h += btn(n, calCtrShort(n), calCtrColor(n), cnt);
+  });
+  const none = rows.filter(r => !rcCtrOf(r)).length;
+  if(none) h += btn("", "会社なし", "#78909c", none);
+  host.innerHTML = h;
+  host.querySelectorAll(".rc-ctr-pick").forEach(b => b.addEventListener("click", () => {
+    rcCtrSet(b.getAttribute("data-rcctr"));
+    renderReceptionCtr();
+    receptionRerender();
+  }));
+}
 const RC_FILTERS = [
   { key:"all",    label:"すべて",   hit:()=>true },
   { key:"survey", label:"下見待ち", hit:f=>!flowPhaseDone(f,"survey") },
@@ -5750,8 +5814,22 @@ function flowDotsHtml(f){
     return '<i class="'+(on?"on":"")+'"'+(on?(' style="background:'+ph.color+'"'):'')+' title="'+esc(ph.name)+'">'+ph.ch+"</i>";
   }).join("") + "</span>";
 }
+/* 「すべて出す」＝会社の絞り込みも工程の絞り込みも外して、全部出す。
+   絞り込んだ結果が0件のときにも同じボタンを出すので、結び付けは1か所にまとめる。 */
+function rcBindShowAll(){
+  const el = document.getElementById("rc-showall"); if(!el) return;
+  el.addEventListener("click", () => {
+    _rcFilter = "all";
+    try{ localStorage.setItem(LS_RCFILTER, _rcFilter); }catch(_){}
+    rcCtrSet("all");
+    renderReceptionFilter();
+    renderReceptionCtr();
+    receptionRerender();
+  });
+}
 function renderReceptionList(q){
   const host=document.getElementById("reception-list"); if(!host) return;
+  renderReceptionCtr();                         // 会社の一列（件数が変わるので毎回出し直す）
   const data=getReceptionData(); const rows=data?data.rows:[];
   const meta=document.getElementById("reception-meta");
   if(meta){
@@ -5767,22 +5845,30 @@ function renderReceptionList(q){
   const kw=(q||"").trim().toLowerCase();
   // アパートは建物名・部屋番号でも探せるようにする（「さくら荘」「203」で引ける）
   const byKw=kw ? rows.filter(r=>((r.mgmt_no||"")+" "+(r.name||"")+" "+(r.addr||"")+" "+(r.tel||"")
-    +" "+(r.apt_name||"")+" "+(r.apt_room||"")+" "+(r.apt_bldg||"")).toLowerCase().includes(kw)) : rows;
+    +" "+(r.apt_name||"")+" "+(r.apt_room||"")+" "+(r.apt_bldg||"")
+    +" "+(r.contractor||"")).toLowerCase().includes(kw)) : rows;
+  // 会社で絞る（自分の会社の戸別だけ出す）。工程より先に絞る。
+  const byCtr=(_rcCtr==="all") ? byKw : byKw.filter(r=>rcCtrOf(r)===_rcCtr);
   // いまの工程で絞る（「今日はビラ配り」の日に、ビラの済んでいない戸別だけ出す）
   const flt=rcFilterDef();
   // いま済みにしたばかりの戸別は、絞り込みから外れても残す（消えたように見せない）
   const justDone=r=>_rcJustDone.has(String((r&&r.mgmt_no)||"").trim());
   const inFilter=r=>flt.hit(rowFlowOf(r));
-  const filtered=rcSortRows((flt.key==="all") ? byKw : byKw.filter(r=>inFilter(r)||justDone(r)));
+  const filtered=rcSortRows((flt.key==="all") ? byCtr : byCtr.filter(r=>inFilter(r)||justDone(r)));
   const hiddenN=byKw.length-filtered.length;
   // いま何件出しているか（絞り込んでいる時は、絞り込みの名前も添える）
-  if(meta && meta.style.display!=="none" && flt.key!=="all"){
-    meta.textContent += "／" + flt.label + " " + filtered.length + "件";
+  if(meta && meta.style.display!=="none" && (flt.key!=="all" || _rcCtr!=="all")){
+    const names=[]; if(_rcCtr!=="all") names.push(rcCtrLabel()); if(flt.key!=="all") names.push(flt.label);
+    meta.textContent += "／" + names.join("・") + " " + filtered.length + "件";
   }
   if(!filtered.length){
+    const names=[]; if(_rcCtr!=="all") names.push(rcCtrLabel()); if(flt.key!=="all") names.push(flt.label);
+    /* 1件も無くなったときこそ、戻すボタンをその場に出す（上のチップを探させない）。 */
     host.innerHTML=`<div class="info" style="text-align:center">該当なし`
-      + (flt.key!=="all" ? `<br><b>「${esc(flt.label)}」で絞り込んでいます。</b><br>上の<b>「すべて」</b>を押すと全部出ます。` : "")
+      + (names.length ? `<br><b>「${esc(names.join("」「"))}」で絞り込んでいます。</b><br>`
+          + `<button type="button" id="rc-showall">すべて出す（${rows.length}件）</button>` : "")
       + `</div>`;
+    rcBindShowAll();
     return;
   }
   // 「まだPCに渡していない戸別」の数。ここで数えないと、書き出し忘れがそのまま埋もれる。
@@ -5840,9 +5926,10 @@ function renderReceptionList(q){
       + `<button id="rc-undoall">まとめて取消（${openedOnly}件）</button></div>`
     : "";
   // 絞り込みで隠れている件数。「消えた」のではなく「隠れている」と分かるようにする
-  const fltBar = (flt.key!=="all" && hiddenN>0)
-    ? `<div class="rc-flt">「<b>${esc(flt.label)}</b>」で絞り込んでいます。`
-      + `済んだ戸別など <b>${hiddenN}件</b> は出していません。`
+  const fltNames=[]; if(_rcCtr!=="all") fltNames.push(rcCtrLabel()); if(flt.key!=="all") fltNames.push(flt.label);
+  const fltBar = (fltNames.length && hiddenN>0)
+    ? `<div class="rc-flt">「<b>${esc(fltNames.join("」「"))}</b>」で絞り込んでいます。`
+      + `ほかの会社や済んだ戸別など <b>${hiddenN}件</b> は出していません。`
       + `<button type="button" id="rc-showall">すべて出す（${rows.length}件）</button></div>`
     : "";
   // 他の端末で進めた分の引き継ぎは「📋 履歴」の中に置いてある（毎日使うものではないので、
@@ -5853,6 +5940,7 @@ function renderReceptionList(q){
   ordered.forEach(r => { const k = rcAptKey(r); if(!k) return;
     if(!aptGrp.has(k)) aptGrp.set(k, []); aptGrp.get(k).push(r); });
   const aptSeen = new Set();
+  const ctrMany = rcCtrMany();          // 1社しか出てこない端末では色を付けない
   host.innerHTML=fltBar+warn+redoBar+undoBar+ordered.map(r=>{
     const idx=rows.indexOf(r);
     const aptKey = rcAptKey(r);
@@ -5940,7 +6028,10 @@ function renderReceptionList(q){
       : "";
     // この端末で工程を進めた戸別だけ「見直す」（PCの台帳で済んでいるだけの戸別は「開く」）
     const act = `<div class="d-act"><button class="d-open" data-recopen="${idx}">${(info&&flowAny(info.flow))?"見直す":"開く"}</button>${act2}</div>`;
-    return bandHtml + `<div class="draft${cls}${soon?" rc-soon":""}${consentOnly?" rc-consent":""}${unsaved?" rc-unsaved":""}"><div class="d-main" data-recopen="${idx}">
+    // 会社の色を行の左端に。並べ替えなくても、どの会社の戸別かが一目で分かる。
+    const ctrCol = ctrMany ? calCtrColor(rcCtrOf(r)) : "";
+    const ctrAttr = ctrCol ? ` style="--rc-ctr:${esc(ctrCol)}" title="${esc(rcCtrOf(r) || "会社が決まっていません")}"` : "";
+    return bandHtml + `<div class="draft${cls}${soon?" rc-soon":""}${consentOnly?" rc-consent":""}${unsaved?" rc-unsaved":""}${ctrCol?" rc-ctrbar":""}"${ctrAttr}><div class="d-main" data-recopen="${idx}">
       <div class="d-no">${dots}${phase}${soonBadge}${just}${started}${other}${unsaved}${hold}${waived}${apt}${badge}${esc(r.mgmt_no||"（番号なし）")}${r.name?(" ／ "+esc(r.name)):""}</div>
       <div class="d-sub">${sub}${ph}${fileNote}</div>${noteHtml}</div>${act}</div>`;
   }).join("");
@@ -5951,13 +6042,7 @@ function renderReceptionList(q){
   const ua = document.getElementById("rc-undoall");
   if(ua) ua.addEventListener("click", untouchOpenedOnly);
   // 「取消」は .d-main の外に置いてあるので、行を開くハンドラには拾われない
-  const showAll=document.getElementById("rc-showall");
-  if(showAll) showAll.addEventListener("click",()=>{
-    _rcFilter="all";
-    try{ localStorage.setItem(LS_RCFILTER, _rcFilter); }catch(_){}
-    renderReceptionFilter();
-    receptionRerender();
-  });
+  rcBindShowAll();
   host.querySelectorAll("[data-recmap]").forEach(b=>b.addEventListener("click",()=>{
     const r = rows[parseInt(b.getAttribute("data-recmap"),10)];
     if(r) openMapView(r.mgmt_no);        // 地図を閉じれば、この一覧に戻ってくる
@@ -6151,7 +6236,7 @@ function rcWhenText(iso){
    ============================================================================ */
 let _calYM   = null;    // 出している月 { y, m }（m は 1〜12）
 let _calPick = "";      // 選んでいる日 "YYYY-MM-DD"
-let _calCtr  = "all";   // 会社の絞り込み（会社名 または "all"）
+let _calCtr  = _rcCtr;  // 会社の絞り込み（会社名 または "all"）。台帳の絞り込みと共通＝この端末の会社
 const CAL_KIND = { work: { ch:"工", name:"工事",   color:"#1565c0" },
                    meet: { ch:"打", name:"打合せ", color:"#e65100" } };
 /* 会社の色。PCの受付台帳のカレンダーと同じ並びの色を使う。 */
@@ -6275,7 +6360,8 @@ function calRenderCtr(){
   if(none) h += btn("", "会社なし", "#78909c", none);
   host.innerHTML = h;
   host.querySelectorAll(".cal-ctr-pick").forEach(b => b.addEventListener("click", () => {
-    _calCtr = b.getAttribute("data-ctr"); calRender();
+    rcCtrSet(b.getAttribute("data-ctr"));   // 台帳の一覧の絞り込みも同じ会社にそろえ、この端末に覚える
+    calRender();
   }));
 }
 /* 月のマスと、選んだ日の中身。 */
