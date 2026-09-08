@@ -1073,7 +1073,7 @@ const GENBA_SCHEMA_VER = 1;
 const APP_NAME_SHORT = "現場入力";
 /* 版は「増えていくだけの通し番号」。メイン（積算・図面）と同じ番号体系で、
    番号が小さいほうが古い。 */
-const APP_VERSION = "145";
+const APP_VERSION = "146";
 function photoContentId(dataUri){
   if(!dataUri || typeof dataUri !== "string") return "";
   let a = 5381, b = 0;
@@ -3946,6 +3946,11 @@ function draftKey(){ return M.chosho_mgmt_no ? ("no:"+M.chosho_mgmt_no) : (M._dr
 function bumpRev(){ M._touched=true; M._rev=(M._rev|0)+1; }
 function saveDraft(){ bumpRev(); updateHeader(); schedulePersist(); }
 function saveDraftQuiet(){ bumpRev(); schedulePersist(); }
+/* 受付台帳の内容を写しただけの直し（備考・予定日・工程の印など）。
+   「直した回数」は進める（PCへ渡し忘れないため）が、「現場でこの端末で入力した」印は
+   立てない。立ててしまうと、開いただけの戸別が「まとめて保存」「全部保存し直す」の
+   対象に戻り、PCのファイルにある写真を写真0枚で上書きしてしまう。 */
+function saveDraftFromLedger(){ const own = M._touched; bumpRev(); M._touched = own; schedulePersist(); }
 function schedulePersist(){ clearTimeout(_persistTimer); _persistTimer=setTimeout(()=>{ persistDraft(); }, 400); saveStateDirty(); }
 /* ---- 保存の状態表示 ----
    「この端末への自動保存」と「JSONファイルの書き出し」は別もの。
@@ -4497,15 +4502,37 @@ function rcSrcOf(row){
            flyer:!!(row&&row.flyer), consent:!!(row&&row.consent), compdoc:!!(row&&row.compdoc),
            status:String((row&&row.status)||"") };
 }
-/* 管理番号のある下書きすべて（保存済みも含む）。「全部保存し直す」の対象。 */
-function allDraftTargets(){
+/* 「開いただけ」で対象から外れた戸別のファイルを、それでも作り直したいときの案内。
+   ここで「その戸別を開いて『保存』を押してください」とだけ言うと、PCのファイルに写真が
+   入っている戸別でその手順を踏まれ、写真が消える（1件ずつの「保存」にも守りは無い）。
+   条件と、写真が消えることを必ず一緒に出す。 */
+const GENBA_REDO_HOWTO =
+  "PCにその戸別のファイルがまだ無いとき・PCで「中身が空（0KB）」と言われたときだけ、\n"
+  + "その戸別を開いて「保存」を押してください。\n"
+  + "⚠ PCのファイルに写真が入っていると、その写真は消えます。";
+const GENBA_REDO_HOWTO_HTML =
+  `PCにその戸別のファイルが<b>まだ無いとき</b>・PCで<b>「中身が空（0KB）」</b>と言われたときだけ、`
+  + `その戸別を開いて「保存」を押してください。`
+  + `<b>⚠ PCのファイルに写真が入っていると、その写真は消えます。</b>`;
+/* 管理番号のある下書きすべて（保存済みも含む）。「全部保存し直す」の対象。
+   ただし、開いただけ（この端末でまだ何も入力していない・写真も無い）の下書きは入れない。
+   入れると、写真0枚・入力なしの中身で PC の 管理番号.json を丸ごと置き換え、
+   PC 側の写真や測定値が消える。「まとめて保存」（unsavedTargets）と同じふるい（isUntouchedHere）。
+   外した戸別は skipped（配列）で受け取れる。
+   台帳の印（下見・ビラ・完了など）が付いているだけで「入力あり」と見なされ、開いただけでも
+   対象に残ってしまう戸別は marked（配列）で受け取れる（確認文で件数を知らせるため）。
+   管理番号は半角にそろえる。そろえないと、同じ戸別が全角と半角で二重に数えられる。 */
+function allDraftTargets(skipped, marked){
   const seen = {}, out = [];
-  const add = no => {
-    no = String(no||"").trim();
+  const add = v => {
+    const no = draftNoKey(v);
     if(!no || seen[no]) return;
     const info = draftInfoOf(no);
     if(!info || !info.has) return;
-    seen[no] = 1; out.push(no);
+    seen[no] = 1;
+    if(isUntouchedHere(info)){ if(skipped) skipped.push(no); return; }
+    if(marked && !info.touched && !info.photos && !info.fileAt) marked.push(no);
+    out.push(no);
   };
   Object.keys(_draftInfo).forEach(add);
   add(M.chosho_mgmt_no);                     // いま開いている戸別
@@ -4567,13 +4594,28 @@ async function saveAllDrafts(mode){
   clearTimeout(_persistTimer);
   try{ await persistDraft(); }catch(_){}     // いまの入力を先に下書きへ確定
   await refreshDraftInfo(true);
-  const nos = isAll ? allDraftTargets() : unsavedTargets();
+  const openedOnly = [];   // 開いただけ（この端末で何も入力していない）の戸別。「全部保存し直す」でも触らない
+  const markedOnly = [];   // 台帳の印が付いているだけで対象に残る、開いただけの戸別（今までどおり上書きになる）
+  const nos = isAll ? allDraftTargets(openedOnly, markedOnly) : unsavedTargets();
+  /* 「まとめて保存」でも、台帳の印が付いているだけの戸別（この端末では何も入力していない）は
+     対象に入る。ここで数えて、「全部保存し直す」と同じ注意を出す。
+     外しはしない：現場でその印を付けた戸別も同じ形なので、外すと本当に渡したい下書きが渡らない。 */
+  if(!isAll){
+    nos.forEach(no => {
+      const info = draftInfoOf(no);
+      if(info && info.has && !info.touched && !info.photos && !info.fileAt) markedOnly.push(no);
+    });
+  }
   const all = await idbGetAll();
   // 管理番号が無くて対象にできない下書き（ファイル名を決められない）
   const noNum = (all||[]).filter(r => r && r.model && !String(r.mgmt||"").trim()
     && !r.fileSavedAt && (r.touched !== false || r.photos || r.surveyDone)).length;
   if(!nos.length){
-    await uiAlert(isAll ? "保存し直せる戸別はありません（この端末に下書きがありません）。"
+    await uiAlert(isAll ? (openedOnly.length
+                    ? ("保存し直せる戸別はありません。\n\n開いただけ（この端末で何も入力していない）の戸別が "
+                       + openedOnly.length + " 件ありますが、\nPCのファイルにある写真や入力を消さないよう、触りません。\n\n"
+                       + GENBA_REDO_HOWTO)
+                    : "保存し直せる戸別はありません（この端末に下書きがありません）。")
                 : noNum ? ("まとめて保存できる戸別はありません。\n\n管理番号の入っていない下書きが "+noNum+" 件あります。\n管理番号を入れてから保存してください。")
                         : "まだ保存していない戸別はありません。");
     return;
@@ -4632,8 +4674,30 @@ async function saveAllDrafts(mode){
     ? (files.length + "件を保存し直します。\n\n受付台帳の最新（名前・住所・電話・工事予定日・備考）を"
        + "入れ直してから、管理番号.json を上書きします。\n"
        + "現場で入力したもの（アンテナ・部材・測定・写真）はそのままです。"
-       + (applied ? ("\n\n台帳の内容を入れ直した戸別： " + applied + "件") : "") + "\n\n")
-    : (files.length + "件をまとめて保存します。\n\n");
+       + (applied ? ("\n\n台帳の内容を入れ直した戸別： " + applied + "件") : "")
+       // 開いただけの戸別は対象に入れていない。黙って減らすと「件数が合わない」ので、ここで言う
+       + (openedOnly.length
+          ? ("\n\n※ 開いただけ（この端末で何も入力していない）の戸別 " + openedOnly.length + " 件は触りません。\n"
+             + "PCのファイルにある写真や入力を、そのまま残すためです。")
+          : "")
+       /* 台帳の印（下見・ビラ・完了など）が付いている戸別は、開いただけでも対象に残る。
+          上の一文だけだと「開いただけは全部守られる」と読めてしまうので、その分は
+          件数を添えて言い、そのときどうすればよいかまで書く（この端末では外せない）。 */
+       + (markedOnly.length
+          ? ("\n\n※ 台帳の印（下見・ビラ・完了など）が付いている戸別 " + markedOnly.length + " 件は、開いただけでも上書きします。\n"
+             + "PCでその戸別に写真を入れているなら、このボタンは押さないでください。\n"
+             /* 同じ戸別は「まとめて保存」でも上書きされる。こちらだけ止めても、
+                すぐ上の大きなボタンで同じことが起きるので、必ず一緒に言う。 */
+             + "上の「まとめて保存」でも同じように上書きします。\n"
+             + "この端末では、その戸別だけを外せません。台帳の入れ直しはPCの方でしてください。")
+          : "") + "\n\n")
+    : (files.length + "件をまとめて保存します。\n\n"
+       + (markedOnly.length
+          ? ("※ このうち " + markedOnly.length + " 件は、台帳の印（下見・ビラ・完了など）が付いているだけで、\n"
+             + "この端末では何も入力していない戸別です。\n"
+             + "PCでその戸別に写真を入れているなら、その写真は消えます。\n"
+             + "この端末では、その戸別だけを外せません。台帳の入れ直しはPCの方でしてください。\n\n")
+          : ""));
   // 他の端末が保存したファイルを上書きする分は、件数を添えて知らせる
   const otherCnt = files.filter(f => f.other).length;
   const otherTxt = otherCnt
@@ -5736,13 +5800,20 @@ function renderReceptionList(q){
       + `<div class="rc-warn-sub">`
       +   (dirName ? `前回のフォルダ「<b>${esc(dirName)}</b>」が出ます（保存のたびに選び直せます）`
                    : `押すと保存先を選ぶ画面が出ます`)
-      +   `<br>※ PCで<b>0KB</b>と言われたファイルは、こちらでは直りません（下の「全部保存し直す」を使ってください）`
+      +   `<br>※ PCで<b>0KB</b>と言われたファイルは、こちらでは直りません（下の「全部保存し直す」の案内をご覧ください）`
       + `</div>`
       + `</div>`
     : "";
   // PCで台帳を直したあとは、戸別ファイルも作り直さないと、メインでフォルダを読み直したときに
   // 直す前の内容へ戻ってしまう（メインは戸別ファイルの中身を見るため）。ここから一気に作り直せる。
-  const redoCnt = allDraftTargets().length;
+  const redoSkip = [];                     // 開いただけ（何も入力していない）で、対象から外した戸別
+  const redoCnt = allDraftTargets(redoSkip).length;
+  /* 開いただけの戸別のぶんは、対象から外したことと、それでも作り直したいときの条件を出す。
+     条件を書かずに「開いて保存」とだけ書くと、写真の入っているファイルを消させてしまう。 */
+  const redoSkipTxt = redoSkip.length
+    ? `<br>ただし<b>開いただけ</b>（まだ何も入力していない）の戸別<b>${redoSkip.length}件</b>は入りません`
+      + `（PCのファイルにある写真や入力を消さないためです）。<br>` + GENBA_REDO_HOWTO_HTML
+    : ``;
   const redoBar = redoCnt
     ? `<div class="rc-redo">PCで台帳を直して<b>取り込み直したとき</b>は、<b>全部保存し直して</b>ください。`
       + `<button id="rc-saveall2" data-label="全部保存し直す（${redoCnt}件）">全部保存し直す（${redoCnt}件）</button>`
@@ -5750,7 +5821,16 @@ function renderReceptionList(q){
       + `現場で入力したものはそのままです。<br>`
       + `<b>PCで「中身が空（0KB）」と言われたファイルも、これで作り直せます。</b>`
       + `上の「まとめて保存」は<b>まだ保存していない戸別だけ</b>が相手なので、`
-      + `この端末が「保存済み」と思っている戸別は入りません。</div>`
+      + `この端末が「保存済み」と思っている戸別は入りません。`
+      + redoSkipTxt + `</div>`
+      + `</div>`
+    /* 対象が1件も無くても、0KB の作り直しの案内は消さない。
+       台帳を見るために開いただけの戸別しか無い端末では、ここが唯一の案内になる。 */
+    : redoSkip.length
+    ? `<div class="rc-redo">いま<b>保存し直す戸別はありません</b>`
+      + `（開いただけ・まだ何も入力していない戸別が <b>${redoSkip.length}件</b>）。`
+      + `<div class="rc-redo-sub">この戸別は「全部保存し直す」では書きません`
+      + `（PCのファイルにある写真や入力を消さないためです）。<br>` + GENBA_REDO_HOWTO_HTML + `</div>`
       + `</div>`
     : "";
   // 開いただけ（何も入力していない）の戸別。たまると「入力中」だらけになるのでまとめて戻せる。
@@ -5904,9 +5984,9 @@ async function openFromReception(row){
       M=rec.model; M._lastDraftKey="no:"+mgmt; ensureModelShape(M);
       // PCで直した内容（名前・住所・電話・工事予定日・備考・工程）をここでも入れ直す。
       // 取り込みのときにも入れているが、取り込み後に作った下書きなどもここで合わせる。
-      if(receptionApplyToModel(M, row)) saveDraftQuiet();
+      if(receptionApplyToModel(M, row)) saveDraftFromLedger();
       // 現場でまだ備考を書いていなければ、台帳の備考（PC側で書き足した分）を入れる
-      if(!String(M.chosho_note||"").trim() && row.note){ M.chosho_note = String(row.note); saveDraftQuiet(); }
+      if(!String(M.chosho_note||"").trim() && row.note){ M.chosho_note = String(row.note); saveDraftFromLedger(); }
       resetOpenState(); render();
       await saveStateLoad();                       // その戸別の保存状況に合わせる（前の戸別のまま残さない）
       localStorage.setItem(LS_LAST,"no:"+mgmt); closeReceptionModal(); toast("下書きの続きを開きました"); return;
@@ -5959,7 +6039,7 @@ async function receptionApplyToDrafts(){
   // いま開いている戸別は画面ごと直す
   const openNo = toHalfWidthAn(M.chosho_mgmt_no || "").trim();
   if(openNo && byNo[openNo] && receptionApplyToModel(M, byNo[openNo])){
-    applied++; saveDraftQuiet(); render();
+    applied++; saveDraftFromLedger(); render();
   }
   let all = [];
   try{ all = await idbGetAll(); }catch(_){ return applied; }
@@ -5974,9 +6054,12 @@ async function receptionApplyToDrafts(){
        「保存し直す対象」の印が消えてしまう（＝まとめて保存の件数が減る）。
        開いても消えないよう、中身の側を進めて、控えはそれに合わせる。 */
     rec.model._rev = (rec.model._rev | 0) + 1;
-    rec.model._touched = true;
     rec.rev = rec.model._rev;             // 中身が変わった＝戸別ファイルを保存し直す対象になる
-    rec.touched = true;
+    /* ★台帳を写しただけでは「現場で触った」ことにしない★
+       ここで印を立てていたので、「開いただけ → 台帳を取り込み直す → 全部保存し直す」の
+       順で、開いただけの戸別がふるいを素通りし、PCのファイルの写真が消えていた。
+       （台帳の直しはPCが持っているので、この端末から書き戻さなくても失われない） */
+    rec.touched = (rec.touched !== false);
     rec.sig = stateSig(rec.model);        // 指紋も今の中身に合わせる（古いままだと二重に数える）
     rec.flow = flowOf(rec.model);         // 工程の控えも合わせる（一覧・地図の印がすぐ合う）
     try{ await idbPut(rec); applied++; }catch(e){ console.warn("下書きへの反映に失敗", no, e); }
