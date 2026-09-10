@@ -781,8 +781,12 @@
   .info{font-size:12px; color:var(--sub); background:#f6f8fb; border:1px solid var(--line); border-radius:8px; padding:8px 10px; margin:8px 0;}
   /* アプリ内ダイアログ（iOSのホーム画面アプリでは confirm/alert が無効なため自前UIで代替）*/
   #ui-dialog{align-items:center; justify-content:center; padding:24px;}
-  #ui-dialog .dlg{background:#fff; width:100%; max-width:360px; border-radius:14px; padding:20px; box-shadow:0 12px 40px rgba(0,0,0,.35);}
-  .dlg-msg{font-size:15px; line-height:1.6; white-space:pre-wrap; margin-bottom:16px; color:var(--ink);}
+  /* 長い知らせでも OK が画面の外へ出ないように、中だけを送れるようにする */
+  #ui-dialog .dlg{background:#fff; width:100%; max-width:360px; border-radius:14px; padding:20px; box-shadow:0 12px 40px rgba(0,0,0,.35);
+    display:flex; flex-direction:column; max-height:calc(100vh - 48px); max-height:calc(100dvh - 48px);}
+  .dlg-msg{font-size:15px; line-height:1.6; white-space:pre-wrap; margin-bottom:16px; color:var(--ink);
+    overflow:auto; -webkit-overflow-scrolling:touch; flex:1 1 auto; min-height:0;}
+  .dlg-btns{flex:none;}
   .dlg-btns{display:flex; gap:10px;}
   .dlg-btns button{flex:1; min-height:50px; border:0; border-radius:10px; font-size:16px; font-weight:700;}
   .dlg-cancel{background:#eef2f7; color:var(--ink);}
@@ -3861,8 +3865,23 @@ async function saveJsonRun(){
         suggestedName:fname,
         types:[{description:"戸別JSON",accept:{"application/json":[".json"]}}]
       });
+      /* ★覚えているフォルダの道と同じように、選んだファイルの中身を読んで融合する★
+         ここを通さないと、保存先をまだ覚えていない初回や、ブラウザを開き直したあとの
+         最初の保存で、PCの写真や工事日が消えてしまう。 */
+      let pickedNote = "";
+      try{
+        const cur = await handle.getFile();
+        const txt = await cur.text();
+        if(txt && txt.trim()){
+          const oj = JSON.parse(txt);
+          if(flowShareIsCase(oj)){
+            const mgp = mergeIntoState(state, oj);
+            if(mgp.kept.length) pickedNote = "\n（ファイルに入っていた " + mgp.kept.join("・") + " を残しました）";
+          }
+        }
+      }catch(_){ /* 新しいファイル＝読めなくてふつう。そのまま書く */ }
       const w=await handle.createWritable();
-      await w.write(blob); await w.close();
+      await w.write(new Blob([JSON.stringify(state)], { type:"application/json" })); await w.close();
       // 覚えているフォルダへ書いたときと同じように、読み返して中身を確かめる
       const bad2 = await saveVerify(handle, state);
       if(bad2){
@@ -3874,7 +3893,7 @@ async function saveJsonRun(){
         return true;                             // 💾は付けない＝「まとめて保存」に残す
       }
       await markDraftSaved(); saveStateFile();   // ← 読み返して確かめてから💾
-      _lastSaveInfo = { title: "保存しました", msg: (handle.name || fname) + "\n" + sizeTxt
+      _lastSaveInfo = { title: "保存しました", msg: (handle.name || fname) + "\n" + saveSizeText(JSON.stringify(state), state) + pickedNote
         + "\n（書いたあと読み返して、中身が入っていることを確かめました）", warn: false };
       toast("保存しました："+fname);
       return true;
@@ -3916,6 +3935,20 @@ async function saveJsonRun(){
 // 既存JSONを読み込んでフォームへ（plainのみ。暗号化(.enc/.hyb)はPCで）
 async function loadStateInto(s){
   clearTimeout(_persistTimer); await persistDraft(); // 取込前に現在編集中を確定保存（直近入力喪失を防ぐ）
+  /* ★同じ戸別を、現場で入力したあとに読み込んだとき★
+     帯の「📂 戸別ファイルを読み込んで編集する」はこの道を通る。そのまま入れ替えると、
+     現場で入れた測定値・工程の印・備考・電話が消えてしまう。
+     現場で入れたものを土台にして、ファイルの中身は「こちらがまだ何も入れていないところ」
+     だけを入れる（写真はあとで和集合にする）。 */
+  try{
+    const noNow  = toHalfWidthAn(String((M && M.chosho_mgmt_no) || "").trim());
+    const noFile = toHalfWidthAn(String((s && s.chosho_mgmt_no) || "").trim());
+    if(noNow && noNow === noFile && M && M._touched === true){
+      const mine = buildStateOf(M);
+      mergeIntoState(mine, s);
+      s = mine;
+    }
+  }catch(e){ console.warn("読み込みの融合に失敗（そのまま読み込みます）", e); }
   const m=freshModel();
   // 文字列/基本フィールド
   for(const k in DEFAULTS){ if(s[k]!==undefined && k!=="outsource_fee_on"&&k!=="outsource_fee_amount"&&k!=="outsource_fee_auto") m[k]=s[k]; }
@@ -4942,8 +4975,8 @@ async function saveAllDrafts(mode){
     where = "「" + (dir.name || "選んだフォルダ") + "」";
     if(keptAll.length){
       await uiAlert("ファイルに入っていた中身を残しました（" + keptAll.length + "件）。\n\n"
-        + keptAll.slice(0, 8).join("\n")
-        + (keptAll.length > 8 ? ("\nほか " + (keptAll.length - 8) + "件") : "")
+        + keptAll.slice(0, 3).join("\n")
+        + (keptAll.length > 3 ? ("\nほか " + (keptAll.length - 3) + "件") : "")
         + "\n\nPCで入れた写真や工事日は、消えていません。");
     }
   } else {
@@ -5251,6 +5284,41 @@ function mergePhotosUnion(mine, theirs){
 }
 const MERGE_TEXT_KEYS = ["chosho_date","chosho_time","chosho_meet_at","chosho_cust_name",
   "chosho_cust_addr","chosho_cust_tel","chosho_note","chosho_status"];
+/* 作りたての戸別を書き出すと、どんな中身になるか。
+   現場入力は「まだ何も選んでいない」ときも既定値（アンテナ U206・石綿の既定など）を
+   書き出すので、「空かどうか」では見分けられない。作りたての形と見比べる。 */
+let _mergeFreshCache = null;
+function mergeFreshState(){
+  if(!_mergeFreshCache){
+    try{ _mergeFreshCache = buildStateOf(freshModel()); }catch(_){ _mergeFreshCache = {}; }
+  }
+  return _mergeFreshCache;
+}
+/* この項目は「まだ現場で何も入れていない（作りたてのまま）」か */
+function mergeIsFresh(state, k){
+  const fresh = mergeFreshState();
+  if(!(k in fresh)) return false;
+  try{ return JSON.stringify(state[k]) === JSON.stringify(fresh[k]); }catch(_){ return false; }
+}
+/* 現場の言葉での呼び名（何を残したかを知らせるため） */
+const MERGE_LABELS = {
+  chosho_date:"工事日", chosho_time:"工事の時刻", chosho_meet_at:"打合せ予定",
+  chosho_note:"備考", chosho_status:"状態",
+  chosho_cust_name:"お客様の情報", chosho_cust_addr:"お客様の情報", chosho_cust_tel:"お客様の情報",
+  measurements:"測定値", asbestos:"石綿の判定", text_annotations:"図面の注記",
+  chosho_photos:"写真", antenna_guide:"アンテナ取付ガイド"
+};
+function mergeLabelOf(k){
+  if(MERGE_LABELS[k]) return MERGE_LABELS[k];
+  if(/^antenna|^mount|^mast|^side_base|^bs|^ch46/.test(k)) return "アンテナ・取付";
+  if(/^cable|^wire/.test(k))                              return "ケーブル・配線";
+  if(/^tv_/.test(k))                                      return "TVの台数・部屋";
+  if(/^apt_/.test(k))                                     return "アパートの欄";
+  if(/^remove|^dummy|^use_fa|^fa_/.test(k))               return "撤去・付属";
+  if(/^outsource|^tax|^misc/.test(k))                     return "料金の扱い";
+  if(/^survey_|^flyer_|^work_|^consent_|^compdoc_/.test(k)) return "工程の印";
+  return "PCで選んだ内容";
+}
 const MERGE_MAP_KEYS = ["wire_overrides","qty_overrides","node_offsets","meas_transforms","node_existing_overrides"];
 /* 測定値に、現場で入れた数字が1つでもあるか */
 function measHasValue(ms){
@@ -5267,31 +5335,24 @@ function mergeIntoState(state, old){
   const added = (state.chosho_photos || []).filter(p => p && p.dataUri).length - before;
   if(added > 0) kept.push("写真 " + added + "枚");
 
-  MERGE_TEXT_KEYS.forEach(k => {
-    if(!String(state[k] == null ? "" : state[k]).trim() && String(old[k] == null ? "" : old[k]).trim()){
-      state[k] = old[k];
-      kept.push(k === "chosho_date" ? "工事日" : k === "chosho_time" ? "工事の時刻"
-              : k === "chosho_meet_at" ? "打合せ予定" : k === "chosho_note" ? "備考"
-              : k === "chosho_status" ? "状態" : "お客様の情報");
-    }
-  });
-  MERGE_MAP_KEYS.forEach(k => {
-    const mine = state[k], th = old[k];
-    if(th && typeof th === "object" && Object.keys(th).length
-       && (!mine || typeof mine !== "object" || !Object.keys(mine).length)){
-      state[k] = th; kept.push("PCで直した内容");
-    }
-  });
-  if(Array.isArray(old.text_annotations) && old.text_annotations.length
-     && (!Array.isArray(state.text_annotations) || !state.text_annotations.length)){
-    state.text_annotations = old.text_annotations; kept.push("図面の注記");
-  }
+  /* 測定値だけは「作りたてと同じ形か」ではなく「現場で数字を1つでも入れたか」で見る。
+     CSV取込やCHの入れ替えで形が変わっていても、数字が空なら相手を消さない。 */
   if(!measHasValue(state.measurements) && measHasValue(old.measurements)){
     state.measurements = old.measurements; kept.push("測定値");
   }
-  if(old.asbestos && typeof old.asbestos === "object"
-     && (!state.asbestos || !Object.keys(state.asbestos).length)){
-    state.asbestos = old.asbestos; kept.push("石綿の判定");
+  /* ★ほかは決まり1つ。「まだ現場で何も入れていないところ（作りたてのまま）は、相手を消さない」★
+     工事日・時刻・備考のような文字の欄も、アンテナ・取付・部材・TVの台数・ケーブルの長さ・
+     石綿・測定値・図面の注記・数量の直し・工程の印も、すべてこの決まりで守る。
+     現場入力は「何も選んでいない」ときも既定値を書き出すので、「空か」では見分けられない。 */
+  const skip = { chosho_photos:1, chosho_mgmt_no:1, meas_show:1, editedAt:1, _origin:1, _schemaVer:1,
+                 measurements:1 };   // 測定値は上で決めた（二重に書くと片方を壊しても気づけない）
+  for(const k in old){
+    if(skip[k] || !(k in state)) continue;
+    if(!mergeIsFresh(state, k)) continue;                 // 現場で何か入れている → 現場を採る
+    let same = true;
+    try{ same = JSON.stringify(state[k]) === JSON.stringify(old[k]); }catch(_){ same = true; }
+    if(same) continue;
+    state[k] = old[k]; kept.push(mergeLabelOf(k));
   }
   // PCだけの項目（ag_placement など）。こちらに無いものは、そのまま残す。
   let extra = 0;
