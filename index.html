@@ -489,6 +489,11 @@
   .sb-dest:active{ transform:scale(.94); background:#d8e8fa; }
   .sb-dest.none{ background:#fff3e0; color:#8a4b00; border-color:#ffcc80; }
   .sb-dest.none:active{ background:#ffe9c9; }
+  /* 戸別ファイルの中身を控えてあるか（＝守られているか）を小さく出す */
+  .sb-base{ margin-left:6px; padding:0 6px; border-radius:7px; font-size:10px; line-height:17px;
+    background:rgba(0,105,92,.12); color:#00695c; white-space:nowrap; }
+  .sb-base.none{ background:rgba(120,120,120,.14); color:#6b6b6b; }
+  .sb-base.warn{ background:rgba(230,81,0,.16); color:#bf360c; }
   .sb-dest-x{ margin-left:4px; padding:0 5px; border-radius:7px; font-size:10px;
     background:rgba(30,58,95,.12); }
   .sb-dest.none .sb-dest-x{ background:rgba(138,75,0,.14); }
@@ -4355,6 +4360,7 @@ function renderSaveBar(){
       : '<button type="button" class="sb-dest none" id="sb-dest" title="保存先のフォルダを覚えていません。押すとここで選べます">📁 保存先 未設定 <span class="sb-dest-x">選ぶ</span></button>');
   el.innerHTML='<span class="sb-dot"></span><span class="sb-main">'+esc(main)+'</span>'
     + destHtml
+    + saveBarBaseText()
     + (file ? '<span class="sb-file'+((saveStale()||!_save.fileAt)?" attn":"")+'">'+esc(file)+'</span>' : "");
   const db = document.getElementById("sb-dest");
   if(db) db.addEventListener("click", saveDirChange);
