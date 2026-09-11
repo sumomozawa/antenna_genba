@@ -3849,7 +3849,9 @@ async function saveJsonRun(){
   if(dir && !(await saveDirOk(dir, false))){ dir = null; dirLapsed = true; }
   const lapsedLine = () => dirLapsed
     ? ("\n\n（覚えている保存先" + (saveDirName() ? ("フォルダ「" + saveDirName() + "」") : "フォルダ")
-       + "へ書く許可が切れていました。\n保存バーの「📁 変更」で選び直すと、次からはそのまま入ります）")
+       + "へ書く許可が切れていました。\n"
+       + "保存バーの 📁 のボタン（フォルダの名前が出ているところ）を押して\n"
+       + "選び直すと、次からはそのまま入ります）")
     : "";
   /* ★控え・写真IDの副本が知っている写真が、この端末に無いとき★
      ここではまだ止めない。「相手のファイルを読んで和集合にできたか」は道によって違うので、
@@ -3991,8 +3993,9 @@ async function saveJsonRun(){
           msg: (handle.name || fname) + "\n\n"
              + "そのファイルに入っている中身を読み合わせられませんでした。\n"
              + "このまま書くと、PCに入っている写真や工事日が消えるかもしれません。\n\n"
-             + "保存していません。もう一度「保存」を押すか、\n"
-             + "受付台帳の「まとめて保存」をお試しください。", warn: true };
+             + "保存していません。\n\n"
+             + "先に「📂 戸別ファイルを読み込んで編集する」で\n"
+             + "そのファイルを読み込んでから、もう一度「保存」を押してください。", warn: true };
         toast("⚠ 読み合わせられないので保存していません");
         return true;                              // 💾は付けない＝「まとめて保存」に残す
       }
@@ -4595,7 +4598,8 @@ function saveHintLine(){
   return n ? ("\n\n★入れる場所： 「" + n + "」フォルダ★\nここに入れないと、PCが読み込めません。") : "";
 }
 /* フォルダへ書く許可があるか。ask=true なら聞き直す（許可はブラウザを閉じると切れることがある） */
-/* そのフォルダの直下にある戸別ファイル（管理番号.json）の数をざっと数える（多いフォルダで止める） */
+/* そのフォルダの直下にある戸別ファイル（管理番号.json）の数をざっと数える
+   （「中のフォルダの方に戸別が多いですよ」と勧めるかどうかを決めるために使う） */
 async function saveDirCountCases(dir, cap){
   let n = 0;
   try{
@@ -5130,7 +5134,10 @@ async function saveAllDrafts(mode){
          「フォルダを選ぶ画面が出ます」と言ったのに出ないまま、別の場所へ配られてしまう。 */
       if(!(e && e.name === "AbortError")){
         console.warn("まとめて保存：フォルダを選ぶ画面を開けませんでした", e);
-        await uiAlert("保存先のフォルダを選べませんでした。\n\nもう一度「まとめて保存」を押してください。");
+        await uiAlert("保存先のフォルダを選べませんでした。\n\n"
+          + "もう一度「まとめて保存」を押してください。\n\n"
+          + "それでも開かないときは、戸別を1件ずつ開いて「保存」を押すと、\n"
+          + "共有やダウンロードで渡せます。");
       }
       return; }
     if(dir){
@@ -8017,7 +8024,15 @@ async function spSaveFile(rec){
   const sizeTxt = saveSizeText(json, state);
   // ① 覚えているフォルダ
   let dir = await saveDirGet();
-  if(dir && !(await saveDirOk(dir, false))) dir = null;
+  /* 戸別の「保存」と同じ。許可が切れているときは聞き直さずに落として、あとで伝える。 */
+  let dirLapsed = false;
+  if(dir && !(await saveDirOk(dir, false))){ dir = null; dirLapsed = true; }
+  const lapsedLine = () => dirLapsed
+    ? ("\n\n（覚えている保存先" + (saveDirName() ? ("フォルダ「" + saveDirName() + "」") : "フォルダ")
+       + "へ書く許可が切れていました。\n"
+       + "保存バーの 📁 のボタン（フォルダの名前が出ているところ）を押して\n"
+       + "選び直すと、次からはそのまま入ります）")
+    : "";
   if(dir){
     try{
       const fh = await dir.getFileHandle(fname, { create:true });
@@ -8028,6 +8043,9 @@ async function spSaveFile(rec){
          特別記録の写真は、この端末の下書きと、このファイルの2か所にしか無い。 */
       const bad = await saveVerify(fh, state);
       if(bad){
+        /* ✏️ は残す（fileSavedAt は進めない）が、ファイル名だけは控える。
+           控えないと、次に保存したときに別の名前のファイルがもう1つできてしまう。 */
+        try{ await spPersist(rec, false); }catch(_){}
         return { ok:false, warn:true, title:"⚠ 保存できていないかもしれません",
           msg: "「" + (dir.name || "選んだフォルダ") + "」の中\n" + fname + "\n" + sizeTxt + "\n\n"
              + "書いたあとに読み返したところ、中身が合いませんでした。\n" + bad
@@ -8049,7 +8067,7 @@ async function spSaveFile(rec){
       rec.fileSavedAt = Date.now(); rec.fileRev = rec.rev | 0;
       await spPersist(rec, false);
       return { ok:true, title:"保存しました", msg:(h.name || fname) + "\n" + sizeTxt
-        + "\n（保存先を選んで保存しました）", warn:false };
+        + "\n（保存先を選んで保存しました）" + lapsedLine(), warn:false };
     }catch(e){ if(e && e.name === "AbortError") return { ok:false, aborted:true }; }
   }
   // ③ 共有（Androidはここ）
@@ -8062,7 +8080,7 @@ async function spSaveFile(rec){
       return { ok:true, title:"共有で渡しました", msg:(sr.name[0] || fname) + "\n" + sizeTxt
         + "\n\n中身はきちんと入っています（消えていません）。\n\n"
         + "渡した先が、PCで読み込むフォルダなら\nそのままPCで読めます。"
-        + shareRenameNote(sr.as), warn:true };
+        + shareRenameNote(sr.as) + lapsedLine(), warn:true };
     }
   }
   // ④ ダウンロード
@@ -8075,7 +8093,7 @@ async function spSaveFile(rec){
   return { ok:true, title:"ダウンロードに入れました", msg: fname + "\n" + sizeTxt
     + "\n\n中身はきちんと入っています（消えていません）。\n\n"
     + "この端末の「ダウンロード」に入りました。\n"
-    + "PCで読み込むフォルダとちがう場合は、\nそのフォルダへ移してください。", warn:true };
+    + "PCで読み込むフォルダとちがう場合は、\nそのフォルダへ移してください。" + lapsedLine(), warn:true };
 }
 function spStale(rec){ return !rec.fileSavedAt || (rec.rev | 0) > (rec.fileRev | 0); }
 /* ---- 画面 ---- */
