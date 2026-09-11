@@ -1110,7 +1110,7 @@ const GENBA_SCHEMA_VER = 1;
 const APP_NAME_SHORT = "現場入力";
 /* 版は「増えていくだけの通し番号」。メイン（積算・図面）と同じ番号体系で、
    番号が小さいほうが古い。 */
-const APP_VERSION = "155";
+const APP_VERSION = "156";
 function photoContentId(dataUri){
   if(!dataUri || typeof dataUri !== "string") return "";
   let a = 5381, b = 0;
@@ -1143,7 +1143,7 @@ const GENBA_KNOWN_KEYS = new Set([
   "tv_rooms","tv_bd","tv_sp","tv_term",
   "wire_overrides","qty_overrides","node_offsets","meas_transforms","node_existing_overrides",
   "text_annotations","measurements","chosho_photos","asbestos","antenna_guide",
-  "_origin","_schemaVer","editedAt","_draftId","_passthrough","_otherFile",
+  "_origin","_schemaVer","editedAt","_draftId","_passthrough","_otherFile","_fileBase",
   "chosho_photos_thumb","chosho_photo_count"   // PC物件スナップショット専用メタは再emitしない
 ]);
 
@@ -2694,7 +2694,18 @@ function bindEvents(root){
   // 写真
   const camBtn=root.querySelector("#cam-btn"); if(camBtn) camBtn.addEventListener("click",()=>document.getElementById("cam-input").click());
   const pickBtn=root.querySelector("#pick-btn"); if(pickBtn) pickBtn.addEventListener("click",()=>document.getElementById("pick-input").click());
-  root.querySelectorAll("[data-photodel]").forEach(el=>el.addEventListener("click",()=>{ M.chosho_photos.splice(+el.getAttribute("data-photodel"),1); saveDraft(); refreshPhotos(); }));
+  root.querySelectorAll("[data-photodel]").forEach(el=>el.addEventListener("click",()=>{
+    /* PCのファイルに入っている写真は、この端末では消せない（写真はいかなる経路でも減らさない）。
+       保存のときに止めるより、押したその場で言う方が分かりやすい。 */
+    const i0 = +el.getAttribute("data-photodel");
+    const p0 = (M.chosho_photos || [])[i0];
+    const id0 = p0 ? String(p0.id || (p0.dataUri ? photoContentId(p0.dataUri) : "")) : "";
+    const b0 = fileBaseGet(M);
+    if(id0 && b0 && b0.photos.some(x => x.id === id0)){
+      uiAlert("この写真はPCのファイルに入っています。\n\nこの端末では消せません。\n消すときはPCでお願いします。");
+      return;
+    }
+    M.chosho_photos.splice(i0,1); saveDraft(); refreshPhotos(); }));
   root.querySelectorAll("[data-photolbl]").forEach(el=>el.addEventListener("input",()=>{ M.chosho_photos[+el.getAttribute("data-photolbl")].label=el.value; saveDraftQuiet(); }));
   // 電波測定の各値（再描画しない＝入力・フォーカスを妨げない）
   root.querySelectorAll("[data-meas]").forEach(el=>el.addEventListener("input",()=>{
@@ -3791,6 +3802,11 @@ function shareRenameNote(as){
 let _lastSaveInfo = null;      // 直前の保存がどこへ入ったか（暗幕に出す）
 async function saveJsonRun(){
   _lastSaveInfo = null;
+  /* ★この端末でまだ何も入力していない戸別は、PCのファイルを書き替えない★
+     台帳から開いただけ・管理番号を打っただけ、の戸別を書くと
+     PCの写真・図面・積算が現場の既定値で潰れる。判定は下の M._touched=true より前。
+     相手のファイルを読めないスマホ・共有・ダウンロードでも効く、唯一の守り。 */
+  const nothingNew = isNothingNewHere(M);
   const state=buildState();
   const json=JSON.stringify(state);
   const blob=new Blob([json],{type:"application/json"});
@@ -3812,8 +3828,20 @@ async function saveJsonRun(){
      そのあとの「保存先を選ぶ」窓が開けなくなって、
      ダウンロードへ落ちる。すでに許可があるフォルダだけ使う。
      許可を取り直すのは「まとめて保存」の役目。 */
+  if(nothingNew){
+    _lastSaveInfo = { title: "PCの中身をそのまま残しました",
+      msg: "この戸別は、この端末でまだ何も入力していません。\n\n"
+         + "PCのファイル（" + fname + "）は書き替えていません。\n写真も工事日も、そのまま残っています。\n\n"
+         + "入力してから、もう一度「保存」を押してください。", warn: false };
+    toast("この端末で入力していないので、書き替えていません");
+    return true;                        // 💾は付けない（渡すものが無い）
+  }
   let dir = await saveDirGet();
   if(dir && !(await saveDirOk(dir, false))) dir = null;
+  /* ★控え・写真IDの副本が知っている写真が、この端末に無いとき★
+     ここではまだ止めない。「相手のファイルを読んで和集合にできたか」は道によって違うので、
+     書き込みの直前ごとに photoGateStop() で止める（下の4か所）。
+     ここで一括して止めると、1回保存したあと2回目が保存できなくなる。 */
   M._touched = true;     // 明示的に保存したものは、中身が薄くても下書きに残す
   await persistDraft();  // 下書きは保存（ただし💾＝JSON書出済フラグは“実際に書き出せた時だけ”後で付ける）
   if(dir){
@@ -3821,13 +3849,47 @@ async function saveJsonRun(){
       /* ★書き潰す前に、いまそのファイルに入っている中身を読んで融合する★
          写真は和集合（相手にしか無い写真は必ず残す）。こちらが空のところは
          相手の中身を消さない。読めないときは今までどおり、そのまま書く。 */
-      let mergedNote = "";
-      const oldJson = await readExistingCaseFile(dir, fname);
-      if(oldJson){
-        const mg = mergeIntoState(state, oldJson);
-        if(mg.kept.length){
-          mergedNote = "\n（ファイルに入っていた " + mg.kept.join("・") + " を残しました）";
-          console.info("[保存] ファイルの中身を残しました:", mg.kept.join("・"));
+      let mergedNote = "", mgKeys = [], primary = null;
+      const cf = await readExistingCaseFiles(dir, fname, state.chosho_mgmt_no);
+      primary = cf.primary;
+      if(primary){
+        const base = fileBaseGet(M);
+        const mg = mergeIntoState(state, primary, { model:M, base:base, fname:fname,
+                                                    mode:"write", others:cf.others, askable:true });
+        if(mg.stop){
+          await uiAlert("そのファイルは " + mg.reason + "\n\nファイル名を確かめてください。保存していません。");
+          return true;
+        }
+        if(mg.conflicts.length) await mergeApplyAnswers(state, mg.conflicts);
+        if(await mergeApplyBuild(state, mg)) mergedNote += "\n（材料はこの端末の内容にしました）";
+        else if(mg.buildAsk) mergedNote += "\n（材料はPCのファイルの内容を残しました）";
+        if(!baseUseValues(base) && (mg.mine.length || mg.conflicts.length)){
+          /* 控えが無い＝「PCが直したのか、現場が直したのか」を見分けられない。1回だけ確かめる。 */
+          const what = Array.from(new Set(mg.mine.concat(mg.conflicts.map(c => c.label)))).join("・");
+          if(!(await uiConfirm("PCのファイルに中身が入っています。\n\n" + what + "\n\n"
+              + "このまま保存すると、上のものはこの端末の内容に置き換わります。\n"
+              + "（📷 写真は消えません。両方まとめて残ります）\n\n"
+              + "先に「📂 戸別ファイルを読み込んで編集する」で読み込むと、\nPCの中身を残したまま続きを入力できます。\n\n"
+              + "それでも、このまま保存しますか？"))) return false;
+        }
+        mgKeys = mg.changed;
+        if(mg.kept.length) mergedNote += "\n（ファイルに入っていた " + mg.kept.join("・") + " を残しました）";
+        if(mg.removed.length) mergedNote += "\n（PCで消された "
+          + Array.from(new Set(mg.removed.map(mergeLabelOf))).join("・") + " を、こちらも消しました）";
+        if(cf.names.length > 1) mergedNote += "\n（同じ戸別のファイルが " + cf.names.length + " つありました。写真はどれも残しました。要らない方はPCで片付けてください）";
+      }
+      /* フォルダにその戸別のファイルが無い＝和集合にする相手がいない。
+         控え・副本が知っている写真が手元に無いまま新しく書くと、その写真は消える。 */
+      if(!primary && !cf.others.length && await photoGateStop(M, state)) return true;
+      /* ★融合に穴があっても、読めたファイルの写真が1枚でも落ちるなら書かない★ */
+      {
+        const lost = photoLossVsFiles(state, [primary].concat(cf.others).filter(Boolean));
+        if(lost){
+          _lastSaveInfo = { title: "⚠ 写真が減りそうなので、保存を止めました",
+            msg: "ファイルに入っている写真 " + lost + "枚 が、書こうとした中身に入っていません。\n\n"
+               + "保存していません。もう一度「📂 戸別ファイルを読み込んで編集する」から読み込んでください。", warn: true };
+          toast("⚠ 写真が減りそうなので保存していません");
+          return true;
         }
       }
       const blob2 = new Blob([JSON.stringify(state)], { type:"application/json" });
@@ -3847,9 +3909,16 @@ async function saveJsonRun(){
              + "書いたあとに読み返したところ、中身が合いませんでした。\n" + bad
              + "\n\nもう一度「保存」を押すか、\n台帳の「まとめて保存」をお試しください。", warn: true };
         toast("⚠ 保存を確かめられませんでした：" + fname);
+        try{ const b = fileBaseGet(M); if(b) b.stale = true; }catch(_){}   // 値の見比べはやめる（写真の歯止めは残す）
         return true;                       // 💾は付けない＝「まとめて保存」に残す
       }
-      await markDraftSaved(); saveStateFile();
+      /* ★ファイルから採った分をモデルにも取り込み、控えを取り直す★
+         ここを外すと控えとモデルがずれ、次の保存でPCの中身を消してしまう。 */
+      fileBaseAfterWrite(M, state, fname, primary, mgKeys);
+      await persistDraft(); await markDraftSaved(); saveStateFile();
+      if(mgKeys.length) mergedNote += "\n（ファイルに入っていた "
+        + Array.from(new Set(mgKeys.map(mergeLabelOf))).join("・") + " を画面にも入れました）";
+      render();
       _lastSaveInfo = { title: "保存しました", msg: "「" + (dir.name || "選んだフォルダ") + "」の中\n" + fname
         + "\n" + saveSizeText(JSON.stringify(state), state)
         + "\n（書いたあと読み返して、中身が入っていることを確かめました）"
@@ -3868,18 +3937,37 @@ async function saveJsonRun(){
       /* ★覚えているフォルダの道と同じように、選んだファイルの中身を読んで融合する★
          ここを通さないと、保存先をまだ覚えていない初回や、ブラウザを開き直したあとの
          最初の保存で、PCの写真や工事日が消えてしまう。 */
-      let pickedNote = "";
+      let pickedNote = "", pickedKeys = [], pickedOld = null;
       try{
         const cur = await handle.getFile();
         const txt = await cur.text();
         if(txt && txt.trim()){
           const oj = JSON.parse(txt);
           if(flowShareIsCase(oj)){
-            const mgp = mergeIntoState(state, oj);
+            pickedOld = oj;
+            const base = fileBaseGet(M);
+            const mgp = mergeIntoState(state, oj, { model:M, base:base, fname:(handle.name || fname),
+                                                    mode:"write", others:[], askable:true });
+            if(mgp.stop){
+              await uiAlert("そのファイルは " + mgp.reason + "\n\nファイル名を確かめてください。保存していません。");
+              return true;
+            }
+            if(mgp.conflicts.length) await mergeApplyAnswers(state, mgp.conflicts);
+            if(await mergeApplyBuild(state, mgp)) pickedNote += "\n（材料はこの端末の内容にしました）";
+            else if(mgp.buildAsk) pickedNote += "\n（材料はPCのファイルの内容を残しました）";
+            pickedKeys = mgp.changed;
             if(mgp.kept.length) pickedNote = "\n（ファイルに入っていた " + mgp.kept.join("・") + " を残しました）";
+            const lost = photoLossVsFiles(state, [oj]);
+            if(lost){
+              _lastSaveInfo = { title: "⚠ 写真が減りそうなので、保存を止めました",
+                msg: "ファイルに入っている写真 " + lost + "枚 が、書こうとした中身に入っていません。\n\n保存していません。", warn: true };
+              return true;
+            }
           }
         }
       }catch(_){ /* 新しいファイル＝読めなくてふつう。そのまま書く */ }
+      /* 読めなかった＝和集合にできていない。控え・副本が知っている写真が手元に無ければ書かない。 */
+      if(!pickedOld && await photoGateStop(M, state)) return true;
       const w=await handle.createWritable();
       await w.write(new Blob([JSON.stringify(state)], { type:"application/json" })); await w.close();
       // 覚えているフォルダへ書いたときと同じように、読み返して中身を確かめる
@@ -3893,6 +3981,10 @@ async function saveJsonRun(){
         return true;                             // 💾は付けない＝「まとめて保存」に残す
       }
       await markDraftSaved(); saveStateFile();   // ← 読み返して確かめてから💾
+      fileBaseAfterWrite(M, state, (handle.name || fname), pickedOld, pickedKeys);
+      if(pickedKeys.length) pickedNote += "\n（ファイルに入っていた "
+        + Array.from(new Set(pickedKeys.map(mergeLabelOf))).join("・") + " を画面にも入れました）";
+      render();
       _lastSaveInfo = { title: "保存しました", msg: (handle.name || fname) + "\n" + saveSizeText(JSON.stringify(state), state) + pickedNote
         + "\n（書いたあと読み返して、中身が入っていることを確かめました）", warn: false };
       toast("保存しました："+fname);
@@ -3901,13 +3993,17 @@ async function saveJsonRun(){
   }
   // ② Web Share（ファイル共有→Dropbox/ドライブ等）
   {
-    const sr = await shareFilesSmart([{ name: fname, text: json }]);
+    if(await photoGateStop(M, state)) return true;
+    /* ★いまの state から作り直す★ 上のフォルダの道で融合していた場合、
+       先に作った json は融合前のものなので、そのまま渡すとPCの写真が消える。 */
+    const json2 = JSON.stringify(state), size2 = saveSizeText(json2, state);
+    const sr = await shareFilesSmart([{ name: fname, text: json2 }]);
     if(sr.aborted) return false;
     if(sr.ok){
       await markDraftSaved(); saveStateFile();
       /* 共有先がPCの読み込むフォルダなら、これで正しく入っている。
          どこへ渡したかはこちらでは分からないので、決めつけずに事実だけ書く。 */
-      _lastSaveInfo = { title: "共有で渡しました", msg: (sr.name[0] || fname) + "\n" + sizeTxt
+      _lastSaveInfo = { title: "共有で渡しました", msg: (sr.name[0] || fname) + "\n" + size2
         + "\n\n中身はきちんと入っています（消えていません）。\n\n"
         + "渡した先が、PCで読み込むフォルダなら\nそのままPCで読めます。\n"
         + "ちがう場所へ渡したときは、そのフォルダへ移してください。"
@@ -3918,12 +4014,14 @@ async function saveJsonRun(){
     }
   }
   // ③ ダウンロード
-  const url=URL.createObjectURL(blob);
+  if(await photoGateStop(M, state)) return true;
+  const json3 = JSON.stringify(state), size3 = saveSizeText(json3, state);   // 融合した分を反映
+  const url=URL.createObjectURL(new Blob([json3],{type:"application/json"}));
   const a=document.createElement("a"); a.href=url; a.download=fname; document.body.appendChild(a); a.click();
   setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); },4000); // 大量写真でDLダイアログが遅延しても失敗しないよう余裕を持つ
   await markDraftSaved(); saveStateFile();
   // ダウンロードフォルダに落ちただけ。PCが読むフォルダとは別なので、はっきり言う。
-  _lastSaveInfo = { title: "ダウンロードに入れました", msg: fname + "\n" + sizeTxt
+  _lastSaveInfo = { title: "ダウンロードに入れました", msg: fname + "\n" + size3
     + "\n\n中身はきちんと入っています（消えていません）。\n\n"
     + "この端末の「ダウンロード」に入りました。\n"
     + "PCで読み込むフォルダとちがう場合は、\nそのフォルダへ移してください。"
@@ -3933,22 +4031,10 @@ async function saveJsonRun(){
 }
 
 // 既存JSONを読み込んでフォームへ（plainのみ。暗号化(.enc/.hyb)はPCで）
-async function loadStateInto(s){
-  clearTimeout(_persistTimer); await persistDraft(); // 取込前に現在編集中を確定保存（直近入力喪失を防ぐ）
-  /* ★同じ戸別を、現場で入力したあとに読み込んだとき★
-     帯の「📂 戸別ファイルを読み込んで編集する」はこの道を通る。そのまま入れ替えると、
-     現場で入れた測定値・工程の印・備考・電話が消えてしまう。
-     現場で入れたものを土台にして、ファイルの中身は「こちらがまだ何も入れていないところ」
-     だけを入れる（写真はあとで和集合にする）。 */
-  try{
-    const noNow  = toHalfWidthAn(String((M && M.chosho_mgmt_no) || "").trim());
-    const noFile = toHalfWidthAn(String((s && s.chosho_mgmt_no) || "").trim());
-    if(noNow && noNow === noFile && M && M._touched === true){
-      const mine = buildStateOf(M);
-      mergeIntoState(mine, s);
-      s = mine;
-    }
-  }catch(e){ console.warn("読み込みの融合に失敗（そのまま読み込みます）", e); }
+/* ファイルの中身（s）を、このアプリのモデルの形にする。
+   ★控えを作るときもここを通す★ 生のファイルをそのまま控えると、
+   読み込みの整え（meas_show・ガイド・TVの配列）の分だけ「現場が直した」に見えてしまう。 */
+function modelFromCaseState(s, skipPhotos){
   const m=freshModel();
   // 文字列/基本フィールド
   for(const k in DEFAULTS){ if(s[k]!==undefined && k!=="outsource_fee_on"&&k!=="outsource_fee_amount"&&k!=="outsource_fee_auto") m[k]=s[k]; }
@@ -3969,7 +4055,7 @@ async function loadStateInto(s){
   if(s.node_existing_overrides) m.node_existing_overrides=Object.assign({},s.node_existing_overrides);
   if(Array.isArray(s.text_annotations)) m.text_annotations=s.text_annotations.map(a=>({id:a.id||("anno_"+Math.random().toString(36).slice(2)),x:+a.x||0,y:+a.y||0,text:String(a.text||""),color:a.color||"#d32f2f",size:a.size||18}));
   if(s.measurements&&Array.isArray(s.measurements.channels)) m.measurements=JSON.parse(JSON.stringify(s.measurements));
-  if(Array.isArray(s.chosho_photos)) m.chosho_photos=s.chosho_photos
+  if(!skipPhotos && Array.isArray(s.chosho_photos)) m.chosho_photos=s.chosho_photos
       .map(p=>{
         const dataUri=(p&&p.dataUri)||null;
         const o={label:String((p&&p.label)||""),dataUri};
@@ -3983,9 +4069,37 @@ async function loadStateInto(s){
   m.antenna_guide=normalizeAntennaGuide(s.antenna_guide);
   // 未知トップレベルキー（PC側の ag_placement 等）を退避＝書出し時にそのまま復元する（往復での欠落防止）。
   m._passthrough={};
-  for(const k in s){ if(!GENBA_KNOWN_KEYS.has(k)) m._passthrough[k]=s[k]; }
+  /* 持ち越してはいけないキー。受付台帳のJSONを間違えて読んだときの type/rows/sheets と、
+     端末の中だけの控え（_fileBase）を、戸別ファイルへ書き出さないため。 */
+  const PASS_NG = { type:1, rows:1, sheets:1, _fileBase:1 };
+  for(const k in s){ if(!GENBA_KNOWN_KEYS.has(k) && !PASS_NG[k]) m._passthrough[k]=s[k]; }
   syncTvArrays(m);
   m.meas_show="yes"; // 電波測定表は常に掲載扱い（UIトグル廃止・取込JSONの"no"を上書き）
+  return m;
+}
+let _loadKeptNote = "";
+async function loadStateInto(s, fname){
+  _loadKeptNote = "";
+  clearTimeout(_persistTimer); await persistDraft(); // 取込前に現在編集中を確定保存（直近入力喪失を防ぐ）
+  const raw = s;                                    // ★控えは「元のファイル」から作る（融合後の s ではない）
+  /* ★同じ戸別を、現場で入力したあとに読み込んだとき★
+     そのまま入れ替えると、現場で入れた測定値・工程の印・備考・電話が消えてしまう。
+     現場で入れたものを土台にして、ファイルの中身を融合する。 */
+  try{
+    const noNow  = draftNoKey((M && M.chosho_mgmt_no) || "");
+    const noFile = draftNoKey((s && s.chosho_mgmt_no) || "");
+    if(noNow && noNow === noFile && M && M._touched === true){
+      const mine = buildStateOf(M);
+      const mgl = mergeIntoState(mine, s, { model:M, base:fileBaseGet(M), mode:"load", askable:false });
+      s = mine;
+      /* 日時・備考が両方で違っていたら、この端末の内容を残したことを必ず言う
+         （黙って残すと、PCの内容が入ったと思い込んだまま保存してしまう） */
+      if(mgl.conflicts.length){
+        _loadKeptNote = Array.from(new Set(mgl.conflicts.map(c => c.label))).join("・");
+      }
+    }
+  }catch(e){ console.warn("読み込みの融合に失敗（そのまま読み込みます）", e); }
+  const m = modelFromCaseState(s, false);
   /* 戸別ファイルから開いた＝PCの中身を手元に持っている。ここから保存しても消えない。 */
   m._fromCaseFile = true;
   m._viewOnly = false;
@@ -4005,7 +4119,21 @@ async function loadStateInto(s){
   // 保存データがガイドと食い違っている場合（例: 旧ch46="triple"のままガイドは2本等）の是正。
   // ガイドが有効な物件は、取込直後にガイド基準で再反映して整合を取る（未設定の物件は触らない）。
   if(antennaGuideActive(M.antenna_guide)) autoReflectGuideToModel(M.antenna_guide);
+  /* ★ファイルの中身を控える（3つ見比べの土台）★ ガイドの整合取りのあとの値で作る。 */
+  try{
+    if(flowShareIsCase(raw) && draftNoKey(raw.chosho_mgmt_no)){
+      fileBaseSet(M, fileBaseStateOf(raw), fname, raw);
+      pbaseSet(M.chosho_mgmt_no, (raw.chosho_photos || []).filter(p => p && p.dataUri)
+        .map(p => String(p.id || photoContentId(p.dataUri))));
+    }
+  }catch(e){ console.warn("ファイルの控えを取れませんでした（守りは弱くなります）", e); }
   resetOpenState(); render(); saveDraft();
+  if(_loadKeptNote){
+    await uiAlert("読み込みました。\n\nただし " + _loadKeptNote + " は、PCのファイルとこの端末で違っていました。\n\n"
+      + "この端末で入力した内容をそのまま残しています。\n"
+      + "PCの内容にしたいときは、その欄を手で直してください。");
+    _loadKeptNote = "";
+  }
 }
 document.getElementById("import-file").addEventListener("change",e=>{
   const f=e.target.files[0]; e.target.value="";
@@ -4022,7 +4150,7 @@ document.getElementById("import-file").addEventListener("change",e=>{
       if(!(data.work_type||data.chosho_mgmt_no||data.chosho_cust_name)){
         if(!(await uiConfirm("戸別JSONとして認識できませんでした。読み込みますか？"))) return;
       }
-      await loadStateInto(data);
+      await loadStateInto(data, f.name);
       closeDraftModal();
       toast("読込みました");
     }catch(err){ await uiAlert("読込みに失敗しました："+err.message); }
@@ -4190,6 +4318,13 @@ function saveOverlayHide(){
   clearTimeout(_saveOvHide); _saveOvHide = null;
   const d = document.getElementById("save-ov"); if(d) d.remove();
 }
+/* 控えがあるか（守られているか）を、小さく出す。出さないと守りが無い状態が静かに続く。 */
+function saveBarBaseText(){
+  const b = fileBaseGet(M);
+  if(!b) return '<span class="sb-base none" title="まだ戸別ファイルを読み込んでいません。読み込むと、PCの中身を残したまま保存できます">📎 控えなし</span>';
+  if(b.stale) return '<span class="sb-base warn" title="書いたあとの読み返しが合いませんでした。もう一度読み込んでください">📎 控えが古いかも</span>';
+  return '<span class="sb-base ok" title="' + esc(b.file || "戸別ファイル") + ' の中身を控えてあります（' + _hhmm(b.at) + ' 時点）">📎 控えあり</span>';
+}
 function renderSaveBar(){
   renderSaveButtons();
   const el=document.getElementById("savebar"); if(!el) return;
@@ -4299,6 +4434,8 @@ function _recHasContent(rec){
     || (rec.model.chosho_photos && rec.model.chosho_photos.length)));
 }
 async function persistDraft(){
+  /* 管理番号を変えたら、前の戸別の控えは使えない。捨てたら【見るだけ】の関門も掛け直す。 */
+  try{ if(M && M._fileBase && !fileBaseGet(M)) M._fromCaseFile = false; }catch(_){}
   try{
     // 中身の無い下書き（管理番号も入力も写真も工程の印も無い）は保存しない。
     // ※ draftKey() より前に返すこと。draftKey() は一時IDを採番してしまうため。
@@ -4323,11 +4460,15 @@ async function persistDraft(){
     if(M._lastDraftKey && M._lastDraftKey !== key){ try{ await idbDel(M._lastDraftKey); }catch(_){} draftInfoForget(M._lastDraftKey); }
     M._lastDraftKey = key;
     const cur = (key===wantKey) ? prev : await idbGet(key);
-    // 画面を通さずに中身が変わっていた場合（台帳から引き継いだ等）も「変更あり」に数える。
-    // どの道から変わっても、PCへ渡し忘れないようにするための保険。
+    /* 画面を通さずに中身が変わっていた場合（台帳から引き継いだ等）も「変更あり」に数える。
+       どの道から変わっても、PCへ渡し忘れないようにするための保険。
+       ★ただし「現場でこの端末が入力した」印（_touched）は立てない★
+       立てると、受付台帳を写しただけの戸別が「渡すものがある」ことになり、
+       この端末で何も入力していない戸別を書き替えない守り（isNothingNewHere）が
+       効かなくなって、PCの写真・図面・積算を既定値で潰してしまう。 */
     const sig = stateSig(M);
     if(cur && cur.sig && cur.sig !== sig && (M._rev|0) <= (cur.rev|0)){
-      M._rev = (cur.rev|0) + 1; M._touched = true;
+      M._rev = (cur.rev|0) + 1;
     }
     const rec={ key, model:M, savedAt:Date.now(), fileSavedAt:(cur&&cur.fileSavedAt)||0,
       mgmt:M.chosho_mgmt_no||"", cust:M.chosho_cust_name||"", photos:(M.chosho_photos||[]).length,
@@ -4694,7 +4835,8 @@ function receptionFlowOf(row){
 }
 /* いま台帳から受け取った内容の控え（次に「PCが直したか」を見分けるための基準） */
 function rcSrcOf(row){
-  return { name:String((row&&row.name)||""), addr:String((row&&row.addr)||""),
+  return { mgmt:String((row&&row.mgmt_no)||""),
+           name:String((row&&row.name)||""), addr:String((row&&row.addr)||""),
            tel:String((row&&row.tel)||""),   date:String((row&&row.date)||""),
            time:String((row&&row.time)||""),
            meet:String((row&&row.meet)||""), note:String((row&&row.note)||""),
@@ -4751,9 +4893,11 @@ function unsavedTargets(){
   add(M.chosho_mgmt_no);                     // いま開いている戸別（下書きに書く前でも拾う）
   return out.sort();
 }
-async function markDraftSavedFor(key){
+async function markDraftSavedFor(key, model){
   try{
     const rec = await idbGet(key);
+    /* 控えを取り直したモデルを、下書きへも入れ直す（控えとモデルがずれないように） */
+    if(rec && model && rec.model !== model){ rec.model = model; rec.sig = stateSig(model); }
     if(rec){ rec.fileSavedAt = Date.now(); rec.fileRev = (rec.rev|0); rec.other = "";
              if(rec.model) delete rec.model._otherFile;      // 保存できた＝この端末の内容になった
              const wasStale = _draftInfoStale;
@@ -4836,14 +4980,19 @@ async function saveAllDrafts(mode){
       const row = byRow[no];
       if(!row) continue;                       // 台帳に無い戸別はそのまま書き出す
       if(no === openNo){                       // いま開いている戸別は画面ごと直す
-        if(receptionApplyToModel(M, row)){ applied++; saveDraftQuiet(); render(); }
+        /* ★saveDraftFromLedger を使うこと★ saveDraftQuiet は「現場で入力した」印を立てるので、
+           台帳を写しただけの戸別が書き替えの対象に戻り、PCの写真・図面・積算を潰す。 */
+        if(receptionApplyToModel(M, row)){ applied++; saveDraftFromLedger(); render(); }
       } else {
         const rec = byNo[no];
         if(rec && rec.model && receptionApplyToModel(rec.model, row)){
           // 回数の持ち主は中身（model._rev）。控えだけ進めると、開いたときに巻き戻る
           rec.model._rev = (rec.model._rev | 0) + 1;
-          rec.model._touched = true;
-          rec.rev = rec.model._rev; rec.touched = true;
+          /* ★「現場でこの端末が入力した」印は立てない★（saveDraftFromLedger と同じ）
+             立てると、台帳を入れ直しただけの戸別が「渡すものがある」ことになり、
+             G1（この端末で何も入力していない戸別は書かない）を自分で破ってしまう。
+             受付台帳の値はもともとPCのものなので、この端末から書き戻す必要は無い。 */
+          rec.rev = rec.model._rev;
           rec.sig = stateSig(rec.model);
           applied++;
           try{ await idbPut(rec); }catch(e){ console.warn("下書きの更新に失敗", no, e); }
@@ -4858,16 +5007,33 @@ async function saveAllDrafts(mode){
     }
   }
   const files = [];
+  const skippedNothing = [];                // この端末で何も入力していない戸別（書き替えない）
   const missing = [];                       // 下書きが見つからず書き出せなかった戸別
   nos.forEach(no => {
     const rec = byNo[draftNoKey(no)];
     if(!rec || !rec.model){ missing.push(no); return; }
+    /* ★この端末で何も入力していない戸別は、PCのファイルを書き替えない★
+       （台帳の印が付いているだけの戸別も同じ。PCの写真・図面・積算を守る） */
+    if(isNothingNewHere(rec.model)){ skippedNothing.push(no); return; }
     const st = buildStateOf(rec.model);
     files.push({ no, key: rec.key, name: sanitizeFilename(draftNoKey(no) || no) + ".json",
                  text: JSON.stringify(st), state: st,   // state＝書いたあと読み返して確かめるため
+                 model: rec.model, rec: rec,            // ★戸別ごとの控えで判定する（他の戸別のものを使わない）
                  other: (rec.model && rec.model._otherFile) || "" });
   });
-  if(!files.length){ await uiAlert("まとめて保存できる戸別はありません。"); return; }
+  if(!files.length){
+    if(skippedNothing.length || openedOnly.length){
+      /* 台帳の印が付いているだけの戸別も、ここに入る。
+         「押したのに何も起きない」に見えるので、必ず理由と、どうすれば書けるかを言う。 */
+      await uiAlert("書き替える戸別はありません。\n\n"
+        + "選んだ " + (skippedNothing.length + openedOnly.length) + " 件は、この端末でまだ何も入力していません。\n"
+        + "（受付台帳の印が付いているだけの戸別も同じです）\n\n"
+        + "PCのファイルはそのままです。写真・工事日・図面・積算は消えません。\n\n"
+        + "その戸別を開いて入力してから、もう一度押してください。");
+      return;
+    }
+    await uiAlert("まとめて保存できる戸別はありません。"); return;
+  }
   const listTxt = files.slice(0, 8).map(f => "・" + f.name).join("\n")
     + (files.length > 8 ? ("\n・ほか " + (files.length - 8) + " 件") : "");
   const head = isAll
@@ -4884,12 +5050,7 @@ async function saveAllDrafts(mode){
           上の一文だけだと「開いただけは全部守られる」と読めてしまうので、その分は
           件数を添えて言い、そのときどうすればよいかまで書く（この端末では外せない）。 */
        + (markedOnly.length
-          ? ("\n\n※ 台帳の印（下見・ビラ・完了など）が付いている戸別 " + markedOnly.length + " 件は、開いただけでも上書きします。\n"
-             + "PCでその戸別に写真を入れているなら、このボタンは押さないでください。\n"
-             /* 同じ戸別は「まとめて保存」でも上書きされる。こちらだけ止めても、
-                すぐ上の大きなボタンで同じことが起きるので、必ず一緒に言う。 */
-             + "上の「まとめて保存」でも同じように上書きします。\n"
-             + "この端末では、その戸別だけを外せません。台帳の入れ直しはPCの方でしてください。")
+          ? ("\n\n※ 台帳の印が付いているだけの戸別 " + markedOnly.length + " 件も、この端末で入力していれば書き替えます。")
           : "") + "\n\n")
     : (files.length + "件をまとめて保存します。\n\n"
        + (markedOnly.length
@@ -4917,7 +5078,10 @@ async function saveAllDrafts(mode){
        + "PCが読み込むフォルダを選んでください。"
        + (saveDirName() ? ("\n（前回は「" + saveDirName() + "」でした。違う所にしたい時はここで選び直せます）") : ""))
     : "";
-  if(!(await uiConfirm(head + listTxt + otherTxt + missTxt
+  const nothingTxt = skippedNothing.length
+    ? ("\n\n※ この端末で何も入力していない戸別 " + skippedNothing.length + " 件は、PCのファイルを書き替えません（写真も工事日も残ります）")
+    : "";
+  if(!(await uiConfirm(head + listTxt + otherTxt + missTxt + nothingTxt
       + (noNum && !isAll ? ("\n\n※ 管理番号の無い下書き " + noNum + " 件は対象外です") : "")
       + pickTxt))) return;
 
@@ -4947,18 +5111,32 @@ async function saveAllDrafts(mode){
   const okNos = [], ngNos = [];
   let where = "";
   if(dir){
-    const keptAll = [];
+    const keptAll = [], conflictNos = [], photoNg = [], buildNos = [];
+    try{ await caseFileIndex(dir); }catch(_){}     // フォルダの名前一覧は1回だけ読む
     for(const f of files){
       try{
         /* ★1件ずつの保存と同じように、書き潰す前にいまの中身を読んで融合する★
            ここを通さないと、台帳から開いただけの戸別で PCの写真が0枚になる。 */
-        const old0 = await readExistingCaseFile(dir, f.name);
-        if(old0){
-          const mg0 = mergeIntoState(f.state, old0);
-          if(mg0.kept.length){
+        const cf0 = await readExistingCaseFiles(dir, f.name, f.no);
+        f.cf = cf0; f.keys = [];
+        if(cf0.primary){
+          const mg0 = mergeIntoState(f.state, cf0.primary, { model:f.model, base:fileBaseGet(f.model),
+                                                             fname:f.name, mode:"write", others:cf0.others, askable:false });
+          if(mg0.stop){ console.warn("まとめて保存 別の戸別のファイル", f.name, mg0.reason); ngNos.push(f.no); continue; }
+          f.keys = mg0.changed;
+          f.conflicts = mg0.conflicts;
+          if(mg0.kept.length || mg0.changed.length){
             f.text = JSON.stringify(f.state);
-            keptAll.push((f.no || f.name) + "（" + mg0.kept.join("・") + "）");
+            if(mg0.kept.length) keptAll.push((f.no || f.name) + "（" + mg0.kept.join("・") + "）");
           }
+          if(mg0.conflicts.length) conflictNos.push(f.no + "（" + mg0.conflicts.map(c => c.label).join("・") + "）");
+          if(mg0.buildAsk && Object.keys(mg0.buildSwap).length) buildNos.push(f.no);
+        }
+        /* 写真が1枚でも減るなら書かない */
+        {
+          const lost = photoLossVsFiles(f.state, [cf0.primary].concat(cf0.others).filter(Boolean));
+          const miss = (cf0.primary || cf0.others.length) ? 0 : await photosMissing(f.model, f.state);
+          if(lost || miss){ photoNg.push(f.no); ngNos.push(f.no); continue; }
         }
         const fh = await dir.getFileHandle(f.name, { create:true });
         const w = await fh.createWritable();
@@ -4968,7 +5146,11 @@ async function saveAllDrafts(mode){
            確かめずに💾を付けると、中身が入っていないファイルでも
            「PCへ渡した」扱いになり、次の「まとめて保存」からも外れて取り残される。 */
         const bad = await saveVerify(fh, f.state);
-        if(bad){ console.warn("まとめて保存 読み返し不一致", f.name, bad); ngNos.push(f.no); continue; }
+        if(bad){ console.warn("まとめて保存 読み返し不一致", f.name, bad); ngNos.push(f.no);
+                 try{ const b = fileBaseGet(f.model); if(b) b.stale = true; }catch(_){}
+                 continue; }
+        try{ fileBaseAfterWrite(f.model, f.state, f.name, f.cf && f.cf.primary, f.keys); }
+        catch(e){ console.warn("控えの取り直しに失敗", f.no, e); }
         okNos.push(f);
       }catch(e){ console.warn("まとめて保存 失敗", f.name, e); ngNos.push(f.no); }
     }
@@ -4979,8 +5161,43 @@ async function saveAllDrafts(mode){
         + (keptAll.length > 3 ? ("\nほか " + (keptAll.length - 3) + "件") : "")
         + "\n\nPCで入れた写真や工事日は、消えていません。");
     }
+    if(conflictNos.length){
+      await uiAlert("PCと この端末の両方で直していた戸別が " + conflictNos.length + " 件あります。\n\n"
+        + conflictNos.slice(0, 3).join("\n")
+        + (conflictNos.length > 3 ? ("\nほか " + (conflictNos.length - 3) + "件") : "")
+        + "\n\nまとめて保存では PCの内容を残しました。\n直したいときは、その戸別を1件ずつ開いて保存してください。");
+    }
+    if(buildNos.length){
+      await uiAlert("PCのファイルに下見の内容が入っている戸別が " + buildNos.length + " 件あります。\n\n"
+        + buildNos.slice(0, 5).join("・")
+        + (buildNos.length > 5 ? ("\nほか " + (buildNos.length - 5) + "件") : "")
+        + "\n\nまとめて保存では、材料（アンテナ・取付・ケーブルなど）はPCの内容を残しました。\n"
+        + "この端末の内容にしたいときは、その戸別を1件ずつ開いて「保存」を押してください。");
+    }
+    if(photoNg.length){
+      await uiAlert("⚠ 写真が減りそうなので、" + photoNg.length + " 件は保存していません。\n\n"
+        + photoNg.slice(0, 5).join("・")
+        + "\n\nその戸別を開いて「📂 戸別ファイルを読み込んで編集する」から読み込んでから、もう一度お試しください。");
+    }
   } else {
-    // フォルダを選べない端末：まず共有（1回の操作で全部まとめて渡せる）
+    /* ★フォルダを選べない端末（共有・ダウンロード）★
+       相手のファイルを読めないので和集合にできない。控え・写真IDの副本が知っている写真が
+       手元に無い戸別は、渡せば写真が消える。その戸別だけ外して、理由を知らせる。 */
+    const photoNg2 = [];
+    for(let i = files.length - 1; i >= 0; i--){
+      let miss = 0;
+      try{ miss = await photosMissing(files[i].model, files[i].state); }
+      catch(e){ console.warn("写真の歯止めを確かめられませんでした", files[i].no, e); }
+      if(miss){ photoNg2.push(files[i].no); ngNos.push(files[i].no); files.splice(i, 1); }
+    }
+    if(photoNg2.length){
+      await uiAlert("⚠ 写真が減りそうなので、" + photoNg2.length + " 件は渡していません。\n\n"
+        + photoNg2.slice(0, 5).join("・")
+        + "\n\nこの端末ではフォルダを読めないため、PCのファイルにある写真を足せません。\n"
+        + "その戸別を開いて「📂 戸別ファイルを読み込んで編集する」から読み込んでから、もう一度お試しください。");
+    }
+    if(!files.length){ setBusy(false); await uiAlert("渡せる戸別がありませんでした。"); return; }
+    // まず共有（1回の操作で全部まとめて渡せる）
     let shared = false;
     {
       const sr = await shareFilesSmart(files.map(f => ({ name:f.name, text:f.text })));
@@ -5005,7 +5222,7 @@ async function saveAllDrafts(mode){
       where = "ダウンロードフォルダ";
     }
   }
-  for(const f of okNos) await markDraftSavedFor(f.key);
+  for(const f of okNos) await markDraftSavedFor(f.key, f.model);
   await refreshDraftInfo();
   const sv = document.getElementById("reception-search");
   renderReceptionList(sv ? sv.value : "");
@@ -5258,6 +5475,391 @@ async function pcGuardBeforeSave(){
 }
 
 /* ============================================================
+   ファイルの控え（_fileBase）で「3つ見比べ」て融合する
+   ------------------------------------------------------------
+   現場入力の「保存」は、保存先フォルダの 管理番号.json を丸ごと書き替える。
+   PCで写真・図面・積算を入れた戸別を書き潰さないために、書く前にファイルを読んで融合する。
+
+   ★ここまでの版の間違い★
+     「作りたてと同じ値なら、まだ現場で何も入れていない」と見なしていた。
+     しかしそれでは「未入力」と「現場でわざと消した・既定値に戻した」を見分けられない。
+     そのせいで、現場で取り消した工程の印が復活し、現場で消した工事日・備考が戻り、
+     PCの間違いを現場から直せなくなっていた（実測）。
+
+   ★この版の決まり★
+     ファイルを読んだとき（📂）と、自分がファイルへ書けたときに、
+     「そのときのファイルの中身」を控え（_fileBase）としてモデルの中に持つ。
+     保存のときは 控え（base）／現場（mine）／ファイル（theirs）の3つを見比べる。
+       mine が控えと違う  → 現場が直した（消した・既定に戻したも含む）→ 現場を採る
+       theirs が控えと違う → PCが直した                                → ファイルを採る
+       両方違う            → 競合。日時と備考は1件保存のとき聞く。ほかは決まりで倒す
+     控えが無い／古いときは推測しない。写真は必ず和集合にし、ほかは現場を採る。
+     そして「この端末でまだ何も入力していない戸別は、そもそも書かない」（下の isNothingNewHere）。
+   ============================================================ */
+const FB_VER = 1, FB_KEY_MAX = 8 * 1024, FB_TOTAL_MAX = 160 * 1024;
+
+/* 値の指紋（大きい項目は値を持たず、これだけ控える） */
+function keySig(v){
+  let s; try{ s = JSON.stringify(v === undefined ? null : v); }catch(_){ s = "?"; }
+  let a = 5381, b = 0;
+  for(let i = 0; i < s.length; i++){ const c = s.charCodeAt(i); a = ((a << 5) + a + c) >>> 0; b = (c + (b << 6) + (b << 16) - b) >>> 0; }
+  const hex = x => ("00000000" + (x >>> 0).toString(16)).slice(-8);
+  return hex(a) + hex(b) + "_" + s.length;
+}
+/* 控えに入れる形にする（大きすぎるものは指紋だけにして、控え自体は捨てない） */
+function fileBaseReduce(st){
+  const state = {}, sig = {}, big = [];
+  for(const k in st){
+    if(k === "chosho_photos") continue;                 // 写真は値を持たない（容量）
+    let j; try{ j = JSON.stringify(st[k]); }catch(_){ j = ""; }
+    if(j.length > FB_KEY_MAX){ sig[k] = keySig(st[k]); continue; }
+    try{ state[k] = JSON.parse(j); }catch(_){ continue; }
+    big.push([k, j.length]);
+  }
+  let total = big.reduce((a, x) => a + x[1], 0);
+  big.sort((a, b) => b[1] - a[1]);
+  for(let i = 0; i < big.length && total > FB_TOTAL_MAX; i++){
+    const k = big[i][0];
+    sig[k] = keySig(state[k]); delete state[k]; total -= big[i][1];
+  }
+  return { state: state, sig: sig };
+}
+function fileBaseSet(model, st, fname, fileObj){
+  if(!model || !st) return;
+  const no = draftNoKey(st.chosho_mgmt_no);
+  if(!no) return;                                        // 管理番号の無いファイルは控えない
+  const r = fileBaseReduce(st);
+  model._fileBase = {
+    v: FB_VER, no: no, file: String(fname || ""), at: Date.now(),
+    fileEditedAt: String((fileObj && fileObj.editedAt) || st.editedAt || ""),
+    theirOrigin: String((fileObj && fileObj._origin) || ""), stale: false,
+    state: r.state, sig: r.sig,
+    /* ★写真は st から採れないことがある★ 読み込みの控えは fileBaseStateOf で作り、
+       そこでは容量のため chosho_photos を外してある。そのときは読んだファイルから採る。
+       ここを外すと控えの写真が0枚になり、写真の歯止め（photosMissing・写真の削除止め）が
+       まるごと効かなくなる。 */
+    photos: ((st.chosho_photos || (fileObj && fileObj.chosho_photos) || [])).filter(p => p && p.dataUri).map(p => ({
+      id: String(p.id || photoContentId(p.dataUri)), label: String(p.label || ""), chosho: !!p.chosho }))
+  };
+}
+/* 使える控えだけ返す（管理番号が変わっていたら捨てる） */
+function fileBaseGet(model){
+  const b = model && model._fileBase;
+  if(!b || b.v !== FB_VER || !b.state || typeof b.state !== "object"){ if(b && model) delete model._fileBase; return null; }
+  const no = draftNoKey(model.chosho_mgmt_no);
+  if(!no || no !== String(b.no || "")){ delete model._fileBase; return null; }
+  if(b.state.chosho_photos) delete b.state.chosho_photos;
+  if(!b.sig || typeof b.sig !== "object") b.sig = {};
+  if(!Array.isArray(b.photos)) b.photos = [];
+  return b;
+}
+function baseUseValues(b){ return !!(b && !b.stale); }               // 値の見比べに使えるか
+function baseHas(b, k){ return !!(b && ((k in b.state) || (k in b.sig))); }
+function baseSame(b, k, v){
+  if(!b) return false;
+  if(k in b.sig) return keySig(v) === b.sig[k];
+  if(!(k in b.state)) return false;
+  try{ return JSON.stringify(b.state[k]) === JSON.stringify(v); }catch(_){ return false; }
+}
+function baseBoolVal(b, k){ return !!(b && (k in b.state) && b.state[k]); }
+
+/* ---- 写真IDの副本（下書きが消えても、写真が減る保存だけは止められるように） ---- */
+const PB_KEY = "photobase";
+async function pbaseLoad(){
+  try{ const r = await idbMapGet(PB_KEY); return (r && r.data && r.data.rows) ? r.data : { v:1, at:0, rows:{} }; }
+  catch(_){ return { v:1, at:0, rows:{} }; }
+}
+async function pbaseSet(no, ids){
+  no = draftNoKey(no); if(!no) return;
+  try{
+    const d = await pbaseLoad();
+    d.rows[no] = { at: Date.now(), ids: (ids || []).filter(Boolean) };
+    const keys = Object.keys(d.rows);
+    if(keys.length > 800){
+      keys.sort((a, b) => (d.rows[a].at || 0) - (d.rows[b].at || 0));
+      keys.slice(0, keys.length - 800).forEach(k => { delete d.rows[k]; });
+    }
+    d.at = Date.now();
+    await idbMapPut({ key: PB_KEY, data: d, savedAt: Date.now() });
+  }catch(e){ console.warn("写真IDの控えに失敗（保存は続けます）", e); }
+}
+async function pbaseIds(no){
+  no = draftNoKey(no); if(!no) return [];
+  try{ const d = await pbaseLoad(); return (d.rows[no] && d.rows[no].ids) || []; }catch(_){ return []; }
+}
+
+/* ---- ガイドの整合取りを、指定したモデルに対して行う ---- */
+function autoReflectGuideInto(model, guide){
+  const keepM = M, keepG = Array.from(guideFilledFields);
+  try{ M = model; autoReflectGuideToModel(guide); }
+  finally { M = keepM; guideFilledFields.clear(); keepG.forEach(x => guideFilledFields.add(x)); }
+}
+/* ---- 控え用の state を「ファイルだけから作り直す」 ----
+   ★生のファイルをそのまま控えてはいけない★
+   読み込みの整え（meas_show・ガイドの整合取り・TVの配列そろえ）の分だけ
+   「現場が直した」に見えてしまい、次の保存でPCの積算が現場の既定値に潰される。 */
+function fileBaseStateOf(fileObj){
+  const m = modelFromCaseState(fileObj, true);
+  ensureModelShape(m);
+  if(antennaGuideActive(m.antenna_guide)) autoReflectGuideInto(m, m.antenna_guide);
+  const st = buildStateOf(m);
+  delete st.chosho_photos;
+  return st;
+}
+
+/* ============================================================
+   欄の持ち主
+   ============================================================ */
+const MERGE_NEVER = new Set(["chosho_photos","chosho_mgmt_no","meas_show","editedAt",
+  "_origin","_schemaVer","_appVersion","_draftId","_passthrough","_otherFile","_fileBase"]);
+const MERGE_PC_ONLY = new Set(["qty_overrides","node_offsets","meas_transforms","node_existing_overrides",
+  "tax_mode","misc_fee","outsource_fee_on","outsource_fee_amount","outsource_fee_auto","ag_placement","hold_flag"]);
+const MERGE_DT = new Set(["chosho_date","chosho_time","chosho_meet_at"]);
+const MERGE_ASK = new Set(["chosho_date","chosho_time","chosho_meet_at","chosho_note"]);
+const TV_GROUP = ["tv_count","tv_rooms","tv_bd","tv_sp","tv_term"];
+function isPcOwnedKey(model, k){
+  if(MERGE_PC_ONLY.has(k)) return true;
+  if(/^apt_|^compdoc_waived/.test(k)) return true;                          // アパート・完了書なし（台帳が持ち主）
+  if(model && model._passthrough && (k in model._passthrough)) return true; // 現場の画面に欄が無い
+  return false;
+}
+function isPassthroughKey(k){ return !GENBA_KNOWN_KEYS.has(k); }
+function aptUnitsOf(state){ const n = parseInt(String((state && state.apt_units) || ""), 10); return (n >= 2 && n <= 18) ? n : 0; }
+/* アパート（2世帯以上）かどうか。★こちらの state だけで見てはいけない★
+   世帯数は受付台帳が持ち主で、現場では持ち越し（_passthrough）に入っている。
+   ファイルから来る分は「相手にしか無いキー」として入るが、それは石綿を決めたあと。
+   ここで取りこぼすと、建物で1つに揃えるはずの石綿が世帯ごとにばらける。 */
+function mergeAptUnits(state, old, model, base){
+  if(old && ("apt_units" in old)) return aptUnitsOf(old);          // ファイルが持ち主
+  /* 控えにあって相手に無い＝PCがアパートをやめて戸建てに直した。持ち越しの古い世帯数を当てにしない。 */
+  if(base && baseHas(base, "apt_units")) return 0;
+  return Math.max(aptUnitsOf(state), aptUnitsOf(model && model._passthrough));
+}
+/* ============================================================
+   控え（_fileBase）が無いときの、ふたつ目の手がかり
+   ------------------------------------------------------------
+   受付台帳から開いた戸別は、そのとき台帳から入れた値を _rcSrc に控えてある
+   （receptionApplyToModel）。だから控えが無くても
+     画面の値 ≠ _rcSrc の値  → 現場が直した（消した・取り消したも含む）→ 現場を採る
+     画面の値 = _rcSrc の値  → 現場は触っていない                      → PCのファイルを残す
+   が言える。★これが無いと、PCで入れた工事の時刻・アンテナ・下見の印が
+   現場の既定値で潰れる（版155で直した不具合が戻る）。★
+   ============================================================ */
+function mergeRcBase(model){
+  let src = model && model._rcSrc;
+  if(!src || typeof src !== "object"){
+    /* 台帳の控えが無い戸別（手打ちで作った・他の端末のファイルから印を引き継いだ）でも、
+       いま手元にある受付台帳の行が同じ手がかりになる。PCの言い分はそこに入っている。 */
+    try{
+      const row = rcRowOf(model && model.chosho_mgmt_no);
+      if(!row) return null;
+      src = rcSrcOf(row);
+    }catch(_){ return null; }
+  }
+  /* 管理番号を打ち替えたら、前の戸別の台帳の控えは使えない */
+  if(src.mgmt !== undefined && draftNoKey(src.mgmt) !== draftNoKey(model.chosho_mgmt_no)) return null;
+  const f = receptionFlowOf(src);
+  /* ★半角にそろえること★ 書き出す中身（buildState）は HAN_FIELDS を半角にするので、
+     台帳の控えを素のまま持つと、全角の数字やハイフンが1つでも入っていれば
+     「画面を触っていないのに現場が直した」と読まれ、PCの直しが毎回消える。 */
+  const han = v => toHalfWidthAn(String(v == null ? "" : v));
+  const st = {
+    chosho_cust_name: han(src.name), chosho_cust_addr: han(src.addr),
+    chosho_cust_tel:  han(src.tel),  chosho_date:      String(src.date || ""),
+    chosho_time:      String(src.time || ""), chosho_meet_at:   String(src.meet || ""),
+    chosho_note:      String(src.note || ""), chosho_status:    String(src.status || "")
+  };
+  FLOW_STEPS.forEach(s => { if(s.key in f) st[s.flag] = !!f[s.key]; });
+  return { v: FB_VER, no: "", stale: false, state: st, sig: {}, photos: [] };
+}
+function mergeIsUnset(v){
+  if(v === undefined || v === null || v === "" || v === false) return true;
+  if(Array.isArray(v)) return v.length === 0;
+  if(typeof v === "object") return Object.keys(v).length === 0;
+  return false;
+}
+/* 材料・工事の作り（図面と積算に出る選択）。控えが無いときは、この一群を
+   ★ばらばらに勝ち負けさせない★
+   欄ごとに混ぜると「雪止めありなのにターンバックル0本」「ガイドは破風なのに取付は壁面」
+   のような、現場の人もPCの人も見ていない組み合わせがファイルになる。 */
+function isBuildKey(k){
+  if(MERGE_NEVER.has(k)) return false;                           // 中身でない目印（editedAt など）
+  if(MERGE_TEXT_KEYS.indexOf(k) >= 0) return false;              // 日時・客情報・備考・状態
+  if(/^survey_|^flyer_|^work_done|^consent_|^compdoc_/.test(k)) return false;  // 工程の印
+  if(/^apt_|^_/.test(k)) return false;                           // 台帳のもの・端末の目印
+  if(k === "chosho_mgmt_no" || k === "chosho_photos" || k === "measurements"
+     || k === "asbestos" || k === "text_annotations" || k === "antenna_guide") return false;
+  if(MERGE_MAP_KEYS.indexOf(k) >= 0 || MERGE_PC_ONLY.has(k)) return false;
+  return true;
+}
+/* 「この欄は現場が触っていない」と言えるか（控えが無いときだけ使う） */
+function mergeUntouchedVal(k, v){
+  if(mergeIsUnset(v)) return true;
+  try{ return JSON.stringify(v) === JSON.stringify(mergeFreshState()[k]); }catch(_){ return false; }
+}
+/* TVの台数と4つの配列を必ずそろえる（syncTvArrays と同じ埋め方） */
+function mergeTvSyncState(state){
+  const n = parseInt(state.tv_count, 10) || 1;
+  const rooms = [], bd = [], sp = [], term = [];
+  for(let i = 0; i < n; i++){
+    rooms.push((state.tv_rooms && state.tv_rooms[i]) || DEFAULT_ROOMS[i] || "その他");
+    bd.push(!!(state.tv_bd && state.tv_bd[i]));
+    sp.push((state.tv_sp && state.tv_sp[i]) || "no");
+    term.push((state.tv_term && state.tv_term[i]) || "");
+  }
+  state.tv_rooms = rooms; state.tv_bd = bd; state.tv_sp = sp; state.tv_term = term;
+  state.tv_count = String(n);
+}
+
+/* ============================================================
+   書けたあとの取り込み（adopt）と、控えの取り直し
+   ★ここを外すと静かに壊れる★
+   ファイルから採った分をモデルにも入れておかないと、控えとモデルがずれて
+   次の保存で「現場がわざと空にした」と読み違え、PCの中身を消してしまう。
+   ============================================================ */
+function adoptStateIntoModel(model, st, keys){
+  const own = model._touched;                            // 「現場で入力した」印は立てない
+  (keys || []).forEach(k => {
+    if(k === "chosho_photos" || MERGE_NEVER.has(k)) return;   // 写真はモデルに取り込まない（容量）
+    if(isPassthroughKey(k)){ model._passthrough = model._passthrough || {}; model._passthrough[k] = st[k]; return; }
+    if(k === "measurements"){ try{ model.measurements = JSON.parse(JSON.stringify(st.measurements)); }catch(_){} return; }
+    if(k === "asbestos"){ model.asbestos = Object.assign({}, model.asbestos, st.asbestos); return; }
+    if(k === "antenna_guide"){ model.antenna_guide = normalizeAntennaGuide(st.antenna_guide); return; }
+    if(k === "text_annotations"){ model.text_annotations = (st.text_annotations || []).map(a => Object.assign({}, a)); return; }
+    if(MERGE_MAP_KEYS.indexOf(k) >= 0){ model[k] = Object.assign({}, st[k]); return; }
+    if(/^tv_(rooms|bd|sp|term)$/.test(k)){ model[k] = (st[k] || []).slice(); return; }
+    model[k] = st[k];
+  });
+  ensureModelShape(model);
+  model._touched = own;
+}
+function fileBaseAfterWrite(model, st, fname, fileObj, keys){
+  adoptStateIntoModel(model, st, keys);
+  const mine = buildStateOf(model);                          // ★adopt 後のモデルから作る＝控え＝モデル
+  /* ★控えの写真は「ファイルへ書いた分（和集合）」★
+     手元の分だけにすると、PCの写真を控えが忘れてしまい、
+     写真の歯止めが写真IDの副本だけに細る（副本は容量で古い順に捨てる）。 */
+  mine.chosho_photos = (st && st.chosho_photos) || [];
+  fileBaseSet(model, mine, fname, fileObj);
+  try{ pbaseSet(String(model.chosho_mgmt_no || ""), (st.chosho_photos || []).filter(p => p && p.dataUri)
+        .map(p => String(p.id || photoContentId(p.dataUri)))); }catch(_){}
+  model._fromCaseFile = true;
+  fileBaseCheck(model);
+}
+function fileBaseCheck(model){
+  const b = fileBaseGet(model); if(!b) return true;
+  let st; try{ st = buildStateOf(model); }catch(_){ return true; }
+  const bad = Object.keys(b.state).filter(k => !MERGE_NEVER.has(k) && !baseSame(b, k, st[k]));
+  if(bad.length) console.warn("[控え] 保存直後なのにモデルと控えが違います:", bad);
+  return !bad.length;
+}
+
+/* この端末で、まだ何も入力していない戸別か（＝ファイルを書き替える理由が無い）
+   ★この判定は saveJsonRun の「M._touched = true」より前で取ること★ */
+function isNothingNewHere(m){
+  if(!m) return false;
+  if(m._touched === true) return false;
+  if((m.chosho_photos || []).length) return false;
+  return true;
+}
+
+/* ============================================================
+   同じ戸別が別の名前で入っているファイル（管理番号.json.txt ／ 管理番号_数字.json）
+   ============================================================ */
+let _cfIdx = null;
+async function caseFileIndex(dir){
+  if(_cfIdx && _cfIdx.dir === dir && (Date.now() - _cfIdx.at) < 120000) return _cfIdx.map;
+  const map = [];
+  try{ for await (const [name, h] of dir.entries()){ if(h && h.kind === "file") map.push(name); } }catch(_){}
+  _cfIdx = { dir: dir, at: Date.now(), map: map };
+  return map;
+}
+function caseNameRe(no){
+  const e = String(no).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp("^" + e + "(?:[ _\\-(][^\\\\/]*)?\\.json(?:\\.txt)?$", "i");
+}
+async function readExistingCaseFiles(dir, fname, no){
+  const out = { primary: null, others: [], names: [] };
+  if(!dir) return out;
+  no = draftNoKey(no);
+  if(!no){
+    /* ★管理番号を入れないまま保存する道（ファイル名は「戸別.json」）★
+       番号で照らし合わせられないので、同じ名前のファイルだけを読んで和集合にする。
+       ここで読まないと、前に同じ名前で保存した写真が消える。
+       読んだファイルに管理番号が入っていたら、別の戸別なので融合の門番が止める。 */
+    const j0 = await readExistingCaseFile(dir, fname);
+    if(j0){ out.primary = j0; out.names = [fname]; }
+    return out;
+  }
+  const re = caseNameRe(no);
+  const names = [];
+  if(fname) names.push(fname);
+  (await caseFileIndex(dir)).forEach(n => { if(re.test(n) && names.indexOf(n) < 0) names.push(n); });
+  const got = [];
+  for(const n of names.slice(0, 6)){
+    const j = await readExistingCaseFile(dir, n);
+    if(!j) continue;
+    if(draftNoKey(j.chosho_mgmt_no) !== no) continue;      // ★中の管理番号でふるう（最後の砦）
+    got.push({ name: n, data: j });
+  }
+  if(!got.length) return out;
+  out.names = got.map(g => g.name);
+  let pick = got.find(g => g.name === fname);
+  if(!pick) pick = got.slice().sort((a, b) => (Date.parse(b.data.editedAt || "") || 0) - (Date.parse(a.data.editedAt || "") || 0))[0];
+  out.primary = pick.data;
+  out.others = got.filter(g => g !== pick).map(g => g.data);
+  return out;
+}
+
+/* ============================================================
+   写真の歯止め（どの道でも通す）
+   ============================================================ */
+function photoIdsOfState(state){
+  return new Set(((state && state.chosho_photos) || []).filter(p => p && p.dataUri)
+    .map(p => String(p.id || photoContentId(p.dataUri))));
+}
+/* 控え・副本が知っている写真が手元に無いなら、その枚数を返す */
+async function photosMissing(model, state){
+  const have = photoIdsOfState(state);
+  const b = fileBaseGet(model);
+  const ids = new Set([].concat(b ? b.photos.map(p => p.id) : [], await pbaseIds(model && model.chosho_mgmt_no)));
+  let miss = 0;
+  ids.forEach(id => { if(id && !have.has(id)) miss++; });
+  return miss;
+}
+/* 読めたファイルの写真が1枚でも落ちていないか（融合に穴があっても止める最後の砦） */
+function photoLossVsFiles(state, olds){
+  const have = photoIdsOfState(state);
+  let miss = 0;
+  (olds || []).forEach(o => {
+    ((o && o.chosho_photos) || []).forEach(p => {
+      if(!p || !p.dataUri) return;
+      const id = String(p.id || photoContentId(p.dataUri));
+      if(!have.has(id)) miss++;
+    });
+  });
+  return miss;
+}
+/* 写真が減る保存を、その場で止める。
+   ★相手のファイルを読んで和集合にできた道では呼ばない★（読めば戻るので止めなくてよい）
+   逆に、相手を読めない道（共有・ダウンロード・新しい名前で書く）では必ず通すこと。 */
+async function photoGateStop(model, state){
+  let miss = 0;
+  try{ miss = await photosMissing(model, state); }catch(e){ console.warn("写真の歯止めを確かめられませんでした", e); }
+  if(!miss) return false;
+  _lastSaveInfo = { title: "⚠ 写真が減るので保存していません", msg: photoMissingText(miss), warn: true };
+  toast("⚠ 写真が減るので保存していません");
+  return true;
+}
+const PHOTO_MISSING_MSG = "この戸別のファイルには、この端末に無い写真が ";
+function photoMissingText(n){
+  return PHOTO_MISSING_MSG + n + "枚 入っています。\n\n"
+    + "いま保存すると、その写真はファイルから消えます。写真を減らすことはできません。\n\n"
+    + "上の帯の「📂 戸別ファイルを読み込んで編集する」から、その戸別のファイルを読み込んでください。\n"
+    + "読み込むと写真が戻り、そのまま保存できます。";
+}
+
+/* ============================================================
    保存するとき、書き込む先のファイルを読んでから融合する
    ------------------------------------------------------------
    ★写真は和集合。相手にしか無い写真は必ず残す（減らさない）。
@@ -5267,7 +5869,7 @@ async function pcGuardBeforeSave(){
    フォルダを掴める端末（PCの Chrome / Edge）だけで効く。スマホでは相手を読めない
    ので、上の帯と確かめが守りになる。
    ============================================================ */
-function mergePhotosUnion(mine, theirs){
+function mergePhotosUnion(mine, theirs, base){
   const my = Array.isArray(mine) ? mine.slice() : [];
   const th = Array.isArray(theirs) ? theirs : [];
   const idOf = p => String((p && p.id) || ((p && p.dataUri) ? photoContentId(p.dataUri) : ""));
@@ -5280,6 +5882,31 @@ function mergePhotosUnion(mine, theirs){
                       if(p.chosho) o.chosho = true;
                       return o;
                     });
+  /* 同じ写真が両方にあるときの、名前と「工事調書に載せる」印の決め方。
+     控えがあれば「現場が直したか／PCが直したか」を見分ける。
+     控えが無ければ、PCの印は足す・こちらが名前を付けていなければPCの名前を使う。 */
+  const thById = new Map();
+  th.forEach(p => { if(p && p.dataUri) thById.set(idOf(p), p); });
+  const bById = new Map();
+  if(base && Array.isArray(base.photos)) base.photos.forEach(p => { if(p && p.id) bById.set(String(p.id), p); });
+  for(let i = 0; i < my.length; i++){
+    const mp = my[i];
+    if(!mp || !mp.dataUri) continue;
+    const tp = thById.get(idOf(mp));
+    if(!tp) continue;
+    const bp = bById.get(idOf(mp));
+    let o = my[i];
+    if(bp){
+      if(String(mp.label || "") === String(bp.label || "") && String(tp.label || "") !== String(bp.label || ""))
+        o = Object.assign({}, o, { label: String(tp.label || "") });
+      if(!!mp.chosho === !!bp.chosho && !!tp.chosho !== !!bp.chosho)
+        o = tp.chosho ? Object.assign({}, o, { chosho: true }) : (function(){ const q = Object.assign({}, o); delete q.chosho; return q; })();
+    } else {
+      if(tp.chosho && !mp.chosho) o = Object.assign({}, o, { chosho: true });
+      if(!String(o.label || "").trim() && String(tp.label || "").trim()) o = Object.assign({}, o, { label: String(tp.label) });
+    }
+    my[i] = o;
+  }
   return missing.concat(my);        // 相手にしか無い写真を先に、こちらの並びはそのまま
 }
 const MERGE_TEXT_KEYS = ["chosho_date","chosho_time","chosho_meet_at","chosho_cust_name",
@@ -5293,12 +5920,6 @@ function mergeFreshState(){
     try{ _mergeFreshCache = buildStateOf(freshModel()); }catch(_){ _mergeFreshCache = {}; }
   }
   return _mergeFreshCache;
-}
-/* この項目は「まだ現場で何も入れていない（作りたてのまま）」か */
-function mergeIsFresh(state, k){
-  const fresh = mergeFreshState();
-  if(!(k in fresh)) return false;
-  try{ return JSON.stringify(state[k]) === JSON.stringify(fresh[k]); }catch(_){ return false; }
 }
 /* 現場の言葉での呼び名（何を残したかを知らせるため） */
 const MERGE_LABELS = {
@@ -5315,8 +5936,13 @@ function mergeLabelOf(k){
   if(/^tv_/.test(k))                                      return "TVの台数・部屋";
   if(/^apt_/.test(k))                                     return "アパートの欄";
   if(/^remove|^dummy|^use_fa|^fa_/.test(k))               return "撤去・付属";
+  if(/^amplifier|^line_booster|^hpf|^outer_splitter|^indoor_split|^split_all_pass|^power_pos|^ext_power|^box_consent/.test(k))
+                                                          return "増幅器・分配器・電源";
+  if(/^att_/.test(k))                                     return "減衰器";
+  if(/^connector|^turnbuckle|^ofmu|^wire_sus/.test(k))    return "金具・コネクタ";
+  if(/^snow_guard|^high_work|^indoor_adj|^is_catv|^work_type/.test(k)) return "工事のしかた";
   if(/^outsource|^tax|^misc/.test(k))                     return "料金の扱い";
-  if(/^survey_|^flyer_|^work_|^consent_|^compdoc_/.test(k)) return "工程の印";
+  if(/^survey_|^flyer_|^work_done|^consent_|^compdoc_received/.test(k)) return "工程の印";
   return "PCで選んだ内容";
 }
 const MERGE_MAP_KEYS = ["wire_overrides","qty_overrides","node_offsets","meas_transforms","node_existing_overrides"];
@@ -5326,39 +5952,328 @@ function measHasValue(ms){
   return ["antenna","amplifier","terminal"].some(k =>
     Array.isArray(ms[k]) && ms[k].some(v => v && (String(v.db||"").trim() || String(v.mer||"").trim() || String(v.ber||"").trim())));
 }
-/* state（これから書く中身）に、いまファイルに入っている old を融合する */
-function mergeIntoState(state, old){
-  if(!state || !old || typeof old !== "object") return { photosAdded: 0, kept: [] };
-  const kept = [];
-  const before = (state.chosho_photos || []).filter(p => p && p.dataUri).length;
-  state.chosho_photos = mergePhotosUnion(state.chosho_photos, old.chosho_photos);
-  const added = (state.chosho_photos || []).filter(p => p && p.dataUri).length - before;
-  if(added > 0) kept.push("写真 " + added + "枚");
+/* state（これから書く中身）に、いまファイルに入っている old を融合する。
+   opt = { model, base, fname, mode:"write"|"load", others:[…別名ファイル…], askable:true|false }
+   戻り = { stop, reason, photosAdded, kept[], mine[], changed[], conflicts[], removed[], altFiles[] } */
+function mergeIntoState(state, old, opt){
+  const out = { stop:false, reason:"", photosAdded:0, kept:[], mine:[], changed:[], conflicts:[], removed:[], altFiles:[],
+                buildAsk:false, buildSwap:{} };
+  if(!state || !old || typeof old !== "object") return out;
+  if(!opt || !opt.model) console.warn("[融合] model を渡していません（控えなしで進めます）");
+  const model = (opt && opt.model) || M;
+  const base  = (opt && ("base" in opt)) ? opt.base : fileBaseGet(model);
+  const others = (opt && opt.others) || [];
+  const useB  = baseUseValues(base);
+  const rcB   = useB ? null : mergeRcBase(model);   // 控えが使えないときだけ頼る
+  const label = k => mergeLabelOf(k);
+  /* ★控えが無いときの「材料ひとかたまり」の向き★
+     材料（アンテナ・取付・ケーブル・分配器・TVの台数…）は図面と積算に出るので、
+     欄ごとに勝ち負けを混ぜると「誰も見ていない組み合わせ」になる。まとめて決める。
+       ・ファイルに下見の内容が入っていない → いま現場で下見をしている＝まとめて現場
+       ・入っている／現場は材料を触っていない → まとめてPCのファイル
+       ・入っている／現場も材料を入れた      → まとめてPC（安全側）にして、1件保存では1回聞く
+     「ファイルに下見の内容が入っている」は、下見済みの印か、作りたてと違う材料があるかで見る
+     （メインが書いたファイルには工程の印が入っていないことがある）。 */
+  let buildMine = true;
+  if(!useB){
+    const keys0 = Array.from(new Set(Object.keys(state).concat(Object.keys(old)))).filter(isBuildKey);
+    const mineTouched = keys0.some(k => !mergeUntouchedVal(k, state[k]));
+    const fileFinal = (old.survey_done === true)
+      || (!("survey_done" in old) && keys0.some(k => (k in old) && !mergeUntouchedVal(k, old[k])));
+    if(!fileFinal)          buildMine = true;
+    else if(!mineTouched)   buildMine = false;
+    else { buildMine = false; out.buildAsk = true; }
+  }
 
-  /* 測定値だけは「作りたてと同じ形か」ではなく「現場で数字を1つでも入れたか」で見る。
-     CSV取込やCHの入れ替えで形が変わっていても、数字が空なら相手を消さない。 */
-  if(!measHasValue(state.measurements) && measHasValue(old.measurements)){
-    state.measurements = old.measurements; kept.push("測定値");
+  /* 0) 門番 ------------------------------------------------------------ */
+  if(!flowShareIsCase(old)) return out;
+  const myNo = draftNoKey(state.chosho_mgmt_no);
+  const thNo = draftNoKey(old.chosho_mgmt_no);
+  if(myNo && thNo && myNo !== thNo){
+    out.stop = true; out.reason = "別の戸別（" + thNo + "）の内容です";
+    return out;
   }
-  /* ★ほかは決まり1つ。「まだ現場で何も入れていないところ（作りたてのまま）は、相手を消さない」★
-     工事日・時刻・備考のような文字の欄も、アンテナ・取付・部材・TVの台数・ケーブルの長さ・
-     石綿・測定値・図面の注記・数量の直し・工程の印も、すべてこの決まりで守る。
-     現場入力は「何も選んでいない」ときも既定値を書き出すので、「空か」では見分けられない。 */
-  const skip = { chosho_photos:1, chosho_mgmt_no:1, meas_show:1, editedAt:1, _origin:1, _schemaVer:1,
-                 measurements:1 };   // 測定値は上で決めた（二重に書くと片方を壊しても気づけない）
-  for(const k in old){
-    if(skip[k] || !(k in state)) continue;
-    if(!mergeIsFresh(state, k)) continue;                 // 現場で何か入れている → 現場を採る
-    let same = true;
-    try{ same = JSON.stringify(state[k]) === JSON.stringify(old[k]); }catch(_){ same = true; }
-    if(same) continue;
-    state[k] = old[k]; kept.push(mergeLabelOf(k));
+  /* こちらは管理番号がまだ無いのに、ファイルには番号が入っている。
+     同じ名前でも中身は別の戸別なので、書き潰さない。 */
+  if(!myNo && thNo){
+    out.stop = true; out.reason = "管理番号 " + thNo + " の戸別の内容です";
+    return out;
   }
-  // PCだけの項目（ag_placement など）。こちらに無いものは、そのまま残す。
-  let extra = 0;
-  for(const k in old){ if(!(k in state)){ state[k] = old[k]; extra++; } }
-  if(extra) kept.push("PCだけの項目 " + extra + "件");
-  return { photosAdded: Math.max(0, added), kept: Array.from(new Set(kept)) };
+
+  /* 1) 写真（いちばん先に・必ず・例外なし） ----------------------------- */
+  const before = ((state.chosho_photos) || []).filter(p => p && p.dataUri).length;
+  state.chosho_photos = mergePhotosUnion(state.chosho_photos, old.chosho_photos, base);
+  others.forEach(o => { state.chosho_photos = mergePhotosUnion(state.chosho_photos, o && o.chosho_photos, base); });
+  const after = ((state.chosho_photos) || []).filter(p => p && p.dataUri).length;
+  out.photosAdded = Math.max(0, after - before);
+  if(after < before) throw new Error("融合で写真が減りました（" + before + "→" + after + "）");
+  if(out.photosAdded) out.kept.push("写真 " + out.photosAdded + "枚");
+  if(others.length) out.altFiles = (opt && opt.altNames) || [];
+
+  /* 2) 触らないもの ---------------------------------------------------- */
+  if(myNo) state.chosho_mgmt_no = myNo;
+
+  /* 3-a) 工程の印（★取り消しは必ず残す。控えが無くても現場が勝つ★） ---- */
+  let flowFromFile = false, flowMine = false;
+  FLOW_STEPS.forEach(st => {
+    const mineF = !!state[st.flag], theirF = !!old[st.flag];
+    const hasB = useB && baseHas(base, st.flag);
+    const baseF = hasB ? baseBoolVal(base, st.flag) : null;
+    const hasRc = !hasB && rcB && baseHas(rcB, st.flag);
+    let take;
+    if(hasB){
+      if(mineF !== baseF)       take = "mine";       // 現場が付けた／取り消した
+      else if(theirF !== baseF) take = "theirs";     // PCが付けた／取り消した
+      else                      take = (st.flag in old) ? "theirs" : "mine";
+    }
+    /* ★控えが無いとき★ 受付台帳の控え（_rcSrc）を手がかりにする。
+       ・画面に○が付いている … 現場が付けた印か、受付台帳が付けた印。どちらもPCの言い分
+         なので残す（★台帳で付けた下見・完了書の○を、ファイルの古い「未」で消さない★）。
+       ・画面は○なし・台帳は○あり … 現場が取り消した。取り消しを必ず残す（完了の判定）。
+       ・どちらも○なし … 現場は何も言っていない。PCの印を消さない。 */
+    else if(hasRc)             take = (mineF || baseBoolVal(rcB, st.flag)) ? "mine" : "theirs";
+    else if(mineF && !theirF)  take = "mine";
+    else if(!mineF && theirF)  take = "theirs";
+    else                       take = "mine";
+    if(take === "theirs"){
+      /* ファイルにその印のキーが無ければ、採るものが無い（言わない） */
+      if(st.flag in old){
+        if(mineF !== theirF) flowFromFile = true;
+        state[st.flag] = theirF; out.changed.push(st.flag);
+      }
+      if(st.at in old){ state[st.at] = String(old[st.at] || ""); out.changed.push(st.at); }
+    } else if(mineF !== theirF){ flowMine = true; }
+  });
+  if(flowFromFile) out.kept.push("工程の印");
+  if(flowMine) out.mine.push("工程の印");
+
+  /* 3-b) TVの台数と部屋（ばらばらに採ると食い違う） --------------------- */
+  const tvMine = useB
+    ? TV_GROUP.some(k => baseHas(base, k) ? !baseSame(base, k, state[k]) : true)
+    : buildMine;                                         // 控えなし＝材料ひとかたまりに合わせる
+  if(!tvMine && TV_GROUP.some(k => (k in old))){
+    TV_GROUP.forEach(k => {
+      if(!(k in old)) return;
+      if(out.buildAsk && !mergeUntouchedVal(k, state[k])) out.buildSwap[k] = state[k];
+      state[k] = old[k]; out.changed.push(k);
+    });
+    out.kept.push("TVの台数・部屋");
+  }
+
+  /* 3-c) 測定値 -------------------------------------------------------- */
+  if(useB && baseHas(base, "measurements")){
+    const mSame = baseSame(base, "measurements", state.measurements);
+    const tSame = baseSame(base, "measurements", old.measurements);
+    if(mSame && !tSame && old.measurements){ state.measurements = old.measurements; out.changed.push("measurements"); out.kept.push("測定値"); }
+    else if(!mSame && tSame){ out.mine.push("測定値"); }
+  } else if(!measHasValue(state.measurements) && measHasValue(old.measurements)){
+    state.measurements = old.measurements; out.changed.push("measurements"); out.kept.push("測定値");
+  }
+
+  /* 3-d) 石綿（アパートは建物で1つ＝いつもPCが持ち主） ------------------ */
+  if(mergeAptUnits(state, old, model, useB ? base : null) >= 2){
+    if(old.asbestos && typeof old.asbestos === "object"){
+      state.asbestos = Object.assign({}, old.asbestos); out.changed.push("asbestos"); out.kept.push("石綿の判定");
+    }
+  } else if(old.asbestos && typeof old.asbestos === "object"){
+    const mine0 = state.asbestos || {};
+    /* ★石綿もひとかたまりで決める★ 項目ごとに混ぜると
+       「建築年月日が入っているのに『日付不明』が立っている」のような
+       ありえない中身（みなし含有＝金額が付く）になる。
+       控えが無いときは、現場が1つでも入れていれば全部現場、でなければ全部PC。 */
+    const asbFresh = mergeFreshState().asbestos || {};
+    const asbMine = !useB && Object.keys(mine0).some(k2 => {
+      const v2 = mine0[k2];
+      if(mergeIsUnset(v2) && mergeIsUnset(asbFresh[k2])) return false;
+      return JSON.stringify(v2) !== JSON.stringify(asbFresh[k2]);
+    });
+    const merged = Object.assign({}, mine0);
+    let took = false, keptMine = false;
+    Object.keys(old.asbestos).forEach(k => {
+      const mv = mine0[k], tv = old.asbestos[k];
+      if(JSON.stringify(mv) === JSON.stringify(tv)) return;
+      if(useB && baseHas(base, "asbestos")){
+        const bv = (base.state.asbestos || {})[k];
+        const mSame = JSON.stringify(mv) === JSON.stringify(bv);
+        const tSame = JSON.stringify(tv) === JSON.stringify(bv);
+        if(mSame && !tSame){ merged[k] = tv; took = true; }
+        else if(!mSame && tSame){ keptMine = true; }
+        else { merged[k] = tv; took = true; }             // 両方違う＝PCを残す（安全側）
+      } else if(asbMine){ keptMine = true; }            // 控えなし＝現場がこの建物の石綿を入れている
+      else { merged[k] = tv; took = true; }               // 控えなし＝現場は触っていない
+    });
+    if(took){ state.asbestos = merged; out.changed.push("asbestos"); out.kept.push("石綿の判定"); }
+    if(keptMine) out.mine.push("石綿の判定");
+  }
+
+  /* 3-e) 地図のキー・注記（中のキー／idごと） ---------------------------
+     ★PCだけの欄（数量の直し・機材の位置・既設の印・図面の変形）はここで扱わない★
+     ここで扱うと「現場が持っているキーはPCの新しい値を見ない」ので、
+     PCが直した発注数量・図面が現場の保存で毎回古い値に戻る（金額に響く）。
+     それらは 5)(a) で「いつもPC」として入れ替える。 */
+  MERGE_MAP_KEYS.filter(k => !MERGE_PC_ONLY.has(k)).forEach(k => {
+    const mine0 = (state[k] && typeof state[k] === "object") ? state[k] : {};
+    const th = (old[k] && typeof old[k] === "object") ? old[k] : null;
+    if(!th) return;
+    const merged = Object.assign({}, mine0);
+    let took = false;
+    Object.keys(th).forEach(sub => {
+      if(sub in mine0) return;                            // 両方にある／現場が持っている
+      if(useB && baseHas(base, k)){
+        const bv = (base.state[k] || {})[sub];
+        if(bv !== undefined) return;                      // 控えにあって現場に無い＝現場が消した。復活させない
+      }
+      merged[sub] = th[sub]; took = true;
+    });
+    if(took){ state[k] = merged; out.changed.push(k); out.kept.push(label(k)); }
+  });
+  {
+    const mineA = Array.isArray(state.text_annotations) ? state.text_annotations : [];
+    const thA = Array.isArray(old.text_annotations) ? old.text_annotations : [];
+    const noId = mineA.some(a => !a || !a.id) || thA.some(a => !a || !a.id);
+    if(thA.length && !noId){
+      const have = new Set(mineA.map(a => String(a.id)));
+      const bIds = (useB && baseHas(base, "text_annotations") && Array.isArray(base.state.text_annotations))
+        ? new Set(base.state.text_annotations.map(a => String(a && a.id))) : null;
+      const add = thA.filter(a => !have.has(String(a.id)) && !(bIds && bIds.has(String(a.id))));
+      if(add.length){ state.text_annotations = add.concat(mineA); out.changed.push("text_annotations"); out.kept.push("図面の注記"); }
+    } else if(thA.length && !mineA.length && !useB){
+      state.text_annotations = thA.map(a => Object.assign({}, a)); out.changed.push("text_annotations"); out.kept.push("図面の注記");
+    }
+  }
+
+  /* 4) 相手にしか無いキー ----------------------------------------------
+     ★入れてはいけないものを除く★ 端末の中だけの控え（_fileBase）や目印が
+     古いファイルに入っていても、持ち帰って書き出さない。 */
+  for(const k in old){ if(!MERGE_NEVER.has(k) && !(k in state)){ state[k] = old[k]; out.changed.push(k); } }
+  others.forEach(o => { for(const k in o){ if(!MERGE_NEVER.has(k) && !(k in state)){ state[k] = o[k]; out.changed.push(k); } } });
+
+  /* 5) 残りのキーを1つずつ --------------------------------------------- */
+  const done = new Set(["chosho_photos","measurements","asbestos","text_annotations"]);
+  TV_GROUP.forEach(k => done.add(k));
+  MERGE_MAP_KEYS.forEach(k => { if(!MERGE_PC_ONLY.has(k)) done.add(k); });
+  FLOW_STEPS.forEach(st => { done.add(st.flag); done.add(st.at); });
+  const keys = new Set();
+  Object.keys((base && base.state) || {}).forEach(k => keys.add(k));
+  Object.keys((base && base.sig) || {}).forEach(k => keys.add(k));
+  Object.keys(state).forEach(k => keys.add(k));
+  Object.keys(old).forEach(k => keys.add(k));
+  keys.forEach(k => {
+    if(MERGE_NEVER.has(k) || done.has(k)) return;
+    if(isPcOwnedKey(model, k)){                                   // (a) 現場に欄が無い＝いつもPC
+      if(k in old){
+        if(JSON.stringify(state[k]) !== JSON.stringify(old[k])){
+          state[k] = old[k]; out.changed.push(k); out.kept.push(label(k));
+        }
+        return;
+      }
+      /* ★PCがその欄を消したときは、こちらも消す★
+         アパート→戸建てに直した・保留を外した、などがここ。消さないと毎回復活する。 */
+      /* ★現場が必ず書き出す欄（料金の扱い・税など）は消さない★
+         控えは buildState から作るのでそれらを必ず持っており、ファイル側に無いだけで
+         「PCが消した」と読むと、現場の書き出しから欄ごと落ちてしまう。
+         消すのは、現場の画面に無い欄（持ち越し）と、台帳が持ち主の欄だけ。 */
+      if(k in state && (isPassthroughKey(k) || /^apt_|^compdoc_waived|^hold_flag/.test(k))
+         && ((useB && baseHas(base, k)) || !useB)){
+        delete state[k]; out.removed.push(k);
+      }
+      return;
+    }
+    if(!(k in state)) return;                                      // (b) 4) で入れた
+    if(useB && baseHas(base, k) && !(k in old)){                   // (c) 相手から消えた
+      if(isPassthroughKey(k) && baseSame(base, k, state[k])){
+        delete state[k]; out.removed.push(k);
+      }
+      return;
+    }
+    if(!(k in old)) return;
+    const same = JSON.stringify(state[k]) === JSON.stringify(old[k]);
+    if(same) return;
+    if(useB && baseHas(base, k)){                                  // (d) 3つ見比べ
+      const mSame = baseSame(base, k, state[k]);
+      const tSame = baseSame(base, k, old[k]);
+      if(mSame && !tSame){ state[k] = old[k]; out.changed.push(k); out.kept.push(label(k)); return; }
+      if(!mSame && tSame){ out.mine.push(label(k)); return; }
+      /* 6) 競合 */
+      if(MERGE_ASK.has(k)){
+        out.conflicts.push({ key:k, label:label(k), pc:old[k], mine:state[k] });
+        /* 書くときは既定をPCにして、1件ずつの保存では聞く（mergeApplyAnswers）。
+           ★読み込むとき（📂）は置き換えない★ 聞く道が無いので、置き換えると
+           現場で入れた工事日・時刻・打合せ・備考が黙って消える。 */
+        if(!opt || opt.mode !== "load"){ state[k] = old[k]; out.changed.push(k); }
+        return;
+      }
+      out.mine.push(label(k));                                      // ほかは現場
+      return;
+    }
+    /* (e) 控えが無い。ふたつ目の手がかりで「現場が直したか」を見る。
+           分からないときは、現場が触っていないところにPCの中身を残す。
+           ★PCで選んだアンテナ・取付・石綿・工事の時刻を、現場の既定値で潰さないため★ */
+    if(rcB && baseHas(rcB, k)){
+      /* ★受付台帳が持ち主の欄（名前・住所・電話・工事日・時刻・打合せ・備考・状態）★
+         ・画面に値が入っている … 現場が入れた値か、受付台帳から入った値。どちらも
+           ファイルより新しい言い分なので残す（★事務所が直した工事日・備考を、
+           ファイルの古い値で戻さない★）。
+         ・画面が空で、台帳には値があった … 現場がわざと消した。消したままにする。
+         ・画面が空で、台帳も空 … 現場は何も言っていない。ファイルの値を残す
+           （PCの戸別ファイルだけが持っている工事の時刻などを消さない）。 */
+      if(!mergeIsUnset(state[k]) || !mergeIsUnset(rcB.state[k])){
+        out.mine.push(label(k)); return;
+      }
+      state[k] = old[k]; out.changed.push(k); out.kept.push(label(k)); return;
+    }
+    if(isBuildKey(k)){
+      if(buildMine){ out.mine.push(label(k)); return; }            // まとめて現場
+      if(out.buildAsk && !mergeUntouchedVal(k, state[k])) out.buildSwap[k] = state[k];
+      state[k] = old[k]; out.changed.push(k); out.kept.push(label(k)); return;   // まとめてPC
+    }
+    if(mergeUntouchedVal(k, state[k]) && !mergeIsUnset(old[k])){
+      state[k] = old[k]; out.changed.push(k); out.kept.push(label(k)); return;
+    }
+    out.mine.push(label(k));
+  });
+
+  /* 7) 仕上げ ---------------------------------------------------------- */
+  mergeTvSyncState(state);
+  FLOW_STEPS.forEach(st => { if(!state[st.flag]) state[st.at] = ""; });
+  if(state.work_done && state.chosho_status !== "completed") state.chosho_status = "completed";
+  if(!state.work_done && state.chosho_status === "completed"){
+    const wasOn = (useB && baseHas(base, "work_done")) ? baseBoolVal(base, "work_done") : (old.work_done === true);
+    if(wasOn) state.chosho_status = "in_progress";                  // 現場が取り消したときだけ下げる
+  }
+  out.kept = Array.from(new Set(out.kept));
+  out.mine = Array.from(new Set(out.mine));
+  out.changed = Array.from(new Set(out.changed));
+  out.removed = Array.from(new Set(out.removed));
+  return out;
+}
+/* 材料（下見の内容）を、PCのファイルと この端末の どちらにするか。1回だけ聞く。
+   ★欄ごとではなく、まとめて★ 混ぜると誰も見ていない組み合わせになる。 */
+async function mergeApplyBuild(state, mg){
+  if(!mg || !mg.buildAsk) return false;
+  const keys = Object.keys(mg.buildSwap || {});
+  if(!keys.length) return false;
+  const names = Array.from(new Set(keys.map(mergeLabelOf))).join("・");
+  if(!(await uiConfirm("PCのファイルに、下見の内容（アンテナ・取付・ケーブル・分配器など）が入っています。\n\n"
+      + "この端末でも " + names + " を入力しています。\n\n"
+      + "材料をこの端末の内容に書き替えますか？\n\n"
+      + "「いいえ」を選ぶと、PCの内容をそのまま残します。\n"
+      + "（迷ったら「いいえ」。あとで「📂 戸別ファイルを読み込んで編集する」から読み込めば、\n"
+      + "　PCの内容を見ながら直せます）"))) return false;
+  keys.forEach(k => { state[k] = mg.buildSwap[k]; });
+  mergeTvSyncState(state);
+  return true;
+}
+/* 競合を1件ずつ聞いて、現場を選ばれたキーだけ戻す（1件保存のときだけ） */
+async function mergeApplyAnswers(state, conflicts){
+  for(const c of (conflicts || [])){
+    const pc = String(c.pc == null ? "（空）" : c.pc) || "（空）";
+    const my = String(c.mine == null ? "（空）" : c.mine) || "（空）";
+    const keepMine = await uiConfirm(c.label + "が、PCとこの端末で違います。\n\n"
+      + "　PC　　： " + pc + "\n　この端末： " + my + "\n\n"
+      + "この端末の内容を残しますか？\n（「いいえ」を選ぶと、PCの内容を残します）");
+    if(keepMine) state[c.key] = c.mine;
+  }
 }
 /* 書き込む先のファイルを読む（無ければ null）。読めなければ null。 */
 async function readExistingCaseFile(dir, fname){
@@ -5817,7 +6732,15 @@ function ensureModelShape(m){
   ["wire_overrides","qty_overrides","node_offsets","meas_transforms","node_existing_overrides"].forEach(k=>{ if(!m[k]||typeof m[k]!=="object") m[k]={}; });
   if(!Array.isArray(m.text_annotations)) m.text_annotations=[];
   if(!Array.isArray(m.chosho_photos)) m.chosho_photos=[];
-  if(!m.measurements||!Array.isArray(m.measurements.channels)) m.measurements=JSON.parse(JSON.stringify(DEFAULT_MEASUREMENTS));
+  /* ★見本の数字を入れないこと★ DEFAULT_MEASUREMENTS には例の数字（47.8 など）が入っている。
+     そのまま入れると「現場で測った数字」と見分けが付かず、測っていない数字が工事調書に載り、
+     融合でもPCの実測値より優先されてしまう。freshModel と同じで、CH名だけ残して空にする。 */
+  if(!m.measurements||!Array.isArray(m.measurements.channels)){
+    m.measurements=JSON.parse(JSON.stringify(DEFAULT_MEASUREMENTS));
+    ["antenna","amplifier","terminal"].forEach(k=>{
+      m.measurements[k]=(m.measurements[k]||[]).map(()=>({db:"",mer:"",ber:""}));
+    });
+  }
   m.meas_show="yes"; // 電波測定表は常に掲載扱い（UIトグル廃止・旧レコードの"no"を上書き）
   if(!m.asbestos||typeof m.asbestos!=="object") m.asbestos=freshModel().asbestos;
   m.antenna_guide=normalizeAntennaGuide(m.antenna_guide); // 形不正（旧下書き・破損データ）は既定値へ
