@@ -3731,9 +3731,19 @@ async function saveVerify(fileHandle, state){
      「確かめられない」だけで、失敗ではない。ここで失敗にすると、正しく保存できているのに
      毎回「中身が合いません」と出てしまう。 */
   if(!fileHandle || typeof fileHandle.getFile !== "function") return "";
-  try{
-    const f = await fileHandle.getFile();
-    const o = JSON.parse(await f.text());
+  /* ★読めなかったときだけ、少し待って1回だけ読み直す★
+     書いた直後は、同期ソフト（Dropbox・OneDrive 等）やウイルス対策がそのファイルを掴んでいて
+     一瞬読めないことがある（中身は書けている）。その一瞬で「保存できていないかも」と言うと
+     現場で毎回押し直しになる。中身が合わなかったときは待たずにそのまま知らせる
+     （合わないものは何度読んでも合わない）。2回とも読めなければ今までどおり知らせる＝💾は付かない。 */
+  let lastErr = null;
+  for(let attempt = 0; attempt < 2; attempt++){
+    if(attempt) await new Promise(r => setTimeout(r, 700));
+    let o;
+    try{
+      const f = await fileHandle.getFile();
+      o = JSON.parse(await f.text());
+    }catch(e){ lastErr = e; continue; }
     const ng = [];
     const same = (k, label) => {
       const a = String((state && state[k]) == null ? "" : state[k]);
@@ -3748,9 +3758,10 @@ async function saveVerify(fileHandle, state){
     const pb = (o && o.chosho_photos || []).filter(x => x && x.dataUri).length;
     if(pa !== pb) ng.push("・写真の枚数： 入れたはず " + pa + " 枚 ／ ファイル " + pb + " 枚");
     return ng.length ? ng.join("\n") : "";
-  }catch(e){
-    return "・読み返せませんでした（" + ((e && e.message) || e) + "）";
   }
+  return "・読み返せませんでした（" + ((lastErr && lastErr.message) || lastErr) + "）\n"
+       + "　（書けてはいるかもしれませんが、確かめられませんでした。同期ソフトやウイルス対策が\n"
+       + "　　そのファイルを開いていた可能性があります。少し待ってから、もう一度「保存」を押してください）";
 }
 /* ============================================================================
    Web共有（Androidタブレット等でDropboxへ渡すための道）
