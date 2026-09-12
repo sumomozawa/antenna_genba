@@ -1115,7 +1115,7 @@ const GENBA_SCHEMA_VER = 1;
 const APP_NAME_SHORT = "現場入力";
 /* 版は「増えていくだけの通し番号」。メイン（積算・図面）と同じ番号体系で、
    番号が小さいほうが古い。 */
-const APP_VERSION = "157";
+const APP_VERSION = "158";
 function photoContentId(dataUri){
   if(!dataUri || typeof dataUri !== "string") return "";
   let a = 5381, b = 0;
@@ -3731,26 +3731,43 @@ async function saveVerify(fileHandle, state){
      「確かめられない」だけで、失敗ではない。ここで失敗にすると、正しく保存できているのに
      毎回「中身が合いません」と出てしまう。 */
   if(!fileHandle || typeof fileHandle.getFile !== "function") return "";
-  try{
-    const f = await fileHandle.getFile();
-    const o = JSON.parse(await f.text());
-    const ng = [];
-    const same = (k, label) => {
-      const a = String((state && state[k]) == null ? "" : state[k]);
-      const b = String((o && o[k]) == null ? "" : o[k]);
-      if(a !== b) ng.push("・" + label + "： 入れたはず「" + (a || "空") + "」／ ファイル「" + (b || "空") + "」");
-    };
-    same("chosho_mgmt_no", "管理番号");
-    same("chosho_date",    "工事予定日");
-    same("chosho_time",    "工事の時刻");
-    same("chosho_cust_name", "顧客名");
-    const pa = (state && state.chosho_photos || []).filter(x => x && x.dataUri).length;
-    const pb = (o && o.chosho_photos || []).filter(x => x && x.dataUri).length;
-    if(pa !== pb) ng.push("・写真の枚数： 入れたはず " + pa + " 枚 ／ ファイル " + pb + " 枚");
-    return ng.length ? ng.join("\n") : "";
-  }catch(e){
-    return "・読み返せませんでした（" + ((e && e.message) || e) + "）";
+  /* ★読めなかったときだけ、少し待って1回だけ読み直す★
+     書いた直後は、同期ソフト（Dropbox・OneDrive 等）やウイルス対策がそのファイルを掴んでいて
+     一瞬読めないことがある（中身は書けている）。その一瞬で「保存できていないかも」と言うと
+     現場で毎回押し直しになる。中身が合わなかったときは待たずにそのまま知らせる
+     （合わないものは何度読んでも合わない）。2回とも読めなければ今までどおり知らせる＝💾は付かない。 */
+  let lastErr = null;
+  for(let attempt = 0; attempt < 2; attempt++){
+    if(attempt) await new Promise(r => setTimeout(r, 700));
+    try{
+      const f = await fileHandle.getFile();
+      const o = JSON.parse(await f.text());
+      const ng = [];
+      const same = (k, label) => {
+        const a = String((state && state[k]) == null ? "" : state[k]);
+        const b = String((o && o[k]) == null ? "" : o[k]);
+        if(a !== b) ng.push("・" + label + "： 入れたはず「" + (a || "空") + "」／ ファイル「" + (b || "空") + "」");
+      };
+      same("chosho_mgmt_no", "管理番号");
+      same("chosho_date",    "工事予定日");
+      same("chosho_time",    "工事の時刻");
+      same("chosho_cust_name", "顧客名");
+      const pa = (state && state.chosho_photos || []).filter(x => x && x.dataUri).length;
+      const pb = (o && o.chosho_photos || []).filter(x => x && x.dataUri).length;
+      if(pa !== pb) ng.push("・写真の枚数： 入れたはず " + pa + " 枚 ／ ファイル " + pb + " 枚");
+      return ng.length ? ng.join("\n") : "";
+    }catch(e){ lastErr = e; }          // 読めなかった／中身の形が違った → 少し待ってもう一度
   }
+  return "・読み返せませんでした（" + ((lastErr && lastErr.message) || lastErr) + "）";
+}
+/* 読み返しの結果に付ける見出し。「読めなかった」と「中身が合わなかった」は別の話なので言い分ける。
+   （読めなかっただけなら、ファイルは書けていることが多い） */
+function saveVerifyHead(bad){
+  return /^・読み返せませんでした/.test(String(bad || ""))
+    ? ("書いたあとに読み返しましたが、ファイルを読めませんでした。\n"
+       + "（書けてはいるかもしれません。同期ソフトやウイルス対策が、そのファイルを一瞬開いていた\n"
+       + "　可能性があります。少し待ってから押し直すと通ることが多いです）\n")
+    : "書いたあとに読み返したところ、中身が合いませんでした。\n";
 }
 /* ============================================================================
    Web共有（Androidタブレット等でDropboxへ渡すための道）
@@ -3921,7 +3938,7 @@ async function saveJsonRun(){
         _lastSaveInfo = { title: "⚠ 保存できていないかもしれません",
           msg: "「" + (dir.name || "選んだフォルダ") + "」の中\n" + fname + "\n\n"
              + sizeTxt + "\n\n"
-             + "書いたあとに読み返したところ、中身が合いませんでした。\n" + bad
+             + saveVerifyHead(bad) + bad
              + "\n\nもう一度「保存」を押すか、\n台帳の「まとめて保存」をお試しください。", warn: true };
         toast("⚠ 保存を確かめられませんでした：" + fname);
         try{ const b = fileBaseGet(M); if(b) b.stale = true; }catch(_){}   // 値の見比べはやめる（写真の歯止めは残す）
@@ -4008,7 +4025,7 @@ async function saveJsonRun(){
       if(bad2){
         _lastSaveInfo = { title: "⚠ 保存できていないかもしれません",
           msg: (handle.name || fname) + "\n\n" + sizeTxt + "\n\n"
-             + "書いたあとに読み返したところ、中身が合いませんでした。\n" + bad2
+             + saveVerifyHead(bad2) + bad2
              + "\n\nもう一度「保存」を押すか、\n台帳の「まとめて保存」をお試しください。", warn: true };
         toast("⚠ 保存を確かめられませんでした：" + fname);
         return true;                             // 💾は付けない＝「まとめて保存」に残す
@@ -8048,7 +8065,7 @@ async function spSaveFile(rec){
         try{ await spPersist(rec, false); }catch(_){}
         return { ok:false, warn:true, title:"⚠ 保存できていないかもしれません",
           msg: "「" + (dir.name || "選んだフォルダ") + "」の中\n" + fname + "\n" + sizeTxt + "\n\n"
-             + "書いたあとに読み返したところ、中身が合いませんでした。\n" + bad
+             + saveVerifyHead(bad) + bad
              + "\n\nもう一度「保存」を押してください。" };
       }
       rec.fileSavedAt = Date.now(); rec.fileRev = rec.rev | 0;
