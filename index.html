@@ -1115,7 +1115,7 @@ const GENBA_SCHEMA_VER = 1;
 const APP_NAME_SHORT = "現場入力";
 /* 版は「増えていくだけの通し番号」。メイン（積算・図面）と同じ番号体系で、
    番号が小さいほうが古い。 */
-const APP_VERSION = "158";
+const APP_VERSION = "159";
 function photoContentId(dataUri){
   if(!dataUri || typeof dataUri !== "string") return "";
   let a = 5381, b = 0;
@@ -3831,7 +3831,6 @@ async function saveJsonRun(){
   const nothingNew = isNothingNewHere(M);
   const state=buildState();
   const json=JSON.stringify(state);
-  const blob=new Blob([json],{type:"application/json"});
   const fname=currentFileName();
   const sizeTxt=saveSizeText(json, state);
   /* ★① 覚えている保存先フォルダへ、同じ名前で上書きする★
@@ -4541,6 +4540,17 @@ async function persistDraft(){
   }
 }
 // 指定モデルを（現在編集中でなくても）そのキーで直接保存。写真読込完了が別戸別切替後に走った時などに使用。
+/* 下書きは写真ごと端末に置いている。端末の空きが減ると、ブラウザの都合で
+   丸ごと消されることがある（しばらく開かない時も）。「消さないでほしい」と申し出ておく。
+   断られても今までどおり動く（申し出られない端末も多い）。 */
+async function askPersistentStorage(){
+  try{
+    const st = navigator.storage;
+    if(!st || typeof st.persist !== "function") return false;
+    if(typeof st.persisted === "function" && await st.persisted()) return true;   // もう申し出済み
+    return !!(await st.persist());
+  }catch(_){ return false; }
+}
 async function persistModel(m){
   try{
     if(!m) return;
@@ -4552,7 +4562,15 @@ async function persistModel(m){
       surveyDone:!!m.survey_done, flow:flowOf(m), touched:true, sig:stateSig(m),
       other:m._otherFile||"",
       rev:(m._rev|0), fileRev:(prev&&prev.fileRev)|0 });
-  }catch(e){ console.warn("persistModel failed",e); }
+    persistModel._warned=false;
+  }catch(e){
+    console.warn("persistModel failed",e);
+    /* ★ここだけ知らせが無かった★ 写真を読み終えたときの控えが失敗すると、
+       その写真は画面の中にしかない。閉じると戻らないので、必ず知らせる。 */
+    if(m === M) saveStateFailed();
+    if(!persistModel._warned){ persistModel._warned=true;
+      toast("⚠ 写真の控えに失敗（空き容量不足かも）。「保存」でファイルに残してください"); }
+  }
 }
 async function markDraftSaved(){
   try{
@@ -8465,6 +8483,7 @@ window.addEventListener("pagehide", flushPersist);
    ============================================================================ */
 (async function boot(){
   M=freshModel(); render();  // まず即描画（IDB読込を待たせない）
+  try{ await askPersistentStorage(); }catch(_){}   // 下書き（写真入り）を消されにくくする
   try{ renderAppVer(); }catch(_){}   // 画面下部の版表記
   try{ renderReceptionFilter(); }catch(_){}   // 受付台帳の「工程で絞る」ボタン（地図から台帳を入れた時にも出るように）
   try{ renderReceptionSort(); }catch(_){}     // 受付台帳の「並び」
