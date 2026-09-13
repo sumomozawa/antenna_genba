@@ -4569,7 +4569,10 @@ async function persistModel(m){
        その写真は画面の中にしかない。閉じると戻らないので、必ず知らせる。 */
     if(m === M) saveStateFailed();
     if(!persistModel._warned){ persistModel._warned=true;
-      toast("⚠ 写真の控えに失敗（空き容量不足かも）。「保存」でファイルに残してください"); }
+      const no = (m && m.chosho_mgmt_no) ? String(m.chosho_mgmt_no) : "";
+      toast(no && m !== M
+        ? ("⚠ 管理番号 " + no + " の写真の控えに失敗（空き容量不足かも）。その戸別を開いて「保存」でファイルに残してください")
+        : "⚠ 写真の控えに失敗（空き容量不足かも）。「保存」でファイルに残してください"); }
   }
 }
 async function markDraftSaved(){
@@ -8483,7 +8486,6 @@ window.addEventListener("pagehide", flushPersist);
    ============================================================================ */
 (async function boot(){
   M=freshModel(); render();  // まず即描画（IDB読込を待たせない）
-  try{ await askPersistentStorage(); }catch(_){}   // 下書き（写真入り）を消されにくくする
   try{ renderAppVer(); }catch(_){}   // 画面下部の版表記
   try{ renderReceptionFilter(); }catch(_){}   // 受付台帳の「工程で絞る」ボタン（地図から台帳を入れた時にも出るように）
   try{ renderReceptionSort(); }catch(_){}     // 受付台帳の「並び」
@@ -8520,6 +8522,11 @@ window.addEventListener("pagehide", flushPersist);
   };
   window.addEventListener("scroll",onScroll,{passive:true});
   onScroll();
+  /* ★いちばん最後に、返事を待たずに申し出る★
+     下書き（写真入り）をブラウザの都合で消されにくくする。
+     端末によっては確認の窓が出ることがあるので、前回の下書きを読み終えてからにする
+     （先に待つと、答えるまで画面が白紙のままになり、打った内容が消えたように見える）。 */
+  try{ askPersistentStorage(); }catch(_){}
 })();
 </script>
 </body>
