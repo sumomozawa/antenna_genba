@@ -1131,7 +1131,7 @@ function photoContentId(dataUri){
 /* ============================================================
    写真を入れるときに、大きすぎるものだけ自動で軽くする
    ------------------------------------------------------------
-   工事写真は、見積書・工事調書・写真台帳・印刷で使うぶんには長辺2000pxで十分読める。
+   工事写真は、見積書・工事調書・写真台帳・印刷で使うぶんには長辺2048pxで十分読める。
    いまのスマホの写真は1枚3〜5MBあり、そのまま戸別ファイルへ入れると保存先がすぐ一杯になる。
    ・1枚の目安（約1MB）を超えたものだけ縮める。もともと小さい写真には触らない
      （触ると、保存のたびに少しずつ画質が落ちていく）
@@ -1176,6 +1176,46 @@ function photoRenderSmaller(dataUri, maxEdge, quality){
     img.src = dataUri;
   });
 }
+/* 小さな見本（24x24）にして、明るさの平均とばらつきを取る。
+   端末のメモリが足りないと、大きな写真を描き直したときに真っ白・灰色の絵になることがある。
+   そのまま入れると、写真が入っているつもりで白い枠になり、あとから取り返せない。 */
+function photoTinyStats(dataUri){
+  return new Promise(resolve => {
+    let done = false;
+    const fin = v => { if(!done){ done = true; resolve(v); } };
+    const img = new Image();
+    img.onload = () => {
+      try{
+        const n = 24;
+        const cv = document.createElement("canvas"); cv.width = n; cv.height = n;
+        const ctx = cv.getContext("2d");
+        ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, n, n);
+        ctx.drawImage(img, 0, 0, n, n);
+        const d = ctx.getImageData(0, 0, n, n).data;
+        let sum = 0; const g = [];
+        for(let i = 0; i < d.length; i += 4){
+          const v = (d[i] * 299 + d[i+1] * 587 + d[i+2] * 114) / 1000;
+          g.push(v); sum += v;
+        }
+        const mean = sum / g.length;
+        let vsum = 0;
+        for(let i = 0; i < g.length; i++) vsum += (g[i] - mean) * (g[i] - mean);
+        fin({ mean: mean, sd: Math.sqrt(vsum / g.length) });
+      }catch(err){ fin(null); }
+    };
+    img.onerror = () => fin(null);
+    setTimeout(() => fin(null), 10000);
+    img.src = dataUri;
+  });
+}
+/* 縮めた絵が、元の写真とだいたい同じかを確かめる。違えば「縮めなかったこと」にする。 */
+async function photoLooksLike(src, out){
+  const a = await photoTinyStats(src), b = await photoTinyStats(out);
+  if(!a || !b) return false;                                  // 確かめられない＝採らない
+  if(Math.abs(a.mean - b.mean) > 28) return false;            // 明るさがまるで違う（真っ白など）
+  if(a.sd >= 6 && b.sd < a.sd * 0.35) return false;           // 模様が消えている（のっぺりした絵）
+  return true;
+}
 /* 入れる前に1枚を目安の大きさへ収める。収められなければ元のまま返す（写真は捨てない）。
    JPEGの大きさは画素数にほぼ比例するので、1回試したら「あとどれだけ縮めればよいか」を
    見積もって一気に寄せる。総当たりより速く、目安のぎりぎり手前＝いちばんきれいな所に収まる。 */
@@ -1207,6 +1247,7 @@ async function photoFitForStorage(dataUri){
     ? inside.reduce((a, t) => (t.b > a.b ? t : a))
     : tries.reduce((a, t) => (t.b < a.b ? t : a));
   if(!best || best.out.length >= dataUri.length) return dataUri;     // 小さくならないなら元のまま
+  if(!(await photoLooksLike(dataUri, best.out))) return dataUri;    // 絵が変わっていたら元のまま
   return best.out;
 }
 // buildState で明示的に扱うトップレベルキー（これ以外の未知キーは _passthrough に退避し、
@@ -3084,12 +3125,18 @@ async function handlePhotoFiles(files){
   for(let i=0;i<arr.length;i++){
     try{
       const raw=await readImageAsDataURI(arr[i]);
+      // id＝安定な写真ID。★縮める前の中身から付ける★（圧縮・サムネ化しても維持する決まり。
+      // 縮めたあとから付けると、端末やブラウザで縮め方がわずかに違うだけで別の写真に見える）
+      const id=photoContentId(raw);
       // 大きすぎる写真はここで軽くしてから入れる（枚数は変えない。軽くできなければ元のまま）
       const dataUri=await photoFitForStorage(raw);
       if(photoBytesOf(dataUri) < photoBytesOf(raw)) shrunk++;
       // ラベルは実際の格納枚数で採番（失敗があっても連番がズレない）。push先は固定した model。
-      // id＝安定な写真ID（撮影時に付与。PC側で圧縮・サムネ化しても維持し、重複突合に使う）。
-      model.chosho_photos.push({label:suggestLabel(model.chosho_photos.length), dataUri, id:photoContentId(dataUri)});
+      model.chosho_photos.push({label:suggestLabel(model.chosho_photos.length), dataUri, id});
+      /* 1枚ごとに控える。何枚も選ぶと時間がかかるので、途中で画面を閉じられても
+         そこまでの写真が残るようにする（まとめて最後に控えると全部消える）。 */
+      try{ if(M===model) await saveDraft(); else await persistModel(model); }catch(_){}
+      if(arr.length>1) toast("写真を読んでいます… "+(i+1)+" / "+arr.length);
     }catch(e){ console.error("photo read failed",e); fail++; }
   }
   if(M===model){ saveDraft(); refreshPhotos(); }      // まだ同じ戸別を編集中
@@ -8354,9 +8401,11 @@ function renderSpecialEdit(host){
     for(const f of arr){
       try{
         const raw = await readImageAsDataURI(f);
+        const id = photoContentId(raw);                  // 写真IDは縮める前の中身から
         const dataUri = await photoFitForStorage(raw);   // 大きすぎるものだけ軽くする
         if(photoBytesOf(dataUri) < photoBytesOf(raw)) shrunk++;
-        r.photos.push({ label:"", dataUri, id: photoContentId(dataUri) });
+        r.photos.push({ label:"", dataUri, id });
+        try{ await keep(); }catch(_){}                   // 1枚ごとに控える
       }catch(e){ console.error("特別記録：写真を読めませんでした", e); fail++; }
     }
     if(fail) toast(fail + "枚は読み込めませんでした");
