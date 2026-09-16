@@ -2037,8 +2037,10 @@ const SECTIONS = [
   ]},
   { id:"amp", ico:"📶", title:"増幅・分配", fields:[
     {id:"amplifier", type:"select", label:"増幅器"},
-    {id:"line_booster", type:"seg", label:"ラインブースター（主）"},
-    {id:"line_booster_46", type:"seg", label:"ラインブースター（46CH）", show:m=>m.ch46!=="no"},
+    {id:"line_booster", type:"seg", label:"ラインブースター（主系統）",
+     hint:"主系統（八戸14-24ch。二戸50chが一緒のこともあります）のアンテナの下に入れるぶんです。"},
+    {id:"line_booster_46", type:"seg", label:"ラインブースター（46CH系統）", show:m=>m.ch46!=="no",
+     hint:"46CH（三沢局）専用アンテナの下に入れるぶんです。主系統のぶんとは別に1台つきます。"},
     {id:"hpf", type:"select", label:"HPF"},
     {id:"outer_splitter", type:"select", label:"外部分配器"},
     {id:"indoor_split", type:"select", label:"宅内分配"},
