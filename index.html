@@ -15,7 +15,8 @@
   現場入力.html  —  スマホ（Android・縦画面）特化の戸別調書入力アプリ
   ----------------------------------------------------------------------------
   ・原本 index.html の collectState() と完全互換の「管理番号.json」を出力
-  ・写真はカメラ原本(dataURI・再圧縮なし=無劣化)を chosho_photos に格納
+  ・写真は chosho_photos に格納。1枚が約1MBを超えるものだけ、入れるときに
+    長辺2048px・画質0.85へ縮める（photoFitForStorage。PC側とまったく同じ決まり）
   ・選択肢/既定値は index.html から 2026-07-07 に抽出（下の FIELD 定義）。
     ※ index.html 側の選択肢を変えたら、この FIELD 定義も同期すること。
   ・図面は描かず、「配線チェックリスト(線色)」＋「赤文字メモ」で
@@ -1151,38 +1152,49 @@ function photoBytesOf(dataUri){
   const i = s.indexOf(",");
   return i < 0 ? 0 : Math.round((s.length - i - 1) * 0.75);
 }
-/* 長辺 maxEdge に収まるよう縮めて JPEG にする。開けなければ空文字 */
-function photoRenderSmaller(dataUri, maxEdge, quality){
+/* 写真を1枚だけ読む（開けなければ null）。
+   ★目覚まし（setTimeout）は必ず止める★ 止めないと、読み終わった写真の中身を
+   15秒のあいだ掴んだままになり、何枚も続けて入れるとスマホの画面が落ちる。 */
+function photoLoadImage(dataUri){
   return new Promise(resolve => {
-    let done = false;
-    const fin = v => { if(!done){ done = true; resolve(v); } };
+    let done = false, timer = 0;
+    const fin = v => { if(!done){ done = true; if(timer) clearTimeout(timer); resolve(v); } };
     const img = new Image();
-    img.onload = () => {
-      try{
-        const w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
-        if(!w || !h){ fin(""); return; }
-        const scale = Math.min(1, maxEdge / Math.max(w, h));   // 大きくはしない
-        const nw = Math.max(1, Math.round(w * scale)), nh = Math.max(1, Math.round(h * scale));
-        const cv = document.createElement("canvas");
-        cv.width = nw; cv.height = nh;
-        const ctx = cv.getContext("2d");
-        ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, nw, nh);    // JPEGは透過を持てない＝白地で塗る
-        ctx.drawImage(img, 0, 0, nw, nh);
-        fin(cv.toDataURL("image/jpeg", quality));
-      }catch(err){ console.warn("写真を縮められませんでした", err); fin(""); }
-    };
-    img.onerror = () => fin("");
-    setTimeout(() => fin(""), 15000);   // 固まらせない
+    img.onload = () => fin(img);
+    img.onerror = () => fin(null);
+    timer = setTimeout(() => fin(null), 15000);   // 固まらせない
     img.src = dataUri;
   });
+}
+/* 読み終わった写真を、長辺 maxEdge に収まるよう縮めて JPEG にする。だめなら空文字 */
+function photoDrawToJpeg(img, maxEdge, quality){
+  try{
+    if(!img) return "";
+    const w = img.naturalWidth || img.width, h = img.naturalHeight || img.height;
+    if(!w || !h) return "";
+    const scale = Math.min(1, maxEdge / Math.max(w, h));   // 大きくはしない
+    const nw = Math.max(1, Math.round(w * scale)), nh = Math.max(1, Math.round(h * scale));
+    const cv = document.createElement("canvas");
+    cv.width = nw; cv.height = nh;
+    const ctx = cv.getContext("2d");
+    ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, nw, nh);    // JPEGは透過を持てない＝白地で塗る
+    ctx.drawImage(img, 0, 0, nw, nh);
+    return cv.toDataURL("image/jpeg", quality);
+  }catch(err){ console.warn("写真を縮められませんでした", err); return ""; }
+}
+/* 長辺 maxEdge に収まるよう縮めて JPEG にする。開けなければ空文字。
+   img を渡せば、そのぶん読み直さない（1枚を何度も読み直すとスマホが遅くなる）。 */
+async function photoRenderSmaller(dataUri, maxEdge, quality, img){
+  const im = img || await photoLoadImage(dataUri);
+  return photoDrawToJpeg(im, maxEdge, quality);
 }
 /* 小さな見本（24x24）にして、明るさの平均とばらつきを取る。
    端末のメモリが足りないと、大きな写真を描き直したときに真っ白・灰色の絵になることがある。
    そのまま入れると、写真が入っているつもりで白い枠になり、あとから取り返せない。 */
 function photoTinyStats(dataUri){
   return new Promise(resolve => {
-    let done = false;
-    const fin = v => { if(!done){ done = true; resolve(v); } };
+    let done = false, timer = 0;
+    const fin = v => { if(!done){ done = true; if(timer) clearTimeout(timer); resolve(v); } };
     const img = new Image();
     img.onload = () => {
       try{
@@ -1204,7 +1216,7 @@ function photoTinyStats(dataUri){
       }catch(err){ fin(null); }
     };
     img.onerror = () => fin(null);
-    setTimeout(() => fin(null), 10000);
+    timer = setTimeout(() => fin(null), 10000);
     img.src = dataUri;
   });
 }
@@ -1224,8 +1236,10 @@ async function photoFitForStorage(dataUri){
   if(photoBytesOf(dataUri) <= PHOTO_FIT_MAX_BYTES) return dataUri;   // もともと目安の内＝触らない
   const tries = [];
   let edge = PHOTO_FIT_MAX_EDGE, q = PHOTO_FIT_QUALITY;
+  const img = await photoLoadImage(dataUri);   // 読むのは1回だけ（何度も読み直すとスマホが遅い）
+  if(!img) return dataUri;                     // 開けない＝元のまま（写真は捨てない）
   for(let i = 0; i < 4; i++){
-    const out = await photoRenderSmaller(dataUri, edge, q);
+    const out = await photoRenderSmaller(dataUri, edge, q, img);
     if(!out) break;                                                  // 画像として開けない → 元のまま
     const b = photoBytesOf(out);
     tries.push({ out: out, b: b });
@@ -2208,7 +2222,7 @@ const SECTIONS = [
   { id:"wires", ico:"🎨", title:"配線色・赤文字メモ", fields:[
     {custom:"wires"},
   ]},
-  { id:"photos", ico:"📷", title:"写真（無劣化）", fields:[
+  { id:"photos", ico:"📷", title:"写真", fields:[
     {custom:"photos"},
   ]},
   // 「その他・見積設定」（税・諸経費・石綿）は現場入力では不要のため非表示。
@@ -2662,7 +2676,7 @@ function renderMeas(){
 
 // ---- 写真 ----
 function renderPhotos(){
-  let h=`<div class="info">スマホのカメラで撮影した<b>原本（無劣化）</b>をそのまま保存します。PC側の index.html で「管理番号フォルダへ書き出し」できます。</div>`;
+  let h=`<div class="info">撮った写真をそのまま保存します。1枚が大きいとき（約1MB超）だけ、入れるときに自動で軽くします（長辺2048px）。見積書・工事調書には十分な画質です。<br>PC側の index.html で「管理番号フォルダへ書き出し」できます。</div>`;
   h+=`<div class="addphoto">
     <label id="cam-btn">📷 撮影</label>
     <label id="pick-btn" style="background:#455a64;">🖼 選択</label>
@@ -3102,12 +3116,12 @@ document.getElementById("csv-input").addEventListener("change",async e=>{
 });
 
 /* ============================================================================
-   6) 写真取り込み（無劣化）
+   6) 写真取り込み（大きいものだけ自動で軽くする）
    ============================================================================ */
 function readImageAsDataURI(file){
   return new Promise((resolve,reject)=>{
     const r=new FileReader();
-    r.onload=()=>resolve(r.result);   // 原本バイトをそのままdataURI化（再圧縮なし）
+    r.onload=()=>resolve(r.result);   // まず原本バイトをそのままdataURI化（縮めるのはこのあと）
     r.onerror=()=>reject(r.error);
     r.readAsDataURL(file);
   });
@@ -3137,12 +3151,13 @@ async function handlePhotoFiles(files){
          そこまでの写真が残るようにする（まとめて最後に控えると全部消える）。 */
       try{ if(M===model) await saveDraft(); else await persistModel(model); }catch(_){}
       if(arr.length>1) toast("写真を読んでいます… "+(i+1)+" / "+arr.length);
+      await new Promise(r=>setTimeout(r,0));   // 1枚ごとに画面へ息継ぎさせる（固まらせない）
     }catch(e){ console.error("photo read failed",e); fail++; }
   }
   if(M===model){ saveDraft(); refreshPhotos(); }      // まだ同じ戸別を編集中
   else { await persistModel(model); }                  // 別戸別へ切替済み→読込元を直接確定保存（混入/喪失防止）
-  if(fail) toast(fail+"枚は読み込めませんでした（別の写真でお試しください）");
   if(shrunk) toast(shrunk+"枚は大きかったので軽くして入れました");
+  if(fail) toast(fail+"枚は読み込めませんでした（別の写真でお試しください）");   // 大事な知らせを最後に
 }
 function suggestLabel(n){
   const seq=["施工前","施工前②","施工前③","施工中","施工完了","施工完了②","現地","表札","その他"];
@@ -8406,10 +8421,12 @@ function renderSpecialEdit(host){
         if(photoBytesOf(dataUri) < photoBytesOf(raw)) shrunk++;
         r.photos.push({ label:"", dataUri, id });
         try{ await keep(); }catch(_){}                   // 1枚ごとに控える
+        if(arr.length > 1) toast("写真を読んでいます… " + (arr.indexOf(f) + 1) + " / " + arr.length);
+        await new Promise(r => setTimeout(r, 0));        // 画面へ息継ぎさせる
       }catch(e){ console.error("特別記録：写真を読めませんでした", e); fail++; }
     }
-    if(fail) toast(fail + "枚は読み込めませんでした");
     if(shrunk) toast(shrunk + "枚は大きかったので軽くして入れました");
+    if(fail) toast(fail + "枚は読み込めませんでした");   // 大事な知らせを最後に
     await keep(); renderSpecialEdit(host);
   };
   document.getElementById("sp-cam").addEventListener("change", e => { take(e.target.files); e.target.value = ""; });
