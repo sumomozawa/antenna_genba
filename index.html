@@ -1024,6 +1024,7 @@ const OPT = {
   connector_qty:[["0","なし"],["1","1個"],["2","2個"],["3","3個"],["4","4個"]],
   amplifier:[["amp_3u43","3U 3UB43-A04（3入力）"],["amp_1u45","1U UB45SS"],["amp_1ubc45","1UBC UBCBW45SS（UHF+BS対応）"]],
   line_booster:[["no","なし"],["yes","UB18L"]],
+  line_booster_46:[["no","なし"],["yes","UB18L"]],
   hpf:[["no","なし"],["hpf_dtf","DTF-UPWS-FP-a"],["hpf_std","HPF（標準）"]],
   outer_splitter:[["sp_2cw","2分配器WP SP2CW"],["sp_2cdw","2分配器WP SP2CDW（全通電）"],["sp_3cw","3分配器WP SP3CW"]],
   indoor_split:[["unknown","既設分配（数不明・既存流用）"],["2","2分配（新規）"],["3","3分配（新規）"],["4","4分配（新規）"],["5","5分配（新規）"],["6","6分配（新規）"],["8","8分配（新規）"]],
@@ -1069,7 +1070,7 @@ const DEFAULTS = {
   bs_antenna_state:"new",bsmix_type:"mixer",bsmix_state:"new",mount_type:"side_base_hafu",
   side_base_1:"side_sb22s",side_base_2:"none",side_base_3:"none",mast:"",mast_2:"",mast_3:"",
   connector_type:"mj25s",connector_qty:"0",turnbuckle_qty:"4",amplifier:"amp_3u43",
-  line_booster:"yes",hpf:"hpf_std",outer_splitter:"sp_2cw",indoor_split:"unknown",split_all_pass:"no",
+  line_booster:"yes",line_booster_46:"no",hpf:"hpf_std",outer_splitter:"sp_2cw",indoor_split:"unknown",split_all_pass:"no",
   power_pos:"tv_back",indoor_wire:"existing",outer_wire:"existing",tv_count:"4",
   remove_safety:"yes",remove_drop:"yes",cable_drop_len:"20",dummy_attached:"yes",use_fa:"yes",
   fa_splitter:"no",fa_splitter_pos:"instead",meas_show:"yes",
@@ -1115,7 +1116,7 @@ const GENBA_SCHEMA_VER = 1;
 const APP_NAME_SHORT = "現場入力";
 /* 版は「増えていくだけの通し番号」。メイン（積算・図面）と同じ番号体系で、
    番号が小さいほうが古い。 */
-const APP_VERSION = "159";
+const APP_VERSION = "160";
 function photoContentId(dataUri){
   if(!dataUri || typeof dataUri !== "string") return "";
   let a = 5381, b = 0;
@@ -1133,7 +1134,7 @@ const GENBA_KNOWN_KEYS = new Set([
   "work_type","is_catv","high_work","snow_guard","indoor_adj",
   "antenna_main","antenna_46","antenna_50","ch46","bs_cs","bs_antenna_state","bsmix_type","bsmix_state",
   "mount_type","side_base_1","side_base_2","side_base_3","mast","mast_2","mast_3",
-  "connector_type","connector_qty","turnbuckle_qty","amplifier","line_booster","hpf","outer_splitter",
+  "connector_type","connector_qty","turnbuckle_qty","amplifier","line_booster","line_booster_46","hpf","outer_splitter",
   "indoor_split","split_all_pass","power_pos","indoor_wire","outer_wire","tv_count",
   "remove_safety","remove_drop","cable_drop_len","dummy_attached","use_fa",
   "fa_splitter","fa_splitter_pos","meas_show",
@@ -2036,7 +2037,8 @@ const SECTIONS = [
   ]},
   { id:"amp", ico:"📶", title:"増幅・分配", fields:[
     {id:"amplifier", type:"select", label:"増幅器"},
-    {id:"line_booster", type:"seg", label:"ラインブースター"},
+    {id:"line_booster", type:"seg", label:"ラインブースター（主）"},
+    {id:"line_booster_46", type:"seg", label:"ラインブースター（46CH）", show:m=>m.ch46!=="no"},
     {id:"hpf", type:"select", label:"HPF"},
     {id:"outer_splitter", type:"select", label:"外部分配器"},
     {id:"indoor_split", type:"select", label:"宅内分配"},
@@ -3024,7 +3026,7 @@ function buildState(){
   const STR_FIELDS = ["work_type","is_catv","high_work","snow_guard","indoor_adj",
     "antenna_main","antenna_46","antenna_50","ch46","bs_cs","bs_antenna_state","bsmix_type","bsmix_state",
     "mount_type","side_base_1","side_base_2","side_base_3","mast","mast_2","mast_3",
-    "connector_type","connector_qty","turnbuckle_qty","amplifier","line_booster","hpf","outer_splitter",
+    "connector_type","connector_qty","turnbuckle_qty","amplifier","line_booster","line_booster_46","hpf","outer_splitter",
     "indoor_split","split_all_pass","power_pos","indoor_wire","outer_wire","tv_count",
     "remove_safety","remove_drop","cable_drop_len","dummy_attached","use_fa",
     "fa_splitter","fa_splitter_pos","meas_show",
