@@ -469,6 +469,25 @@
   .draft .d-no{font-weight:700;}
   .draft .d-sub{font-size:12px; color:var(--sub);}
   .draft .d-open{background:var(--accent); color:#fff; border:0; border-radius:8px; padding:8px 12px; font-weight:700; flex:none;}
+  /* 📂 まとめて選んだファイルの一覧（管理番号・氏名・住所で絞り込む） */
+  .op-head{ font-size:12px; color:#546e7a; margin:2px 0 6px; }
+  .op-row{ display:grid; grid-template-columns:auto 1fr auto; gap:4px 10px; align-items:center;
+    width:100%; text-align:left; padding:12px 12px; margin-bottom:6px; border:1px solid #cdd3da;
+    border-radius:10px; background:#fff; font-size:15px; }
+  .op-row:active{ background:#eceff1; }
+  .op-no{ font-weight:700; color:#263238; }
+  .op-sub{ color:#546e7a; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .op-kb{ color:#90a4ae; font-size:12px; }
+  .op-clear{ width:100%; padding:10px; border:1px solid #cdd3da; border-radius:10px;
+    background:#fff; color:#546e7a; font-size:13px; }
+  /* 候補から1つ選ぶ窓 */
+  .pick-row{ display:block; width:100%; text-align:left; padding:14px 12px; margin-bottom:8px;
+    border:1px solid #cdd3da; border-radius:11px; background:#fff; font-size:16px; }
+  .pick-row:active{ background:#eceff1; }
+  .pick-main{ display:block; font-weight:700; color:#263238; }
+  .pick-sub{ display:block; margin-top:2px; font-size:12px; color:#78909c; }
+  .pick-row.pick-off{ background:#f5f7f8; }
+  .pick-row.pick-type .pick-main{ color:#455a64; }
   /* 「開く」と「取消」を右端に縦に並べる */
   .draft .d-act{display:flex; flex-direction:column; gap:6px; flex:none; align-items:stretch;}
   .draft .d-act2{display:flex; gap:6px;}
@@ -912,9 +931,15 @@
   <div class="sheet">
     <h3>📋 履歴・読込</h3>
     <div class="info">入力した内容は、この端末に自動で控えます（<b>💾</b>＝保存済 ／ <b>✏️</b>＝保存後に変更あり ／ 無印＝未保存）。<br>
-    下のボタンで、PCや他の端末の <b class="fname">管理番号.json</b> を読めます。<b>📂</b>＝その戸別の続きを編集／<b>📥</b>＝工程の印だけを引き継ぐ（写真や測定値は取り込みません）。</div>
+    下のボタンで、PCや他の端末の <b class="fname">管理番号.json</b> を読めます。<b>📂</b>＝その戸別の続きを編集／<b>📥</b>＝工程の印だけを引き継ぐ（写真や測定値は取り込みません）。<br>
+    <b>📂 はまとめて選べます。</b>ファイルを選ぶ画面で <b>全部（または今日回るぶん）を選んでおく</b>と、ここで <b>管理番号・氏名・住所で絞り込んで</b>開けます。小さい字を目で探さなくて済みます。</div>
     <button id="btn-import" style="width:100%; padding:15px; border:0; border-radius:11px; background:#455a64; color:#fff; font-weight:700; font-size:15px; margin-bottom:10px;">📂 保存済みJSONを開いて続きを編集</button>
-    <input type="file" id="import-file" accept=".json,application/json,*/*" style="display:none;">
+    <input type="file" id="import-file" accept=".json,application/json,*/*" multiple style="display:none;">
+    <div id="open-pick" style="display:none; margin-bottom:10px;">
+      <input type="search" id="open-pick-q" placeholder="管理番号・氏名・住所で絞り込み" style="width:100%; box-sizing:border-box; padding:11px 12px; border:1px solid #cdd3da; border-radius:10px; font-size:15px; margin-bottom:8px;">
+      <div id="open-pick-list"></div>
+      <button type="button" id="open-pick-clear" class="op-clear">選んだファイルの一覧を消す</button>
+    </div>
     <button id="btn-flowshare" data-label="📥 他の端末の保存からチェックを引き継ぐ" style="width:100%; padding:15px; border:0; border-radius:11px; background:#1565c0; color:#fff; font-weight:700; font-size:15px; margin-bottom:10px;">📥 他の端末の保存からチェックを引き継ぐ</button>
     <div class="fs-note" id="flowshare-note"></div>
     <input type="file" id="flowshare-file" accept=".json,application/json,*/*" multiple style="display:none;">
@@ -975,6 +1000,16 @@
     <div id="reception-meta" class="info" style="display:none;"></div>
     <div id="reception-list"></div>
     <button class="closebtn" id="reception-close">閉じる</button>
+  </div>
+</div>
+
+<!-- 候補から1つ選ぶ窓（入れる場所の名前など。手で打たなくて済むように） -->
+<div class="modal" id="pick-modal">
+  <div class="sheet">
+    <h3 id="pick-title"></h3>
+    <div class="info" id="pick-note"></div>
+    <div id="pick-list"></div>
+    <button class="closebtn" id="pick-close">やめる</button>
   </div>
 </div>
 
@@ -1117,7 +1152,7 @@ const GENBA_SCHEMA_VER = 1;
 const APP_NAME_SHORT = "現場入力";
 /* 版は「増えていくだけの通し番号」。メイン（積算・図面）と同じ番号体系で、
    番号が小さいほうが古い。 */
-const APP_VERSION = "163";
+const APP_VERSION = "164";
 function photoContentId(dataUri){
   if(!dataUri || typeof dataUri !== "string") return "";
   let a = 5381, b = 0;
@@ -4482,28 +4517,142 @@ async function loadStateInto(s, fname){
     _loadKeptNote = "";
   }
 }
-document.getElementById("import-file").addEventListener("change",e=>{
-  const f=e.target.files[0]; e.target.value="";
+/* ============================================================================
+   📂 まとめて選んで、アプリの中から探す
+   ----------------------------------------------------------------------------
+   工事フォルダには戸別ファイルが何百個も入っている。スマホのファイル選択から
+   目当ての 管理番号.json を1つ探すのは、字が小さくて骨が折れる。
+   そこで「いちど全部（または何個か）選んでおく → アプリの中で管理番号・氏名・住所で
+   絞り込んで選ぶ」ようにする。受付台帳を取り込んでいれば、氏名・住所も出る。
+   ・ファイルを1つだけ選んだときは、これまでどおりそのまま開く（手数を増やさない）。
+   ・選んだ一覧はこの画面を閉じても残る（同じ日に何戸も回るため）。
+   ============================================================================ */
+let _openPick = [];
+function openPickMgmtOf(name){
+  let s = String(name || "").split(/[\\/]/).pop();
+  s = s.replace(/\.json\.txt$/i, "").replace(/\.json$/i, "");
+  return s.trim();
+}
+function openPickRowInfo(mgmt){
+  try{
+    const idx = mapRowIndex();
+    const r = idx[mgmt] || idx[toHalfWidthAn(mgmt)];
+    if(!r) return null;
+    return { name: String(r.name || "").trim(), addr: String(r.addr || "").trim() };
+  }catch(_){ return null; }
+}
+function renderOpenPick(){
+  const wrap = document.getElementById("open-pick");
+  const list = document.getElementById("open-pick-list");
+  if(!wrap || !list) return;
+  if(!_openPick.length){ wrap.style.display = "none"; list.innerHTML = ""; return; }
+  wrap.style.display = "";
+  const q = String((document.getElementById("open-pick-q") || {}).value || "").trim().toLowerCase();
+  const hit = _openPick.filter(o => {
+    if(!q) return true;
+    const info = openPickRowInfo(o.mgmt) || {};
+    return (o.mgmt + " " + (info.name || "") + " " + (info.addr || "")).toLowerCase().indexOf(q) >= 0;
+  });
+  const head = '<div class="op-head">選んだファイル ' + _openPick.length + " 個"
+    + (q ? ("／ 当てはまる " + hit.length + " 個") : "") + "</div>";
+  if(!hit.length){
+    list.innerHTML = head + '<div class="info">当てはまるものがありません。</div>';
+    return;
+  }
+  list.innerHTML = head + hit.map(o => {
+    const i = _openPick.indexOf(o);
+    const info = openPickRowInfo(o.mgmt) || {};
+    const kb = o.file && o.file.size ? Math.round(o.file.size / 1024).toLocaleString() + "KB" : "";
+    return '<button type="button" class="op-row" data-openpick="' + i + '">'
+      + '<span class="op-no">' + esc(o.mgmt || "（名前なし）") + '</span>'
+      + '<span class="op-sub">' + esc(info.name || "") + (info.addr ? ("　" + esc(info.addr)) : "") + '</span>'
+      + '<span class="op-kb">' + kb + '</span>'
+      + '</button>';
+  }).join("");
+  list.querySelectorAll("[data-openpick]").forEach(b => {
+    b.addEventListener("click", async () => {
+      const o = _openPick[+b.getAttribute("data-openpick")];
+      if(o && o.file) await openJsonFile(o.file);
+    });
+  });
+}
+/* 戸別JSONを1つ読み込んで、続きを編集できる状態にする */
+async function openJsonFile(f){
   if(!f) return;
-  const r=new FileReader();
-  r.onload=async()=>{
-    try{
-      const data=JSON.parse(r.result);
-      // 暗号化判定
-      if(data && (data.format==="hybrid" || (data.alg==="AES-GCM-256"&&data.ct))){
-        await uiAlert("このファイルは暗号化されています。PCの index.html で開いてください。");
-        return;
-      }
-      if(!(data.work_type||data.chosho_mgmt_no||data.chosho_cust_name)){
-        if(!(await uiConfirm("戸別JSONとして認識できませんでした。読み込みますか？"))) return;
-      }
-      await loadStateInto(data, f.name);
-      closeDraftModal();
-      toast("読込みました");
-    }catch(err){ await uiAlert("読込みに失敗しました："+err.message); }
-  };
-  r.readAsText(f);
+  let text;
+  try{ text = await f.text(); }
+  catch(err){ await uiAlert("読込みに失敗しました：" + ((err && err.message) || err)); return; }
+  let data;
+  try{ data = JSON.parse(text); }
+  catch(err){ await uiAlert("読込みに失敗しました：" + ((err && err.message) || err)); return; }
+  if(data && (data.format === "hybrid" || (data.alg === "AES-GCM-256" && data.ct))){
+    await uiAlert("このファイルは暗号化されています。PCの index.html で開いてください。");
+    return;
+  }
+  if(!(data.work_type || data.chosho_mgmt_no || data.chosho_cust_name)){
+    if(!(await uiConfirm("戸別JSONとして認識できませんでした。読み込みますか？"))) return;
+  }
+  await loadStateInto(data, f.name);
+  closeDraftModal();
+  toast("読込みました");
+}
+/* ============================================================================
+   入れる場所の名前を「選ぶ」（フォルダを掴めない端末むけ）
+   ----------------------------------------------------------------------------
+   これまでは名前を手で打ってもらっていた。現場で小さなキーボードを打つのは骨が折れる
+   ので、心当たりのある名前を並べて押すだけにする。どうしても違う名前のときだけ手で書く。
+   ============================================================================ */
+const LS_SAVEHINTS = "genba_savehints_v1";
+function saveHintHistory(){
+  try{ const a = JSON.parse(localStorage.getItem(LS_SAVEHINTS) || "[]"); return Array.isArray(a) ? a : []; }
+  catch(_){ return []; }
+}
+function saveHintRemember(v){
+  const s = String(v == null ? "" : v).trim();
+  if(!s) return;
+  const a = saveHintHistory().filter(x => x !== s);
+  a.unshift(s);
+  try{ localStorage.setItem(LS_SAVEHINTS, JSON.stringify(a.slice(0, 6))); }catch(_){}
+}
+/* 候補を並べて1つ選んでもらう。戻り値＝選んだ文字／""（覚えない）／null（やめた） */
+function uiPickName(title, note, items){
+  return new Promise(resolve => {
+    const m = document.getElementById("pick-modal");
+    const h = document.getElementById("pick-title");
+    const n = document.getElementById("pick-note");
+    const l = document.getElementById("pick-list");
+    if(!m || !l){ resolve(null); return; }
+    h.textContent = title || "";
+    n.innerHTML = note || "";
+    let done = false;
+    const fin = v => { if(done) return; done = true; m.classList.remove("open"); l.innerHTML = ""; resolve(v); };
+    l.innerHTML = items.map((it, i) =>
+      '<button type="button" class="pick-row' + (it.kind ? (" pick-" + it.kind) : "") + '" data-pick="' + i + '">'
+      + '<span class="pick-main">' + esc(it.label) + '</span>'
+      + (it.sub ? ('<span class="pick-sub">' + esc(it.sub) + '</span>') : "")
+      + '</button>').join("");
+    l.querySelectorAll("[data-pick]").forEach(b => {
+      b.addEventListener("click", () => fin(items[+b.getAttribute("data-pick")].value));
+    });
+    const close = document.getElementById("pick-close");
+    if(close) close.onclick = () => fin(null);
+    m.classList.add("open");
+  });
+}
+document.getElementById("import-file").addEventListener("change", async e=>{
+  const fs = Array.from(e.target.files || []); e.target.value = "";
+  if(!fs.length) return;
+  if(fs.length === 1){ await openJsonFile(fs[0]); return; }   // 1つだけ＝そのまま開く
+  _openPick = fs.map(f => ({ file:f, mgmt: openPickMgmtOf(f.name) }))
+               .sort((a,b) => String(a.mgmt).localeCompare(String(b.mgmt), "ja", { numeric:true }));
+  const q = document.getElementById("open-pick-q"); if(q) q.value = "";
+  renderOpenPick();
+  toast(fs.length + "個から探せます");
 });
+{ const q = document.getElementById("open-pick-q");
+  if(q) q.addEventListener("input", () => renderOpenPick());
+  const c = document.getElementById("open-pick-clear");
+  if(c) c.addEventListener("click", () => { _openPick = []; renderOpenPick(); }); }
 
 /* ============================================================================
    9) 下書き（この端末に自動保存）
@@ -4715,12 +4864,36 @@ async function saveDirChange(){
     /* フォルダは掴めないが、入れる場所の名前だけは覚えておける。
        保存のたびに名前を出せば、端末の保存画面で選ぶ場所を間違えにくくなる。 */
     const now = saveHintName();
-    const v = window.prompt("この端末では保存先のフォルダを選べません。\n"
-      + "「保存」を押すと、共有またはダウンロードで書き出します。\n\n"
-      + "入れる場所の名前を覚えておけます（保存のたびに出します）。\n"
-      + "例： リスト", now);
-    if(v === null) return;                       // やめた
+    /* ★手で打たせない★ 心当たりのある名前を並べて、押すだけで決められるようにする。
+       どうしても違う名前のときだけ、いちばん下の「自分で書く」から打つ。 */
+    const items = [];
+    const seen = {};
+    const add = (label, value, sub, kind) => {
+      const key = String(value);
+      if(seen[key]) return;
+      seen[key] = 1;
+      items.push({ label: label, value: value, sub: sub, kind: kind });
+    };
+    try{
+      const d = getReceptionData();
+      const proj = d && String(d.project || "").trim();
+      if(proj) add(proj, proj, "受付台帳の物件名", "");
+    }catch(_){}
+    if(now) add(now, now, "いま覚えている名前", "");
+    saveHintHistory().forEach(h => add(h, h, "前に使った名前", ""));
+    add("自分で書く", "\u0000type", "候補に無いときはこちら", "type");
+    if(now) add("覚えない", "", "保存のたびの案内を出しません", "off");
+    const picked = await uiPickName("📁 入れる場所の名前",
+      "この端末ではフォルダを掴めないので、名前だけ覚えておきます。<br>"
+      + "保存のたびに出すので、端末の保存画面でそのフォルダを選べます。", items);
+    if(picked === null) return;                  // やめた
+    let v = picked;
+    if(v === "\u0000type"){
+      v = window.prompt("入れる場所の名前を書いてください。\n例： リスト", now);
+      if(v === null) return;
+    }
     saveHintSet(v);
+    saveHintRemember(v);
     renderSaveBar();
     await uiAlert(saveHintName()
       ? ("覚えました。保存のたびに「" + saveHintName() + "」と出します。\n\n"
