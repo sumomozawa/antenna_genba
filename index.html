@@ -1321,6 +1321,37 @@ function photoBytesToDataUri(bytes, mime){
   }
   return "data:" + (mime || "image/jpeg") + ";base64," + btoa(s);
 }
+/* 絵の大きさ [幅, 高さ]（読めなければ null）。Exif に書いてある大きさを直すのに使う。 */
+function photoPixelSizeOf(dataUri){
+  const b = photoHeadBytes(dataUri, 131072);
+  if(!b || b.length < 24) return null;
+  // PNG: 8バイトの目印 + IHDR（幅・高さが 16〜24 バイト目）
+  if(b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4E && b[3] === 0x47){
+    const w = (b[16] << 24) | (b[17] << 16) | (b[18] << 8) | b[19];
+    const h = (b[20] << 24) | (b[21] << 16) | (b[22] << 8) | b[23];
+    return (w > 0 && h > 0) ? [w, h] : null;
+  }
+  // JPEG: SOI のあと、印を順に飛ばして SOFn（大きさが書いてある印）を探す
+  if(!(b[0] === 0xFF && b[1] === 0xD8)) return null;
+  let i = 2;
+  while(i + 9 < b.length){
+    if(b[i] !== 0xFF){ i++; continue; }
+    const m = b[i + 1];
+    if(m === 0xFF){ i++; continue; }
+    if(m === 0xD8 || m === 0x01 || (m >= 0xD0 && m <= 0xD7)){ i += 2; continue; }
+    if(m === 0xD9 || m === 0xDA) return null;      // 絵の中身に入った＝大きさは見つからなかった
+    const len = (b[i + 2] << 8) | b[i + 3];
+    if(len < 2) return null;
+    const isSOF = (m >= 0xC0 && m <= 0xCF) && m !== 0xC4 && m !== 0xC8 && m !== 0xCC;
+    if(isSOF){
+      const h = (b[i + 5] << 8) | b[i + 6];
+      const w = (b[i + 7] << 8) | b[i + 8];
+      return (w > 0 && h > 0) ? [w, h] : null;
+    }
+    i += 2 + len;
+  }
+  return null;
+}
 /* JPEG の頭から Exif の塊（APP1）を切り出す。無ければ null */
 function photoExifSegment(bytes){
   if(!bytes || bytes.length < 4) return null;
@@ -1364,6 +1395,12 @@ function photoExifClearOrientation(seg){
     if(ifd0 + 2 > seg.length) return false;
     const n = u16(ifd0);
     if(ifd0 + 2 + n * 12 + 4 > seg.length) return false;   // 最後まで読み切れない＝あきらめる
+    /* 元の写真に埋まっている「小さい見本」（カメラが入れるサムネイル）を切り離す。
+       見本は回す前の絵・元の大きさのままなので、残すとパソコンのファイル一覧で
+       横倒しに見えたり、縮める前の絵が見えたりする。
+       中身のバイトは触らず、そこへの道しるべ（次の目録の番地）を 0 にするだけ。 */
+    const nx = ifd0 + 2 + n * 12;
+    seg[nx] = 0; seg[nx + 1] = 0; seg[nx + 2] = 0; seg[nx + 3] = 0;
     for(let k = 0; k < n; k++){
       const e = ifd0 + 2 + k * 12;
       if(u16(e) === 0x0112){                        // 向きの印
@@ -1376,12 +1413,57 @@ function photoExifClearOrientation(seg){
     return true;                                    // 向きの印がもともと無い＝そのままでよい
   } catch(_){ return false; }
 }
+/* Exif の中の「絵の大きさ」（ExifImageWidth 0xA002 / ExifImageHeight 0xA003）を、
+   縮めたあとの大きさに書き替える。直せなくても写真は失わない（そのまま進む）。 */
+function photoExifSetPixelSize(seg, w, h){
+  try {
+    const t = 10;
+    if(seg.length < t + 8) return;
+    const little = (seg[t] === 0x49 && seg[t + 1] === 0x49);
+    const big = (seg[t] === 0x4D && seg[t + 1] === 0x4D);
+    if(!little && !big) return;
+    const u16 = o => little ? (seg[o] | (seg[o + 1] << 8)) : ((seg[o] << 8) | seg[o + 1]);
+    const u32 = o => little
+      ? (seg[o] | (seg[o + 1] << 8) | (seg[o + 2] << 16) | (seg[o + 3] << 24)) >>> 0
+      : ((seg[o] << 24) | (seg[o + 1] << 16) | (seg[o + 2] << 8) | seg[o + 3]) >>> 0;
+    const put = (o, type, v) => {
+      if(type === 3){                               // 2バイトの数
+        if(v > 0xFFFF) return;
+        if(little){ seg[o] = v & 255; seg[o + 1] = (v >> 8) & 255; seg[o + 2] = 0; seg[o + 3] = 0; }
+        else { seg[o] = (v >> 8) & 255; seg[o + 1] = v & 255; seg[o + 2] = 0; seg[o + 3] = 0; }
+      } else if(type === 4){                        // 4バイトの数
+        if(little){ seg[o] = v & 255; seg[o+1] = (v >> 8) & 255; seg[o+2] = (v >> 16) & 255; seg[o+3] = (v >>> 24) & 255; }
+        else { seg[o] = (v >>> 24) & 255; seg[o+1] = (v >> 16) & 255; seg[o+2] = (v >> 8) & 255; seg[o+3] = v & 255; }
+      }
+    };
+    if(u16(t + 2) !== 0x2A) return;
+    const ifd0 = t + u32(t + 4);
+    if(ifd0 + 2 > seg.length) return;
+    const n0 = u16(ifd0);
+    if(ifd0 + 2 + n0 * 12 + 4 > seg.length) return;
+    let sub = 0;
+    for(let k = 0; k < n0; k++){
+      const e = ifd0 + 2 + k * 12;
+      if(u16(e) === 0x8769){ sub = t + u32(e + 8); break; }   // 撮影のこまかい目録へ
+    }
+    if(!sub || sub + 2 > seg.length) return;
+    const n1 = u16(sub);
+    if(sub + 2 + n1 * 12 > seg.length) return;
+    for(let k = 0; k < n1; k++){
+      const e = sub + 2 + k * 12;
+      const tag = u16(e), type = u16(e + 2), cnt = u32(e + 4);
+      if(cnt !== 1 || (type !== 3 && type !== 4)) continue;
+      if(tag === 0xA002) put(e + 8, type, w);
+      else if(tag === 0xA003) put(e + 8, type, h);
+    }
+  } catch(_){}
+}
 /* 元の写真から「移せる Exif の塊」を取り出す（無ければ null）。
    縮める前にこれを見て、足すぶんの場所を空けておく。 */
 function photoExifToCarry(srcDataUri){
   try {
     const seg = photoExifSegment(photoHeadBytes(srcDataUri, 262144));   // Exif は写真の頭にある
-    if(!seg || seg.length < 12 || seg.length > 128 * 1024) return null;
+    if(!seg || seg.length < 12 || seg.length > 128 * 1024) return null;   // 念のための上限（JPEGの印は長さが2バイト＝実際は約64KBまで）
     return seg;
   } catch(_){ return null; }
 }
@@ -1393,6 +1475,8 @@ function photoCarryExif(outDataUri, srcDataUri){
     const seg = photoExifToCarry(srcDataUri);
     if(!seg) return outDataUri;
     if(!photoExifClearOrientation(seg)) return outDataUri; // 向きを直せない＝付けない（横倒しになる）
+    const px = photoPixelSizeOf(outDataUri);
+    if(px) photoExifSetPixelSize(seg, px[0], px[1]);       // 大きさの書き置きも、縮めたあとに合わせる
     const out = photoAllBytes(outDataUri);
     if(!out || !(out[0] === 0xFF && out[1] === 0xD8)) return outDataUri;
     if(photoExifSegment(out)) return outDataUri;           // もう入っている＝何もしない
@@ -4591,14 +4675,17 @@ function renderOpenPick(){
   if(!wrap || !list) return;
   if(!_openPick.length){ wrap.style.display = "none"; list.innerHTML = ""; return; }
   wrap.style.display = "";
-  const q = String((document.getElementById("open-pick-q") || {}).value || "").trim().toLowerCase();
+  /* 全角で打っても当たるように、探す言葉も並べる言葉も半角にそろえてから比べる
+     （スマホの日本語キーボードでは「２４５」のように全角になりやすい） */
+  const q = toHalfWidthAn(String((document.getElementById("open-pick-q") || {}).value || "").trim()).toLowerCase();
   /* 受付台帳の索引は、この描画で1つだけ作る（1行ごとに作ると文字を打つたび固まる） */
   const idx = (function(){ try{ return mapRowIndex(); }catch(_){ return {}; } })();
   const hit = [];
   for(let i = 0; i < _openPick.length; i++){
     const o = _openPick[i];
     const info = openPickRowInfo(o.mgmt, idx) || {};
-    if(q && (o.mgmt + " " + (info.name || "") + " " + (info.addr || "")).toLowerCase().indexOf(q) < 0) continue;
+    const hay = toHalfWidthAn(o.mgmt + " " + (info.name || "") + " " + (info.addr || "")).toLowerCase();
+    if(q && hay.indexOf(q) < 0) continue;
     hit.push({ o: o, i: i, info: info });
   }
   const head = '<div class="op-head">選んだファイル ' + _openPick.length + " 個"
@@ -4626,25 +4713,42 @@ function renderOpenPick(){
     });
   });
 }
-/* 戸別JSONを1つ読み込んで、続きを編集できる状態にする */
+/* 戸別JSONを1つ読み込んで、続きを編集できる状態にする。
+   ★押して何も起きない、を作らない★ どこで転んでも必ず日本語で知らせる。
+   ★続けて押されても開くのは1つだけ★ 一覧は指が滑りやすく、あとから押したほうが
+   先に読み終わると、思っていたのと違う戸別が開いてしまう。 */
+let _openBusy = false;
 async function openJsonFile(f){
   if(!f) return;
-  let text;
-  try{ text = await f.text(); }
-  catch(err){ await uiAlert("読込みに失敗しました：" + ((err && err.message) || err)); return; }
-  let data;
-  try{ data = JSON.parse(text); }
-  catch(err){ await uiAlert("読込みに失敗しました：" + ((err && err.message) || err)); return; }
-  if(data && (data.format === "hybrid" || (data.alg === "AES-GCM-256" && data.ct))){
-    await uiAlert("このファイルは暗号化されています。PCの index.html で開いてください。");
-    return;
+  if(_openBusy) return;
+  _openBusy = true;
+  try{
+    const nm = String(f.name || "");
+    let text;
+    try{ text = await f.text(); }
+    catch(_){ await uiAlert("このファイルを読めませんでした。\n\n" + nm + "\n\nもう一度選び直してください。"); return; }
+    let data;
+    try{ data = JSON.parse(text); }
+    catch(_){ await uiAlert("このファイルは 管理番号.json ではないようです。\n\n" + nm); return; }
+    if(!data || typeof data !== "object" || Array.isArray(data)){
+      await uiAlert("このファイルは 管理番号.json ではないようです。\n\n" + nm);
+      return;
+    }
+    if(data.format === "hybrid" || (data.alg === "AES-GCM-256" && data.ct)){
+      await uiAlert("このファイルは暗号化されています。PCの index.html で開いてください。");
+      return;
+    }
+    if(!(data.work_type || data.chosho_mgmt_no || data.chosho_cust_name)){
+      if(!(await uiConfirm("戸別JSONとして認識できませんでした。読み込みますか？"))) return;
+    }
+    await loadStateInto(data, nm);
+    closeDraftModal();
+    toast("読込みました");
+  }catch(err){
+    try{ await uiAlert("読み込めませんでした。\n\n" + ((err && err.message) || err)); }catch(_){}
+  }finally{
+    _openBusy = false;
   }
-  if(!(data.work_type || data.chosho_mgmt_no || data.chosho_cust_name)){
-    if(!(await uiConfirm("戸別JSONとして認識できませんでした。読み込みますか？"))) return;
-  }
-  await loadStateInto(data, f.name);
-  closeDraftModal();
-  toast("読込みました");
 }
 /* ============================================================================
    入れる場所の名前を「選ぶ」（フォルダを掴めない端末むけ）
@@ -4718,15 +4822,28 @@ function uiTypeName(title, note, value){
     setTimeout(() => { try{ i.focus(); i.select(); }catch(_){} }, 60);
   });
 }
+/* 戸別ファイルらしい名前か（写真やメモを一覧に混ぜない） */
+function openPickIsJson(name){ return /\.json(\.txt)?$/i.test(String(name || "")); }
 document.getElementById("import-file").addEventListener("change", async e=>{
-  const fs = Array.from(e.target.files || []); e.target.value = "";
-  if(!fs.length) return;
-  if(fs.length === 1){ await openJsonFile(fs[0]); return; }   // 1つだけ＝そのまま開く
+  const all = Array.from(e.target.files || []); e.target.value = "";
+  if(!all.length) return;
+  if(all.length === 1){ await openJsonFile(all[0]); return; }   // 1つだけ＝そのまま開く
+  let fs = all.filter(f => openPickIsJson(f.name));
+  let away = all.length - fs.length;
+  /* 端末によっては .json が付かない形で渡ってくる。1つも残らないときは選り分けずに全部出す
+     （「押しても何も出ない」を作らない）。 */
+  if(!fs.length){ fs = all; away = 0; }
   _openPick = fs.map(f => ({ file:f, mgmt: openPickMgmtOf(f.name) }))
                .sort((a,b) => String(a.mgmt).localeCompare(String(b.mgmt), "ja", { numeric:true }));
   const q = document.getElementById("open-pick-q"); if(q) q.value = "";
+  /* ★押して何も起きない、を作らない★ 一覧は「履歴・読込」の窓の中にある。
+     PCの守りの帯から押したときは窓が閉じているので、開いてから出す。 */
+  const dm = document.getElementById("draft-modal");
+  if(dm && !dm.classList.contains("open")){
+    try{ await openDraftModal(); }catch(_){ dm.classList.add("open"); }
+  }
   renderOpenPick();
-  toast(fs.length + "個から探せます");
+  toast(fs.length + "個から探せます" + (away ? ("（戸別ファイルでない " + away + " 個は外しました）") : ""));
 });
 { const q = document.getElementById("open-pick-q");
   if(q) q.addEventListener("input", () => renderOpenPick());
@@ -4938,8 +5055,9 @@ function renderSaveBar(){
 /* 保存先のフォルダを選び直す（保存バーの「📁 …」を押したとき）。
    ★窓は押した直後にしか開けない★ので、ここでは何も聞かずにすぐ開く。
    先に確認を出すと、その間に「押した直後」の権利が切れて窓が開かなくなる。 */
-async function saveDirChange(){
-  if(!window.showDirectoryPicker){
+async function saveDirChange(mode){
+  /* mode==="nameonly" ＝ フォルダの窓が出せなかったとき。名前だけでも覚えられるようにする。 */
+  if(mode === "nameonly" || !window.showDirectoryPicker){
     /* フォルダは掴めないが、入れる場所の名前だけは覚えておける。
        保存のたびに名前を出せば、端末の保存画面で選ぶ場所を間違えにくくなる。 */
     const now = saveHintName();
@@ -4987,7 +5105,14 @@ async function saveDirChange(){
   }
   let dir = null;
   try{ dir = await window.showDirectoryPicker({ id:"genba-save", mode:"readwrite" }); }
-  catch(e){ if(e && e.name === "AbortError") return; console.warn("保存先を選べませんでした", e); return; }
+  catch(e){
+    if(e && e.name === "AbortError") return;                 // 自分でやめた＝何も言わない
+    console.warn("保存先を選べませんでした", e);
+    /* ★押して何も起きない、を作らない★ 窓が出せない端末でも、入れる場所の名前は覚えられる。 */
+    await uiAlert("この端末では、保存先のフォルダを選ぶ窓を開けませんでした。\n\n"
+      + "かわりに、入れる場所の名前を覚えておきます。");
+    return await saveDirChange("nameonly");
+  }
   if(!dir) return;
   if(!(await saveDirOk(dir, true))){
     await uiAlert("そのフォルダへ書き込む許可が取れませんでした。\n\nもう一度お試しください。");
