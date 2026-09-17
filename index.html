@@ -469,6 +469,30 @@
   .draft .d-no{font-weight:700;}
   .draft .d-sub{font-size:12px; color:var(--sub);}
   .draft .d-open{background:var(--accent); color:#fff; border:0; border-radius:8px; padding:8px 12px; font-weight:700; flex:none;}
+  /* 📂 まとめて選んだファイルの一覧（管理番号・氏名・住所で絞り込む） */
+  .op-head{ font-size:12px; color:#546e7a; margin:2px 0 6px; }
+  .op-row{ display:grid; grid-template-columns:auto 1fr auto; gap:4px 10px; align-items:center;
+    width:100%; text-align:left; padding:12px 12px; margin-bottom:6px; border:1px solid #cdd3da;
+    border-radius:10px; background:#fff; font-size:15px; }
+  .op-row:active{ background:#eceff1; }
+  .op-no{ font-weight:700; color:#263238; }
+  .op-sub{ color:#546e7a; font-size:13px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .op-kb{ color:#90a4ae; font-size:12px; }
+  .op-clear{ width:100%; padding:10px; border:1px solid #cdd3da; border-radius:10px;
+    background:#fff; color:#546e7a; font-size:13px; }
+  /* 候補から1つ選ぶ窓 */
+  .pick-row{ display:block; width:100%; text-align:left; padding:14px 12px; margin-bottom:8px;
+    border:1px solid #cdd3da; border-radius:11px; background:#fff; font-size:16px; }
+  .pick-row:active{ background:#eceff1; }
+  .pick-main{ display:block; font-weight:700; color:#263238; }
+  .pick-sub{ display:block; margin-top:2px; font-size:12px; color:#78909c; }
+  .pick-row.pick-off{ background:#f5f7f8; }
+  .pick-row.pick-type .pick-main{ color:#455a64; }
+  /* 名前を手で書く窓（ホーム画面アプリでは端末の打ち込み窓が出ないので自前で用意する） */
+  .type-input{ width:100%; box-sizing:border-box; margin-top:4px; padding:14px 12px;
+    border:1px solid #cdd3da; border-radius:11px; background:#fff; font-size:16px; font-family:inherit; }
+  .type-ok{ width:100%; margin-top:12px; padding:14px; border:0; border-radius:12px;
+    background:var(--accent); color:#fff; font-weight:700; font-size:15px; font-family:inherit; }
   /* 「開く」と「取消」を右端に縦に並べる */
   .draft .d-act{display:flex; flex-direction:column; gap:6px; flex:none; align-items:stretch;}
   .draft .d-act2{display:flex; gap:6px;}
@@ -912,9 +936,15 @@
   <div class="sheet">
     <h3>📋 履歴・読込</h3>
     <div class="info">入力した内容は、この端末に自動で控えます（<b>💾</b>＝保存済 ／ <b>✏️</b>＝保存後に変更あり ／ 無印＝未保存）。<br>
-    下のボタンで、PCや他の端末の <b class="fname">管理番号.json</b> を読めます。<b>📂</b>＝その戸別の続きを編集／<b>📥</b>＝工程の印だけを引き継ぐ（写真や測定値は取り込みません）。</div>
+    下のボタンで、PCや他の端末の <b class="fname">管理番号.json</b> を読めます。<b>📂</b>＝その戸別の続きを編集／<b>📥</b>＝工程の印だけを引き継ぐ（写真や測定値は取り込みません）。<br>
+    <b>📂 はまとめて選べます。</b>ファイルを選ぶ画面で <b>全部（または今日回るぶん）を選んでおく</b>と、ここで <b>管理番号・氏名・住所で絞り込んで</b>開けます。小さい字を目で探さなくて済みます。</div>
     <button id="btn-import" style="width:100%; padding:15px; border:0; border-radius:11px; background:#455a64; color:#fff; font-weight:700; font-size:15px; margin-bottom:10px;">📂 保存済みJSONを開いて続きを編集</button>
-    <input type="file" id="import-file" accept=".json,application/json,*/*" style="display:none;">
+    <input type="file" id="import-file" accept=".json,application/json,*/*" multiple style="display:none;">
+    <div id="open-pick" style="display:none; margin-bottom:10px;">
+      <input type="search" id="open-pick-q" placeholder="管理番号・氏名・住所で絞り込み" style="width:100%; box-sizing:border-box; padding:11px 12px; border:1px solid #cdd3da; border-radius:10px; font-size:15px; margin-bottom:8px;">
+      <div id="open-pick-list"></div>
+      <button type="button" id="open-pick-clear" class="op-clear">選んだファイルの一覧を消す</button>
+    </div>
     <button id="btn-flowshare" data-label="📥 他の端末の保存からチェックを引き継ぐ" style="width:100%; padding:15px; border:0; border-radius:11px; background:#1565c0; color:#fff; font-weight:700; font-size:15px; margin-bottom:10px;">📥 他の端末の保存からチェックを引き継ぐ</button>
     <div class="fs-note" id="flowshare-note"></div>
     <input type="file" id="flowshare-file" accept=".json,application/json,*/*" multiple style="display:none;">
@@ -978,6 +1008,27 @@
   </div>
 </div>
 
+<!-- 候補から1つ選ぶ窓（入れる場所の名前など。手で打たなくて済むように） -->
+<div class="modal" id="pick-modal">
+  <div class="sheet">
+    <h3 id="pick-title"></h3>
+    <div class="info" id="pick-note"></div>
+    <div id="pick-list"></div>
+    <button class="closebtn" id="pick-close">やめる</button>
+  </div>
+</div>
+
+<!-- 名前を手で書く窓（ホーム画面アプリでは端末の打ち込み窓が出ないため自前）-->
+<div class="modal" id="type-modal">
+  <div class="sheet">
+    <h3 id="type-title"></h3>
+    <div class="info" id="type-note"></div>
+    <input class="type-input" id="type-input" type="text" autocomplete="off" autocapitalize="off" spellcheck="false">
+    <button class="type-ok" id="type-ok">これにする</button>
+    <button class="closebtn" id="type-close">やめる</button>
+  </div>
+</div>
+
 <!-- アプリ内ダイアログ（confirm/alertの代替・iOSホーム画面アプリ対応）-->
 <div class="modal" id="ui-dialog">
   <div class="dlg">
@@ -1038,7 +1089,7 @@ const OPT = {
   remove_drop:[["yes","あり"],["no","なし"]],
   dummy_attached:[["yes","取付確認済"],["no","未取付（要確認）"]],
   use_fa:[["yes","使用（保安器台に取付）"],["no","使用しない"]],
-  fa_splitter:[["no","なし"],["sp_2cw","2分配器WP SP2CW"],["sp_2cdw","2分配器WP SP2CDW（全通電）"],["sp_3cw","3分配器WP SP3CW"]],
+  fa_splitter:[["no","なし"],["exist_2sp","既設2分配器（流用）"],["sp_2cw","2分配器WP SP2CW"],["sp_2cdw","2分配器WP SP2CDW（全通電）"],["sp_3cw","3分配器WP SP3CW"]],
   fa_splitter_pos:[["instead","FAの代わり"],["after","FAの後ろ"]],
   ext_power_conn:[["splitter_2","2分配器使用（メイン）"],["direct","電源部IN/OUT直結"]],
   att_main:[["no","なし"],["att_w3","ATTW3 (-3dB)"],["att_w6","ATTW6 (-6dB)"],["att_w10","ATTW10 (-10dB)"]],
@@ -1117,7 +1168,7 @@ const GENBA_SCHEMA_VER = 1;
 const APP_NAME_SHORT = "現場入力";
 /* 版は「増えていくだけの通し番号」。メイン（積算・図面）と同じ番号体系で、
    番号が小さいほうが古い。 */
-const APP_VERSION = "162";
+const APP_VERSION = "165";
 function photoContentId(dataUri){
   if(!dataUri || typeof dataUri !== "string") return "";
   let a = 5381, b = 0;
@@ -1228,12 +1279,225 @@ async function photoLooksLike(src, out){
   if(a.sd >= 6 && b.sd < a.sd * 0.35) return false;           // 模様が消えている（のっぺりした絵）
   return true;
 }
+/* 写真の頭のところだけをバイトにして読む（Exif や大きさを見るため）。 */
+function photoHeadBytes(dataUri, maxBytes){
+  const s = String(dataUri || "");
+  const c = s.indexOf(",");
+  if(c < 0) return null;
+  const b64 = s.slice(c + 1, c + 1 + Math.ceil((maxBytes || 65536) / 3) * 4);
+  let bin;
+  try { bin = atob(b64.replace(/[^A-Za-z0-9+/=]/g, "")); } catch(_){ return null; }
+  const out = new Uint8Array(bin.length);
+  for(let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+/* ============================================================
+   撮った日時・場所（GPS）を、縮めたあとの写真にも引き継ぐ
+   ------------------------------------------------------------
+   写真を縮めるときは canvas に描き直すので、出来上がりからは
+   「いつ撮ったか・どこで撮ったか・どの機種で撮ったか」（Exif）が消える。
+   工事写真はいつ撮ったかが大事なので、元の写真の Exif の塊だけをそのまま移す。
+   ・向きの印だけは「そのまま（1）」に直す。焼き直した絵はもう回してあるので、
+     元の印を残すと二重に回って横倒しになる。
+   ・少しでもうまくいかなければ、Exif を付けずにそのまま返す（写真は失わない）。
+   ============================================================ */
+/* dataURI をぜんぶバイトにする（開けなければ null） */
+function photoAllBytes(dataUri){
+  const s = String(dataUri || "");
+  const c = s.indexOf(",");
+  if(c < 0) return null;
+  let bin;
+  try { bin = atob(s.slice(c + 1)); } catch(_){ return null; }
+  const out = new Uint8Array(bin.length);
+  for(let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+/* バイトを dataURI に戻す */
+function photoBytesToDataUri(bytes, mime){
+  let s = "";
+  const step = 0x8000;
+  for(let i = 0; i < bytes.length; i += step){
+    s += String.fromCharCode.apply(null, bytes.subarray(i, i + step));
+  }
+  return "data:" + (mime || "image/jpeg") + ";base64," + btoa(s);
+}
+/* 絵の大きさ [幅, 高さ]（読めなければ null）。Exif に書いてある大きさを直すのに使う。 */
+function photoPixelSizeOf(dataUri){
+  const b = photoHeadBytes(dataUri, 131072);
+  if(!b || b.length < 24) return null;
+  // PNG: 8バイトの目印 + IHDR（幅・高さが 16〜24 バイト目）
+  if(b[0] === 0x89 && b[1] === 0x50 && b[2] === 0x4E && b[3] === 0x47){
+    const w = (b[16] << 24) | (b[17] << 16) | (b[18] << 8) | b[19];
+    const h = (b[20] << 24) | (b[21] << 16) | (b[22] << 8) | b[23];
+    return (w > 0 && h > 0) ? [w, h] : null;
+  }
+  // JPEG: SOI のあと、印を順に飛ばして SOFn（大きさが書いてある印）を探す
+  if(!(b[0] === 0xFF && b[1] === 0xD8)) return null;
+  let i = 2;
+  while(i + 9 < b.length){
+    if(b[i] !== 0xFF){ i++; continue; }
+    const m = b[i + 1];
+    if(m === 0xFF){ i++; continue; }
+    if(m === 0xD8 || m === 0x01 || (m >= 0xD0 && m <= 0xD7)){ i += 2; continue; }
+    if(m === 0xD9 || m === 0xDA) return null;      // 絵の中身に入った＝大きさは見つからなかった
+    const len = (b[i + 2] << 8) | b[i + 3];
+    if(len < 2) return null;
+    const isSOF = (m >= 0xC0 && m <= 0xCF) && m !== 0xC4 && m !== 0xC8 && m !== 0xCC;
+    if(isSOF){
+      const h = (b[i + 5] << 8) | b[i + 6];
+      const w = (b[i + 7] << 8) | b[i + 8];
+      return (w > 0 && h > 0) ? [w, h] : null;
+    }
+    i += 2 + len;
+  }
+  return null;
+}
+/* JPEG の頭から Exif の塊（APP1）を切り出す。無ければ null */
+function photoExifSegment(bytes){
+  if(!bytes || bytes.length < 4) return null;
+  if(!(bytes[0] === 0xFF && bytes[1] === 0xD8)) return null;
+  let i = 2;
+  while(i + 4 < bytes.length){
+    if(bytes[i] !== 0xFF){ i++; continue; }
+    const m = bytes[i + 1];
+    if(m === 0xFF){ i++; continue; }
+    if(m === 0xD8 || m === 0x01 || (m >= 0xD0 && m <= 0xD7)){ i += 2; continue; }
+    if(m === 0xD9 || m === 0xDA) return null;      // 絵の中身に入った＝Exif は無かった
+    const len = (bytes[i + 2] << 8) | bytes[i + 3];
+    if(len < 2 || i + 2 + len > bytes.length) return null;
+    if(m === 0xE1 && len >= 8
+       && bytes[i + 4] === 0x45 && bytes[i + 5] === 0x78 && bytes[i + 6] === 0x69
+       && bytes[i + 7] === 0x66 && bytes[i + 8] === 0x00){
+      return bytes.slice(i, i + 2 + len);          // FFE1 + 長さ + 中身
+    }
+    i += 2 + len;
+  }
+  return null;
+}
+/* Exif の塊の中の「向きの印」を、そのまま（1）に書き替える。
+   焼き直した絵はもう回してあるので、元の印を残すと二重に回る。
+   返り値 true＝「この塊を付けても、もう回らない」（印を直した／もともと印が無い）。
+   false＝中身を読み切れなかった。このときは Exif を付けてはいけない（横倒しになる）。 */
+function photoExifClearOrientation(seg){
+  try {
+    // FFE1(2) + 長さ(2) + "Exif\0\0"(6) = 10 バイト目から TIFF が始まる
+    const t = 10;
+    if(seg.length < t + 8) return false;
+    const little = (seg[t] === 0x49 && seg[t + 1] === 0x49);
+    const big = (seg[t] === 0x4D && seg[t + 1] === 0x4D);
+    if(!little && !big) return false;
+    const u16 = o => little ? (seg[o] | (seg[o + 1] << 8)) : ((seg[o] << 8) | seg[o + 1]);
+    const u32 = o => little
+      ? (seg[o] | (seg[o + 1] << 8) | (seg[o + 2] << 16) | (seg[o + 3] << 24)) >>> 0
+      : ((seg[o] << 24) | (seg[o + 1] << 16) | (seg[o + 2] << 8) | seg[o + 3]) >>> 0;
+    if(u16(t + 2) !== 0x2A) return false;
+    const ifd0 = t + u32(t + 4);
+    if(ifd0 + 2 > seg.length) return false;
+    const n = u16(ifd0);
+    if(ifd0 + 2 + n * 12 + 4 > seg.length) return false;   // 最後まで読み切れない＝あきらめる
+    /* 元の写真に埋まっている「小さい見本」（カメラが入れるサムネイル）を切り離す。
+       見本は回す前の絵・元の大きさのままなので、残すとパソコンのファイル一覧で
+       横倒しに見えたり、縮める前の絵が見えたりする。
+       中身のバイトは触らず、そこへの道しるべ（次の目録の番地）を 0 にするだけ。 */
+    const nx = ifd0 + 2 + n * 12;
+    seg[nx] = 0; seg[nx + 1] = 0; seg[nx + 2] = 0; seg[nx + 3] = 0;
+    for(let k = 0; k < n; k++){
+      const e = ifd0 + 2 + k * 12;
+      if(u16(e) === 0x0112){                        // 向きの印
+        if(u16(e + 2) !== 3 || u32(e + 4) !== 1) return false;   // 見慣れない書き方＝触らない
+        if(little){ seg[e + 8] = 1; seg[e + 9] = 0; }
+        else { seg[e + 8] = 0; seg[e + 9] = 1; }
+        return true;
+      }
+    }
+    return true;                                    // 向きの印がもともと無い＝そのままでよい
+  } catch(_){ return false; }
+}
+/* Exif の中の「絵の大きさ」（ExifImageWidth 0xA002 / ExifImageHeight 0xA003）を、
+   縮めたあとの大きさに書き替える。直せなくても写真は失わない（そのまま進む）。 */
+function photoExifSetPixelSize(seg, w, h){
+  try {
+    const t = 10;
+    if(seg.length < t + 8) return;
+    const little = (seg[t] === 0x49 && seg[t + 1] === 0x49);
+    const big = (seg[t] === 0x4D && seg[t + 1] === 0x4D);
+    if(!little && !big) return;
+    const u16 = o => little ? (seg[o] | (seg[o + 1] << 8)) : ((seg[o] << 8) | seg[o + 1]);
+    const u32 = o => little
+      ? (seg[o] | (seg[o + 1] << 8) | (seg[o + 2] << 16) | (seg[o + 3] << 24)) >>> 0
+      : ((seg[o] << 24) | (seg[o + 1] << 16) | (seg[o + 2] << 8) | seg[o + 3]) >>> 0;
+    const put = (o, type, v) => {
+      if(type === 3){                               // 2バイトの数
+        if(v > 0xFFFF) return;
+        if(little){ seg[o] = v & 255; seg[o + 1] = (v >> 8) & 255; seg[o + 2] = 0; seg[o + 3] = 0; }
+        else { seg[o] = (v >> 8) & 255; seg[o + 1] = v & 255; seg[o + 2] = 0; seg[o + 3] = 0; }
+      } else if(type === 4){                        // 4バイトの数
+        if(little){ seg[o] = v & 255; seg[o+1] = (v >> 8) & 255; seg[o+2] = (v >> 16) & 255; seg[o+3] = (v >>> 24) & 255; }
+        else { seg[o] = (v >>> 24) & 255; seg[o+1] = (v >> 16) & 255; seg[o+2] = (v >> 8) & 255; seg[o+3] = v & 255; }
+      }
+    };
+    if(u16(t + 2) !== 0x2A) return;
+    const ifd0 = t + u32(t + 4);
+    if(ifd0 + 2 > seg.length) return;
+    const n0 = u16(ifd0);
+    if(ifd0 + 2 + n0 * 12 + 4 > seg.length) return;
+    let sub = 0;
+    for(let k = 0; k < n0; k++){
+      const e = ifd0 + 2 + k * 12;
+      if(u16(e) === 0x8769){ sub = t + u32(e + 8); break; }   // 撮影のこまかい目録へ
+    }
+    if(!sub || sub + 2 > seg.length) return;
+    const n1 = u16(sub);
+    if(sub + 2 + n1 * 12 > seg.length) return;
+    for(let k = 0; k < n1; k++){
+      const e = sub + 2 + k * 12;
+      const tag = u16(e), type = u16(e + 2), cnt = u32(e + 4);
+      if(cnt !== 1 || (type !== 3 && type !== 4)) continue;
+      if(tag === 0xA002) put(e + 8, type, w);
+      else if(tag === 0xA003) put(e + 8, type, h);
+    }
+  } catch(_){}
+}
+/* 元の写真から「移せる Exif の塊」を取り出す（無ければ null）。
+   縮める前にこれを見て、足すぶんの場所を空けておく。 */
+function photoExifToCarry(srcDataUri){
+  try {
+    const seg = photoExifSegment(photoHeadBytes(srcDataUri, 262144));   // Exif は写真の頭にある
+    if(!seg || seg.length < 12 || seg.length > 128 * 1024) return null;   // 念のための上限（JPEGの印は長さが2バイト＝実際は約64KBまで）
+    return seg;
+  } catch(_){ return null; }
+}
+/* 縮めた写真（out）へ、元の写真（src）の Exif を移す。
+   うまくいかなければ out をそのまま返す。 */
+function photoCarryExif(outDataUri, srcDataUri){
+  try {
+    if(!/^data:image\/jpeg/i.test(String(outDataUri || ""))) return outDataUri;
+    const seg = photoExifToCarry(srcDataUri);
+    if(!seg) return outDataUri;
+    if(!photoExifClearOrientation(seg)) return outDataUri; // 向きを直せない＝付けない（横倒しになる）
+    const px = photoPixelSizeOf(outDataUri);
+    if(px) photoExifSetPixelSize(seg, px[0], px[1]);       // 大きさの書き置きも、縮めたあとに合わせる
+    const out = photoAllBytes(outDataUri);
+    if(!out || !(out[0] === 0xFF && out[1] === 0xD8)) return outDataUri;
+    if(photoExifSegment(out)) return outDataUri;           // もう入っている＝何もしない
+    const merged = new Uint8Array(out.length + seg.length);
+    merged.set(out.subarray(0, 2), 0);                     // SOI
+    merged.set(seg, 2);                                    // Exif の塊
+    merged.set(out.subarray(2), 2 + seg.length);
+    return photoBytesToDataUri(merged, "image/jpeg");
+  } catch(_){ return outDataUri; }
+}
 /* 入れる前に1枚を目安の大きさへ収める。収められなければ元のまま返す（写真は捨てない）。
    JPEGの大きさは画素数にほぼ比例するので、1回試したら「あとどれだけ縮めればよいか」を
    見積もって一気に寄せる。総当たりより速く、目安のぎりぎり手前＝いちばんきれいな所に収まる。 */
 async function photoFitForStorage(dataUri){
   if(!dataUri || typeof dataUri !== "string") return dataUri;
   if(photoBytesOf(dataUri) <= PHOTO_FIT_MAX_BYTES) return dataUri;   // もともと目安の内＝触らない
+  /* あとで足す「撮った日時・場所」のぶんを、先に空けておく。
+     空けずに足すと出来上がりが目安を超え、次に開いたとき「まだ大きい」と見なされて
+     もう一度縮む＝同じ写真を保存するたびに画質が落ちてしまう。 */
+  const carry = photoExifToCarry(dataUri);
+  const room = PHOTO_FIT_MAX_BYTES - (carry ? carry.length : 0);
   const tries = [];
   let edge = PHOTO_FIT_MAX_EDGE, q = PHOTO_FIT_QUALITY;
   const img = await photoLoadImage(dataUri);   // 読むのは1回だけ（何度も読み直すとスマホが遅い）
@@ -1243,18 +1507,22 @@ async function photoFitForStorage(dataUri){
     if(!out) break;                                                  // 画像として開けない → 元のまま
     const b = photoBytesOf(out);
     tries.push({ out: out, b: b });
-    if(b <= PHOTO_FIT_MAX_BYTES) break;                              // 収まった
+    if(b <= room) break;                                             // 収まった
     /* まだ大きい。まず画質を少し落として同じ大きさで試す（長辺2048pxを保つほうが紙で読みやすい）。
        それでも入らなければ、JPEGの大きさは画素数にほぼ比例するので、必要な縮小率を見積もって寄せる。 */
     if(q > 0.74){ q = 0.74; }
     else {
-      const next = Math.max(PHOTO_FIT_MIN_EDGE, Math.round(edge * Math.sqrt(PHOTO_FIT_MAX_BYTES / b) * 0.95));
+      /* あとどれだけ縮めればよいかを見積もる。ほんの少し超えているだけのときに
+         大きく削ると、要らぬところまで粗くなる。まず控えめ(0.98)に寄せ、
+         最後の1回だけは確実に収まるよう強め(0.90)に寄せる。 */
+      const safety = (i >= 2) ? 0.90 : 0.98;
+      const next = Math.max(PHOTO_FIT_MIN_EDGE, Math.round(edge * Math.sqrt(room / b) * safety));
       if(next >= edge) q = Math.max(0.6, q - 0.07);                  // もう縮められない → 画質を落とす
       else edge = next;
     }
   }
   if(!tries.length) return dataUri;
-  const inside = tries.filter(t => t.b <= PHOTO_FIT_MAX_BYTES);
+  const inside = tries.filter(t => t.b <= room);
   // 目安に収まったもののうち いちばん大きい＝いちばんきれいなもの。
   // 1つも収まらなければ、いちばん小さいもの（それでも元より軽い）。
   const best = inside.length
@@ -1262,7 +1530,12 @@ async function photoFitForStorage(dataUri){
     : tries.reduce((a, t) => (t.b < a.b ? t : a));
   if(!best || best.out.length >= dataUri.length) return dataUri;     // 小さくならないなら元のまま
   if(!(await photoLooksLike(dataUri, best.out))) return dataUri;    // 絵が変わっていたら元のまま
-  return best.out;
+  const withExif = photoCarryExif(best.out, dataUri);   // 撮った日時・場所を引き継ぐ
+  /* 足したぶんで目安を超えた／元より大きくなった、のときは Exif をあきらめる（写真が先）。
+     ここを通さないと、次に開いたときまた縮められて画質が落ちる。 */
+  if(withExif !== best.out && !(photoBytesOf(withExif) <= PHOTO_FIT_MAX_BYTES
+                                && withExif.length < dataUri.length)) return best.out;
+  return withExif;
 }
 // buildState で明示的に扱うトップレベルキー（これ以外の未知キーは _passthrough に退避し、
 // 書出し時にそのまま復元する＝PC側の ag_placement 等を現場入力の往復で失わない）。
@@ -2193,7 +2466,7 @@ const SECTIONS = [
     {id:"indoor_wire", type:"seg", label:"宅内配線（家の中）", hint:"分配器から各部屋への配線を、新規=張替（赤・積算に計上）／既存を流用（黒・計上なし）で選択。基本は既存利用。新規分の長さは下の「宅内 新規分」で指定。"},
     {id:"use_fa", type:"seg", label:"FA中継"},
     {id:"fa_splitter", type:"select", label:"FA接続部の分配", show:m=>m.is_catv==="yes"&&m.power_pos!=="outside",
-     hint:"FA接続部（保安器台のところ）に分配器が入る現場で選びます。1口は壁→宅内分配器へ、残りは「別系統へ」として図面に出ます。外部電源のときは、そこに2分配器WPが入るのでこの欄は出ません。"},
+     hint:"FA接続部（保安器台のところ）に分配器が入る現場で選びます。1口は壁→宅内分配器へ、残りは「別系統へ」として図面に出ます。「既設2分配器（流用）」＝保安器の所にもとからある2分配器につなぐとき。FA（中継）は図面に出ず、材料費も取付費も乗りません。外部電源のときは、そこに2分配器WPが入るのでこの欄は出ません。"},
     {id:"fa_splitter_pos", type:"seg", label:"分配器の位置",
      show:m=>m.is_catv==="yes"&&m.power_pos!=="outside"&&m.fa_splitter!=="no"&&m.use_fa==="yes",
      hint:"FAの代わり＝保安器台に分配器を付ける（FA中継は図面に出ません）／FAの後ろ＝増幅器アウト→FA中継→分配器→壁"},
@@ -4369,28 +4642,213 @@ async function loadStateInto(s, fname){
     _loadKeptNote = "";
   }
 }
-document.getElementById("import-file").addEventListener("change",e=>{
-  const f=e.target.files[0]; e.target.value="";
+/* ============================================================================
+   📂 まとめて選んで、アプリの中から探す
+   ----------------------------------------------------------------------------
+   工事フォルダには戸別ファイルが何百個も入っている。スマホのファイル選択から
+   目当ての 管理番号.json を1つ探すのは、字が小さくて骨が折れる。
+   そこで「いちど全部（または何個か）選んでおく → アプリの中で管理番号・氏名・住所で
+   絞り込んで選ぶ」ようにする。受付台帳を取り込んでいれば、氏名・住所も出る。
+   ・ファイルを1つだけ選んだときは、これまでどおりそのまま開く（手数を増やさない）。
+   ・選んだ一覧はこの画面を閉じても残る（同じ日に何戸も回るため）。
+   ============================================================================ */
+let _openPick = [];
+function openPickMgmtOf(name){
+  let s = String(name || "").split(/[\\/]/).pop();
+  s = s.replace(/\.json\.txt$/i, "").replace(/\.json$/i, "");
+  return s.trim();
+}
+/* 管理番号から 氏名・住所 を引く。索引（idx）は呼ぶ側が1回だけ作って渡す。
+   1行ごとに作り直すと、何百個も選んだときに1文字打つたび画面が固まる。 */
+function openPickRowInfo(mgmt, idx){
+  try{
+    const ix = idx || mapRowIndex();
+    const r = ix[mgmt] || ix[toHalfWidthAn(mgmt)];
+    if(!r) return null;
+    return { name: String(r.name || "").trim(), addr: String(r.addr || "").trim() };
+  }catch(_){ return null; }
+}
+const OPEN_PICK_SHOW_MAX = 60;   // 一度に出すのはここまで（多すぎると指で追えないし重い）
+function renderOpenPick(){
+  const wrap = document.getElementById("open-pick");
+  const list = document.getElementById("open-pick-list");
+  if(!wrap || !list) return;
+  if(!_openPick.length){ wrap.style.display = "none"; list.innerHTML = ""; return; }
+  wrap.style.display = "";
+  /* 全角で打っても当たるように、探す言葉も並べる言葉も半角にそろえてから比べる
+     （スマホの日本語キーボードでは「２４５」のように全角になりやすい） */
+  const q = toHalfWidthAn(String((document.getElementById("open-pick-q") || {}).value || "").trim()).toLowerCase();
+  /* 受付台帳の索引は、この描画で1つだけ作る（1行ごとに作ると文字を打つたび固まる） */
+  const idx = (function(){ try{ return mapRowIndex(); }catch(_){ return {}; } })();
+  const hit = [];
+  for(let i = 0; i < _openPick.length; i++){
+    const o = _openPick[i];
+    const info = openPickRowInfo(o.mgmt, idx) || {};
+    const hay = toHalfWidthAn(o.mgmt + " " + (info.name || "") + " " + (info.addr || "")).toLowerCase();
+    if(q && hay.indexOf(q) < 0) continue;
+    hit.push({ o: o, i: i, info: info });
+  }
+  const head = '<div class="op-head">選んだファイル ' + _openPick.length + " 個"
+    + (q ? ("／ 当てはまる " + hit.length + " 個") : "") + "</div>";
+  if(!hit.length){
+    list.innerHTML = head + '<div class="info">当てはまるものがありません。</div>';
+    return;
+  }
+  const show = hit.slice(0, OPEN_PICK_SHOW_MAX);
+  const rest = hit.length - show.length;
+  list.innerHTML = head + show.map(h => {
+    const kb = h.o.file && h.o.file.size ? Math.round(h.o.file.size / 1024).toLocaleString() + "KB" : "";
+    return '<button type="button" class="op-row" data-openpick="' + h.i + '">'
+      + '<span class="op-no">' + esc(h.o.mgmt || "（名前なし）") + '</span>'
+      + '<span class="op-sub">' + esc(h.info.name || "") + (h.info.addr ? ("　" + esc(h.info.addr)) : "") + '</span>'
+      + '<span class="op-kb">' + kb + '</span>'
+      + '</button>';
+  }).join("")
+  /* ★出していない分を黙らない★ 何個か隠れていることを必ず言う */
+  + (rest > 0 ? ('<div class="info">ほかに ' + rest + ' 個あります。上の欄に 管理番号・氏名・住所 を入れて絞ってください。</div>') : "");
+  list.querySelectorAll("[data-openpick]").forEach(b => {
+    b.addEventListener("click", async () => {
+      const o = _openPick[+b.getAttribute("data-openpick")];
+      if(o && o.file) await openJsonFile(o.file);
+    });
+  });
+}
+/* 戸別JSONを1つ読み込んで、続きを編集できる状態にする。
+   ★押して何も起きない、を作らない★ どこで転んでも必ず日本語で知らせる。
+   ★続けて押されても開くのは1つだけ★ 一覧は指が滑りやすく、あとから押したほうが
+   先に読み終わると、思っていたのと違う戸別が開いてしまう。 */
+let _openBusy = false;
+async function openJsonFile(f){
   if(!f) return;
-  const r=new FileReader();
-  r.onload=async()=>{
-    try{
-      const data=JSON.parse(r.result);
-      // 暗号化判定
-      if(data && (data.format==="hybrid" || (data.alg==="AES-GCM-256"&&data.ct))){
-        await uiAlert("このファイルは暗号化されています。PCの index.html で開いてください。");
-        return;
-      }
-      if(!(data.work_type||data.chosho_mgmt_no||data.chosho_cust_name)){
-        if(!(await uiConfirm("戸別JSONとして認識できませんでした。読み込みますか？"))) return;
-      }
-      await loadStateInto(data, f.name);
-      closeDraftModal();
-      toast("読込みました");
-    }catch(err){ await uiAlert("読込みに失敗しました："+err.message); }
-  };
-  r.readAsText(f);
+  if(_openBusy) return;
+  _openBusy = true;
+  try{
+    const nm = String(f.name || "");
+    let text;
+    try{ text = await f.text(); }
+    catch(_){ await uiAlert("このファイルを読めませんでした。\n\n" + nm + "\n\nもう一度選び直してください。"); return; }
+    let data;
+    try{ data = JSON.parse(text); }
+    catch(_){ await uiAlert("このファイルは 管理番号.json ではないようです。\n\n" + nm); return; }
+    if(!data || typeof data !== "object" || Array.isArray(data)){
+      await uiAlert("このファイルは 管理番号.json ではないようです。\n\n" + nm);
+      return;
+    }
+    if(data.format === "hybrid" || (data.alg === "AES-GCM-256" && data.ct)){
+      await uiAlert("このファイルは暗号化されています。PCの index.html で開いてください。");
+      return;
+    }
+    if(!(data.work_type || data.chosho_mgmt_no || data.chosho_cust_name)){
+      if(!(await uiConfirm("戸別JSONとして認識できませんでした。読み込みますか？"))) return;
+    }
+    await loadStateInto(data, nm);
+    closeDraftModal();
+    toast("読込みました");
+  }catch(err){
+    try{ await uiAlert("読み込めませんでした。\n\n" + ((err && err.message) || err)); }catch(_){}
+  }finally{
+    _openBusy = false;
+  }
+}
+/* ============================================================================
+   入れる場所の名前を「選ぶ」（フォルダを掴めない端末むけ）
+   ----------------------------------------------------------------------------
+   これまでは名前を手で打ってもらっていた。現場で小さなキーボードを打つのは骨が折れる
+   ので、心当たりのある名前を並べて押すだけにする。どうしても違う名前のときだけ手で書く。
+   ============================================================================ */
+const LS_SAVEHINTS = "genba_savehints_v1";
+function saveHintHistory(){
+  try{ const a = JSON.parse(localStorage.getItem(LS_SAVEHINTS) || "[]"); return Array.isArray(a) ? a : []; }
+  catch(_){ return []; }
+}
+function saveHintRemember(v){
+  const s = String(v == null ? "" : v).trim();
+  if(!s) return;
+  const a = saveHintHistory().filter(x => x !== s);
+  a.unshift(s);
+  try{ localStorage.setItem(LS_SAVEHINTS, JSON.stringify(a.slice(0, 6))); }catch(_){}
+}
+/* 候補を並べて1つ選んでもらう。戻り値＝選んだ文字／""（覚えない）／null（やめた） */
+function uiPickName(title, note, items){
+  return new Promise(resolve => {
+    const m = document.getElementById("pick-modal");
+    const h = document.getElementById("pick-title");
+    const n = document.getElementById("pick-note");
+    const l = document.getElementById("pick-list");
+    if(!m || !l){ resolve(null); return; }
+    h.textContent = title || "";
+    n.innerHTML = note || "";
+    let done = false;
+    const fin = v => { if(done) return; done = true; m.classList.remove("open"); l.innerHTML = ""; resolve(v); };
+    l.innerHTML = items.map((it, i) =>
+      '<button type="button" class="pick-row' + (it.kind ? (" pick-" + it.kind) : "") + '" data-pick="' + i + '">'
+      + '<span class="pick-main">' + esc(it.label) + '</span>'
+      + (it.sub ? ('<span class="pick-sub">' + esc(it.sub) + '</span>') : "")
+      + '</button>').join("");
+    l.querySelectorAll("[data-pick]").forEach(b => {
+      b.addEventListener("click", () => fin(items[+b.getAttribute("data-pick")].value));
+    });
+    const close = document.getElementById("pick-close");
+    if(close) close.onclick = () => fin(null);
+    m.classList.add("open");
+  });
+}
+/* 名前を手で書いてもらう窓。戻り値＝書いた文字／null（やめた）。
+   ★端末の打ち込み窓（window.prompt）は使わない★ iOSのホーム画面アプリでは出ないので、
+   押しても何も起きないまま名前が消えてしまう。 */
+function uiTypeName(title, note, value){
+  return new Promise(resolve => {
+    const m = document.getElementById("type-modal");
+    const i = document.getElementById("type-input");
+    const okBtn = document.getElementById("type-ok");
+    const clBtn = document.getElementById("type-close");
+    if(!m || !i || !okBtn || !clBtn){ resolve(null); return; }
+    document.getElementById("type-title").textContent = title || "";
+    document.getElementById("type-note").innerHTML = note || "";
+    i.value = String(value == null ? "" : value);
+    let done = false;
+    const fin = v => {
+      if(done) return;
+      done = true;
+      m.classList.remove("open");
+      okBtn.onclick = null; clBtn.onclick = null; m.onclick = null; i.onkeydown = null;
+      resolve(v);
+    };
+    okBtn.onclick = () => fin(i.value);
+    clBtn.onclick = () => fin(null);
+    m.onclick = e => { if(e.target === m) fin(null); };      // 背景を押す＝やめる
+    i.onkeydown = e => { if(e.key === "Enter"){ e.preventDefault(); fin(i.value); } };
+    m.classList.add("open");
+    setTimeout(() => { try{ i.focus(); i.select(); }catch(_){} }, 60);
+  });
+}
+/* 戸別ファイルらしい名前か（写真やメモを一覧に混ぜない） */
+function openPickIsJson(name){ return /\.json(\.txt)?$/i.test(String(name || "")); }
+document.getElementById("import-file").addEventListener("change", async e=>{
+  const all = Array.from(e.target.files || []); e.target.value = "";
+  if(!all.length) return;
+  if(all.length === 1){ await openJsonFile(all[0]); return; }   // 1つだけ＝そのまま開く
+  let fs = all.filter(f => openPickIsJson(f.name));
+  let away = all.length - fs.length;
+  /* 端末によっては .json が付かない形で渡ってくる。1つも残らないときは選り分けずに全部出す
+     （「押しても何も出ない」を作らない）。 */
+  if(!fs.length){ fs = all; away = 0; }
+  _openPick = fs.map(f => ({ file:f, mgmt: openPickMgmtOf(f.name) }))
+               .sort((a,b) => String(a.mgmt).localeCompare(String(b.mgmt), "ja", { numeric:true }));
+  const q = document.getElementById("open-pick-q"); if(q) q.value = "";
+  /* ★押して何も起きない、を作らない★ 一覧は「履歴・読込」の窓の中にある。
+     PCの守りの帯から押したときは窓が閉じているので、開いてから出す。 */
+  const dm = document.getElementById("draft-modal");
+  if(dm && !dm.classList.contains("open")){
+    try{ await openDraftModal(); }catch(_){ dm.classList.add("open"); }
+  }
+  renderOpenPick();
+  toast(fs.length + "個から探せます" + (away ? ("（戸別ファイルでない " + away + " 個は外しました）") : ""));
 });
+{ const q = document.getElementById("open-pick-q");
+  if(q) q.addEventListener("input", () => renderOpenPick());
+  const c = document.getElementById("open-pick-clear");
+  if(c) c.addEventListener("click", () => { _openPick = []; renderOpenPick(); }); }
 
 /* ============================================================================
    9) 下書き（この端末に自動保存）
@@ -4597,17 +5055,43 @@ function renderSaveBar(){
 /* 保存先のフォルダを選び直す（保存バーの「📁 …」を押したとき）。
    ★窓は押した直後にしか開けない★ので、ここでは何も聞かずにすぐ開く。
    先に確認を出すと、その間に「押した直後」の権利が切れて窓が開かなくなる。 */
-async function saveDirChange(){
-  if(!window.showDirectoryPicker){
+async function saveDirChange(mode){
+  /* mode==="nameonly" ＝ フォルダの窓が出せなかったとき。名前だけでも覚えられるようにする。 */
+  if(mode === "nameonly" || !window.showDirectoryPicker){
     /* フォルダは掴めないが、入れる場所の名前だけは覚えておける。
        保存のたびに名前を出せば、端末の保存画面で選ぶ場所を間違えにくくなる。 */
     const now = saveHintName();
-    const v = window.prompt("この端末では保存先のフォルダを選べません。\n"
-      + "「保存」を押すと、共有またはダウンロードで書き出します。\n\n"
-      + "入れる場所の名前を覚えておけます（保存のたびに出します）。\n"
-      + "例： リスト", now);
-    if(v === null) return;                       // やめた
+    /* ★手で打たせない★ 心当たりのある名前を並べて、押すだけで決められるようにする。
+       どうしても違う名前のときだけ、いちばん下の「自分で書く」から打つ。 */
+    const items = [];
+    const seen = {};
+    const add = (label, value, sub, kind) => {
+      const key = String(value);
+      if(seen[key]) return;
+      seen[key] = 1;
+      items.push({ label: label, value: value, sub: sub, kind: kind });
+    };
+    try{
+      const d = getReceptionData();
+      const proj = d && String(d.project || "").trim();
+      if(proj) add(proj, proj, "受付台帳の物件名", "");
+    }catch(_){}
+    if(now) add(now, now, "いま覚えている名前", "");
+    saveHintHistory().forEach(h => add(h, h, "前に使った名前", ""));
+    add("自分で書く", "\u0000type", "候補に無いときはこちら", "type");
+    if(now) add("覚えない", "", "保存のたびの案内を出しません", "off");
+    const picked = await uiPickName("📁 入れる場所の名前",
+      "この端末ではフォルダを掴めないので、名前だけ覚えておきます。<br>"
+      + "保存のたびに出すので、端末の保存画面でそのフォルダを選べます。", items);
+    if(picked === null) return;                  // やめた
+    let v = picked;
+    if(v === "\u0000type"){
+      v = await uiTypeName("📁 入れる場所の名前",
+        "候補に無いときだけ、ここに書いてください。<br>例： リスト", now);
+      if(v === null) return;                   // やめた（覚えている名前はそのまま）
+    }
     saveHintSet(v);
+    saveHintRemember(v);
     renderSaveBar();
     await uiAlert(saveHintName()
       ? ("覚えました。保存のたびに「" + saveHintName() + "」と出します。\n\n"
@@ -4621,7 +5105,14 @@ async function saveDirChange(){
   }
   let dir = null;
   try{ dir = await window.showDirectoryPicker({ id:"genba-save", mode:"readwrite" }); }
-  catch(e){ if(e && e.name === "AbortError") return; console.warn("保存先を選べませんでした", e); return; }
+  catch(e){
+    if(e && e.name === "AbortError") return;                 // 自分でやめた＝何も言わない
+    console.warn("保存先を選べませんでした", e);
+    /* ★押して何も起きない、を作らない★ 窓が出せない端末でも、入れる場所の名前は覚えられる。 */
+    await uiAlert("この端末では、保存先のフォルダを選ぶ窓を開けませんでした。\n\n"
+      + "かわりに、入れる場所の名前を覚えておきます。");
+    return await saveDirChange("nameonly");
+  }
   if(!dir) return;
   if(!(await saveDirOk(dir, true))){
     await uiAlert("そのフォルダへ書き込む許可が取れませんでした。\n\nもう一度お試しください。");
