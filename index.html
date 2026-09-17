@@ -62,7 +62,9 @@
   header .mgmt.empty{font-size:12.5px; font-weight:400; opacity:.8;}
   header button{
     background:#fff; color:var(--accent); border:0; border-radius:10px; font-weight:700;
-    padding:8px 14px; font-size:14px; min-height:42px; flex:none; white-space:nowrap;
+    padding:8px 14px; font-size:14px; min-height:42px; white-space:nowrap;
+    /* 字の広い端末でも、管理番号の場所を押しつぶして帯からはみ出さない */
+    flex:0 1 auto; min-width:0; max-width:52%; overflow:hidden; text-overflow:ellipsis;
     transition:transform var(--t-fast) var(--ease), box-shadow var(--t-fast) var(--ease), background var(--t-fast) var(--ease);
   }
   header button.ghost{background:rgba(255,255,255,.16); color:#fff;}
@@ -78,13 +80,19 @@
   /* ★この帯は、中身がどれだけ長くても画面の幅に収める★
      物件名が長いと帯が画面より広くなり、画面ごと横に動いてしまう。
      縮む順は「左の説明 → 保存先の名前」。右の「📎控え」と「保存済 HH:MM」は縮めない。 */
+  /* ★この帯は、中身がどれだけ長くても画面の幅に収める★
+     端末によって字の幅が違う（実機の日本語フォントは試験機より広い）ので、
+     「測ったら1行に入った」では足りない。入りきらないときは**折り返す**。
+     切ってしまうと、どこへ入れるのか・保存したのかが読めなくなる。 */
   .savebar{position:sticky; top:0; z-index:45; display:flex; align-items:center; gap:8px;
     padding:6px 12px; font-size:12px; font-weight:600; border-bottom:1px solid var(--line);
-    max-width:100%; overflow:hidden;
+    max-width:100%; overflow:hidden; flex-wrap:wrap; row-gap:3px; align-content:center;
     transition:background var(--t-med) var(--ease), color var(--t-med) var(--ease);}
   .savebar .sb-dot{width:9px; height:9px; border-radius:5px; flex:none; background:currentColor;}
+  /* いちばん先に縮むのはここ（●の色と右の「未保存／保存済」で同じことが分かる） */
   .savebar .sb-main{flex:1 1 0; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
-  .savebar .sb-file{flex:none; font-weight:600; font-size:11px; opacity:.75; white-space:nowrap;}
+  .savebar .sb-file{flex:0 1 auto; min-width:0; overflow:hidden; font-weight:600; font-size:11px;
+    opacity:.75; white-space:nowrap;}
   .savebar .sb-file.attn{opacity:1; background:#d32f2f; color:#fff; border-radius:8px; padding:1px 8px;}
   .savebar.ok{background:#e8f5e9; color:#1b5e20;}
   .savebar.warn{background:#fff8e1; color:#8a5a00;}
@@ -522,11 +530,17 @@
     display:inline-flex; align-items:center; flex:0 1 auto; min-width:0; max-width:60%;
     transition:transform var(--t-fast) var(--ease), background var(--t-med) var(--ease); }
   .sb-dest-n{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+  /* ★狭い画面（スマホ）では、保存先だけ1行をまるごと使う★
+     「どこへ入れるか」はいちばん大事なので、細切れにせず全部見せる。
+     残りの3つ（状態・控え・保存済）は上の行で縮められるので、どんな字の幅でもはみ出さない。 */
+  @media (max-width: 460px){
+    .savebar .sb-dest{ order:9; flex:1 1 100%; max-width:100%; margin-left:0; }
+  }
   .sb-dest:active{ transform:scale(.94); background:#d8e8fa; }
   .sb-dest.none{ background:#fff3e0; color:#8a4b00; border-color:#ffcc80; }
   .sb-dest.none:active{ background:#ffe9c9; }
   /* 戸別ファイルの中身を控えてあるか（＝守られているか）を小さく出す */
-  .sb-base{ flex:none; margin-left:6px; padding:0 6px; border-radius:7px; font-size:10px; line-height:17px;
+  .sb-base{ flex:0 1 auto; min-width:0; overflow:hidden; margin-left:6px; padding:0 6px; border-radius:7px; font-size:10px; line-height:17px;
     background:rgba(0,105,92,.12); color:#00695c; white-space:nowrap; }
   .sb-base.none{ background:rgba(120,120,120,.14); color:#6b6b6b; }
   .sb-base.warn{ background:rgba(230,81,0,.16); color:#bf360c; }
@@ -626,8 +640,12 @@
   .cal-ev .cal-ev-k{flex:none; width:26px; height:26px; border-radius:7px; color:#fff;
     font-size:12px; font-weight:700; line-height:26px; text-align:center;}
   .cal-ev .cal-ev-m{flex:1; min-width:0;}
-  .cal-ev .cal-ev-t{font-weight:700; font-size:14px;}
-  .cal-ev .cal-ev-s{font-size:11.5px; color:var(--sub); overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  /* ★display:block が要る★ span のままだと「…」で切る指定が効かず、
+     長い会社名・住所がそのまま画面の外へ出てしまう（実測で 684px／画面 320px）。 */
+  .cal-ev .cal-ev-t{display:block; font-weight:700; font-size:14px;
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  .cal-ev .cal-ev-s{display:block; font-size:11.5px; color:var(--sub);
+    overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
   .cal-ctr-badge{display:inline-block; font-size:10px; font-weight:700; padding:0 5px; border-radius:7px;
     margin-right:5px; line-height:16px; vertical-align:1px;}
   .cal-none{padding:14px 4px; color:var(--sub); font-size:13px; text-align:center;}
@@ -1179,7 +1197,7 @@ const GENBA_SCHEMA_VER = 1;
 const APP_NAME_SHORT = "現場入力";
 /* 版は「増えていくだけの通し番号」。メイン（積算・図面）と同じ番号体系で、
    番号が小さいほうが古い。 */
-const APP_VERSION = "166";
+const APP_VERSION = "167";
 function photoContentId(dataUri){
   if(!dataUri || typeof dataUri !== "string") return "";
   let a = 5381, b = 0;
