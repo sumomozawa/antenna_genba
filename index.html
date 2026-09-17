@@ -488,6 +488,11 @@
   .pick-sub{ display:block; margin-top:2px; font-size:12px; color:#78909c; }
   .pick-row.pick-off{ background:#f5f7f8; }
   .pick-row.pick-type .pick-main{ color:#455a64; }
+  /* 名前を手で書く窓（ホーム画面アプリでは端末の打ち込み窓が出ないので自前で用意する） */
+  .type-input{ width:100%; box-sizing:border-box; margin-top:4px; padding:14px 12px;
+    border:1px solid #cdd3da; border-radius:11px; background:#fff; font-size:16px; font-family:inherit; }
+  .type-ok{ width:100%; margin-top:12px; padding:14px; border:0; border-radius:12px;
+    background:var(--accent); color:#fff; font-weight:700; font-size:15px; font-family:inherit; }
   /* 「開く」と「取消」を右端に縦に並べる */
   .draft .d-act{display:flex; flex-direction:column; gap:6px; flex:none; align-items:stretch;}
   .draft .d-act2{display:flex; gap:6px;}
@@ -1013,6 +1018,17 @@
   </div>
 </div>
 
+<!-- 名前を手で書く窓（ホーム画面アプリでは端末の打ち込み窓が出ないため自前）-->
+<div class="modal" id="type-modal">
+  <div class="sheet">
+    <h3 id="type-title"></h3>
+    <div class="info" id="type-note"></div>
+    <input class="type-input" id="type-input" type="text" autocomplete="off" autocapitalize="off" spellcheck="false">
+    <button class="type-ok" id="type-ok">これにする</button>
+    <button class="closebtn" id="type-close">やめる</button>
+  </div>
+</div>
+
 <!-- アプリ内ダイアログ（confirm/alertの代替・iOSホーム画面アプリ対応）-->
 <div class="modal" id="ui-dialog">
   <div class="dlg">
@@ -1073,7 +1089,7 @@ const OPT = {
   remove_drop:[["yes","あり"],["no","なし"]],
   dummy_attached:[["yes","取付確認済"],["no","未取付（要確認）"]],
   use_fa:[["yes","使用（保安器台に取付）"],["no","使用しない"]],
-  fa_splitter:[["no","なし"],["sp_2cw","2分配器WP SP2CW"],["sp_2cdw","2分配器WP SP2CDW（全通電）"],["sp_3cw","3分配器WP SP3CW"]],
+  fa_splitter:[["no","なし"],["exist_2sp","既設2分配器（流用）"],["sp_2cw","2分配器WP SP2CW"],["sp_2cdw","2分配器WP SP2CDW（全通電）"],["sp_3cw","3分配器WP SP3CW"]],
   fa_splitter_pos:[["instead","FAの代わり"],["after","FAの後ろ"]],
   ext_power_conn:[["splitter_2","2分配器使用（メイン）"],["direct","電源部IN/OUT直結"]],
   att_main:[["no","なし"],["att_w3","ATTW3 (-3dB)"],["att_w6","ATTW6 (-6dB)"],["att_w10","ATTW10 (-10dB)"]],
@@ -1152,7 +1168,7 @@ const GENBA_SCHEMA_VER = 1;
 const APP_NAME_SHORT = "現場入力";
 /* 版は「増えていくだけの通し番号」。メイン（積算・図面）と同じ番号体系で、
    番号が小さいほうが古い。 */
-const APP_VERSION = "164";
+const APP_VERSION = "165";
 function photoContentId(dataUri){
   if(!dataUri || typeof dataUri !== "string") return "";
   let a = 5381, b = 0;
@@ -1328,7 +1344,9 @@ function photoExifSegment(bytes){
   return null;
 }
 /* Exif の塊の中の「向きの印」を、そのまま（1）に書き替える。
-   焼き直した絵はもう回してあるので、元の印を残すと二重に回る。 */
+   焼き直した絵はもう回してあるので、元の印を残すと二重に回る。
+   返り値 true＝「この塊を付けても、もう回らない」（印を直した／もともと印が無い）。
+   false＝中身を読み切れなかった。このときは Exif を付けてはいけない（横倒しになる）。 */
 function photoExifClearOrientation(seg){
   try {
     // FFE1(2) + 長さ(2) + "Exif\0\0"(6) = 10 バイト目から TIFF が始まる
@@ -1345,27 +1363,36 @@ function photoExifClearOrientation(seg){
     const ifd0 = t + u32(t + 4);
     if(ifd0 + 2 > seg.length) return false;
     const n = u16(ifd0);
+    if(ifd0 + 2 + n * 12 + 4 > seg.length) return false;   // 最後まで読み切れない＝あきらめる
     for(let k = 0; k < n; k++){
       const e = ifd0 + 2 + k * 12;
-      if(e + 12 > seg.length) break;
       if(u16(e) === 0x0112){                        // 向きの印
+        if(u16(e + 2) !== 3 || u32(e + 4) !== 1) return false;   // 見慣れない書き方＝触らない
         if(little){ seg[e + 8] = 1; seg[e + 9] = 0; }
         else { seg[e + 8] = 0; seg[e + 9] = 1; }
         return true;
       }
     }
-    return false;
+    return true;                                    // 向きの印がもともと無い＝そのままでよい
   } catch(_){ return false; }
+}
+/* 元の写真から「移せる Exif の塊」を取り出す（無ければ null）。
+   縮める前にこれを見て、足すぶんの場所を空けておく。 */
+function photoExifToCarry(srcDataUri){
+  try {
+    const seg = photoExifSegment(photoHeadBytes(srcDataUri, 262144));   // Exif は写真の頭にある
+    if(!seg || seg.length < 12 || seg.length > 128 * 1024) return null;
+    return seg;
+  } catch(_){ return null; }
 }
 /* 縮めた写真（out）へ、元の写真（src）の Exif を移す。
    うまくいかなければ out をそのまま返す。 */
 function photoCarryExif(outDataUri, srcDataUri){
   try {
     if(!/^data:image\/jpeg/i.test(String(outDataUri || ""))) return outDataUri;
-    const head = photoHeadBytes(srcDataUri, 262144);      // Exif は写真の頭にある
-    const seg = photoExifSegment(head);
-    if(!seg || seg.length < 12 || seg.length > 128 * 1024) return outDataUri;
-    photoExifClearOrientation(seg);                        // 向きは「そのまま」に直す
+    const seg = photoExifToCarry(srcDataUri);
+    if(!seg) return outDataUri;
+    if(!photoExifClearOrientation(seg)) return outDataUri; // 向きを直せない＝付けない（横倒しになる）
     const out = photoAllBytes(outDataUri);
     if(!out || !(out[0] === 0xFF && out[1] === 0xD8)) return outDataUri;
     if(photoExifSegment(out)) return outDataUri;           // もう入っている＝何もしない
@@ -1382,6 +1409,11 @@ function photoCarryExif(outDataUri, srcDataUri){
 async function photoFitForStorage(dataUri){
   if(!dataUri || typeof dataUri !== "string") return dataUri;
   if(photoBytesOf(dataUri) <= PHOTO_FIT_MAX_BYTES) return dataUri;   // もともと目安の内＝触らない
+  /* あとで足す「撮った日時・場所」のぶんを、先に空けておく。
+     空けずに足すと出来上がりが目安を超え、次に開いたとき「まだ大きい」と見なされて
+     もう一度縮む＝同じ写真を保存するたびに画質が落ちてしまう。 */
+  const carry = photoExifToCarry(dataUri);
+  const room = PHOTO_FIT_MAX_BYTES - (carry ? carry.length : 0);
   const tries = [];
   let edge = PHOTO_FIT_MAX_EDGE, q = PHOTO_FIT_QUALITY;
   const img = await photoLoadImage(dataUri);   // 読むのは1回だけ（何度も読み直すとスマホが遅い）
@@ -1391,18 +1423,22 @@ async function photoFitForStorage(dataUri){
     if(!out) break;                                                  // 画像として開けない → 元のまま
     const b = photoBytesOf(out);
     tries.push({ out: out, b: b });
-    if(b <= PHOTO_FIT_MAX_BYTES) break;                              // 収まった
+    if(b <= room) break;                                             // 収まった
     /* まだ大きい。まず画質を少し落として同じ大きさで試す（長辺2048pxを保つほうが紙で読みやすい）。
        それでも入らなければ、JPEGの大きさは画素数にほぼ比例するので、必要な縮小率を見積もって寄せる。 */
     if(q > 0.74){ q = 0.74; }
     else {
-      const next = Math.max(PHOTO_FIT_MIN_EDGE, Math.round(edge * Math.sqrt(PHOTO_FIT_MAX_BYTES / b) * 0.95));
+      /* あとどれだけ縮めればよいかを見積もる。ほんの少し超えているだけのときに
+         大きく削ると、要らぬところまで粗くなる。まず控えめ(0.98)に寄せ、
+         最後の1回だけは確実に収まるよう強め(0.90)に寄せる。 */
+      const safety = (i >= 2) ? 0.90 : 0.98;
+      const next = Math.max(PHOTO_FIT_MIN_EDGE, Math.round(edge * Math.sqrt(room / b) * safety));
       if(next >= edge) q = Math.max(0.6, q - 0.07);                  // もう縮められない → 画質を落とす
       else edge = next;
     }
   }
   if(!tries.length) return dataUri;
-  const inside = tries.filter(t => t.b <= PHOTO_FIT_MAX_BYTES);
+  const inside = tries.filter(t => t.b <= room);
   // 目安に収まったもののうち いちばん大きい＝いちばんきれいなもの。
   // 1つも収まらなければ、いちばん小さいもの（それでも元より軽い）。
   const best = inside.length
@@ -1410,7 +1446,12 @@ async function photoFitForStorage(dataUri){
     : tries.reduce((a, t) => (t.b < a.b ? t : a));
   if(!best || best.out.length >= dataUri.length) return dataUri;     // 小さくならないなら元のまま
   if(!(await photoLooksLike(dataUri, best.out))) return dataUri;    // 絵が変わっていたら元のまま
-  return photoCarryExif(best.out, dataUri);   // 撮った日時・場所を引き継ぐ（できなければそのまま）
+  const withExif = photoCarryExif(best.out, dataUri);   // 撮った日時・場所を引き継ぐ
+  /* 足したぶんで目安を超えた／元より大きくなった、のときは Exif をあきらめる（写真が先）。
+     ここを通さないと、次に開いたときまた縮められて画質が落ちる。 */
+  if(withExif !== best.out && !(photoBytesOf(withExif) <= PHOTO_FIT_MAX_BYTES
+                                && withExif.length < dataUri.length)) return best.out;
+  return withExif;
 }
 // buildState で明示的に扱うトップレベルキー（これ以外の未知キーは _passthrough に退避し、
 // 書出し時にそのまま復元する＝PC側の ag_placement 等を現場入力の往復で失わない）。
@@ -2341,7 +2382,7 @@ const SECTIONS = [
     {id:"indoor_wire", type:"seg", label:"宅内配線（家の中）", hint:"分配器から各部屋への配線を、新規=張替（赤・積算に計上）／既存を流用（黒・計上なし）で選択。基本は既存利用。新規分の長さは下の「宅内 新規分」で指定。"},
     {id:"use_fa", type:"seg", label:"FA中継"},
     {id:"fa_splitter", type:"select", label:"FA接続部の分配", show:m=>m.is_catv==="yes"&&m.power_pos!=="outside",
-     hint:"FA接続部（保安器台のところ）に分配器が入る現場で選びます。1口は壁→宅内分配器へ、残りは「別系統へ」として図面に出ます。外部電源のときは、そこに2分配器WPが入るのでこの欄は出ません。"},
+     hint:"FA接続部（保安器台のところ）に分配器が入る現場で選びます。1口は壁→宅内分配器へ、残りは「別系統へ」として図面に出ます。「既設2分配器（流用）」＝保安器の所にもとからある2分配器につなぐとき。FA（中継）は図面に出ず、材料費も取付費も乗りません。外部電源のときは、そこに2分配器WPが入るのでこの欄は出ません。"},
     {id:"fa_splitter_pos", type:"seg", label:"分配器の位置",
      show:m=>m.is_catv==="yes"&&m.power_pos!=="outside"&&m.fa_splitter!=="no"&&m.use_fa==="yes",
      hint:"FAの代わり＝保安器台に分配器を付ける（FA中継は図面に出ません）／FAの後ろ＝増幅器アウト→FA中継→分配器→壁"},
@@ -4533,14 +4574,17 @@ function openPickMgmtOf(name){
   s = s.replace(/\.json\.txt$/i, "").replace(/\.json$/i, "");
   return s.trim();
 }
-function openPickRowInfo(mgmt){
+/* 管理番号から 氏名・住所 を引く。索引（idx）は呼ぶ側が1回だけ作って渡す。
+   1行ごとに作り直すと、何百個も選んだときに1文字打つたび画面が固まる。 */
+function openPickRowInfo(mgmt, idx){
   try{
-    const idx = mapRowIndex();
-    const r = idx[mgmt] || idx[toHalfWidthAn(mgmt)];
+    const ix = idx || mapRowIndex();
+    const r = ix[mgmt] || ix[toHalfWidthAn(mgmt)];
     if(!r) return null;
     return { name: String(r.name || "").trim(), addr: String(r.addr || "").trim() };
   }catch(_){ return null; }
 }
+const OPEN_PICK_SHOW_MAX = 60;   // 一度に出すのはここまで（多すぎると指で追えないし重い）
 function renderOpenPick(){
   const wrap = document.getElementById("open-pick");
   const list = document.getElementById("open-pick-list");
@@ -4548,27 +4592,33 @@ function renderOpenPick(){
   if(!_openPick.length){ wrap.style.display = "none"; list.innerHTML = ""; return; }
   wrap.style.display = "";
   const q = String((document.getElementById("open-pick-q") || {}).value || "").trim().toLowerCase();
-  const hit = _openPick.filter(o => {
-    if(!q) return true;
-    const info = openPickRowInfo(o.mgmt) || {};
-    return (o.mgmt + " " + (info.name || "") + " " + (info.addr || "")).toLowerCase().indexOf(q) >= 0;
-  });
+  /* 受付台帳の索引は、この描画で1つだけ作る（1行ごとに作ると文字を打つたび固まる） */
+  const idx = (function(){ try{ return mapRowIndex(); }catch(_){ return {}; } })();
+  const hit = [];
+  for(let i = 0; i < _openPick.length; i++){
+    const o = _openPick[i];
+    const info = openPickRowInfo(o.mgmt, idx) || {};
+    if(q && (o.mgmt + " " + (info.name || "") + " " + (info.addr || "")).toLowerCase().indexOf(q) < 0) continue;
+    hit.push({ o: o, i: i, info: info });
+  }
   const head = '<div class="op-head">選んだファイル ' + _openPick.length + " 個"
     + (q ? ("／ 当てはまる " + hit.length + " 個") : "") + "</div>";
   if(!hit.length){
     list.innerHTML = head + '<div class="info">当てはまるものがありません。</div>';
     return;
   }
-  list.innerHTML = head + hit.map(o => {
-    const i = _openPick.indexOf(o);
-    const info = openPickRowInfo(o.mgmt) || {};
-    const kb = o.file && o.file.size ? Math.round(o.file.size / 1024).toLocaleString() + "KB" : "";
-    return '<button type="button" class="op-row" data-openpick="' + i + '">'
-      + '<span class="op-no">' + esc(o.mgmt || "（名前なし）") + '</span>'
-      + '<span class="op-sub">' + esc(info.name || "") + (info.addr ? ("　" + esc(info.addr)) : "") + '</span>'
+  const show = hit.slice(0, OPEN_PICK_SHOW_MAX);
+  const rest = hit.length - show.length;
+  list.innerHTML = head + show.map(h => {
+    const kb = h.o.file && h.o.file.size ? Math.round(h.o.file.size / 1024).toLocaleString() + "KB" : "";
+    return '<button type="button" class="op-row" data-openpick="' + h.i + '">'
+      + '<span class="op-no">' + esc(h.o.mgmt || "（名前なし）") + '</span>'
+      + '<span class="op-sub">' + esc(h.info.name || "") + (h.info.addr ? ("　" + esc(h.info.addr)) : "") + '</span>'
       + '<span class="op-kb">' + kb + '</span>'
       + '</button>';
-  }).join("");
+  }).join("")
+  /* ★出していない分を黙らない★ 何個か隠れていることを必ず言う */
+  + (rest > 0 ? ('<div class="info">ほかに ' + rest + ' 個あります。上の欄に 管理番号・氏名・住所 を入れて絞ってください。</div>') : "");
   list.querySelectorAll("[data-openpick]").forEach(b => {
     b.addEventListener("click", async () => {
       const o = _openPick[+b.getAttribute("data-openpick")];
@@ -4637,6 +4687,35 @@ function uiPickName(title, note, items){
     const close = document.getElementById("pick-close");
     if(close) close.onclick = () => fin(null);
     m.classList.add("open");
+  });
+}
+/* 名前を手で書いてもらう窓。戻り値＝書いた文字／null（やめた）。
+   ★端末の打ち込み窓（window.prompt）は使わない★ iOSのホーム画面アプリでは出ないので、
+   押しても何も起きないまま名前が消えてしまう。 */
+function uiTypeName(title, note, value){
+  return new Promise(resolve => {
+    const m = document.getElementById("type-modal");
+    const i = document.getElementById("type-input");
+    const okBtn = document.getElementById("type-ok");
+    const clBtn = document.getElementById("type-close");
+    if(!m || !i || !okBtn || !clBtn){ resolve(null); return; }
+    document.getElementById("type-title").textContent = title || "";
+    document.getElementById("type-note").innerHTML = note || "";
+    i.value = String(value == null ? "" : value);
+    let done = false;
+    const fin = v => {
+      if(done) return;
+      done = true;
+      m.classList.remove("open");
+      okBtn.onclick = null; clBtn.onclick = null; m.onclick = null; i.onkeydown = null;
+      resolve(v);
+    };
+    okBtn.onclick = () => fin(i.value);
+    clBtn.onclick = () => fin(null);
+    m.onclick = e => { if(e.target === m) fin(null); };      // 背景を押す＝やめる
+    i.onkeydown = e => { if(e.key === "Enter"){ e.preventDefault(); fin(i.value); } };
+    m.classList.add("open");
+    setTimeout(() => { try{ i.focus(); i.select(); }catch(_){} }, 60);
   });
 }
 document.getElementById("import-file").addEventListener("change", async e=>{
@@ -4889,8 +4968,9 @@ async function saveDirChange(){
     if(picked === null) return;                  // やめた
     let v = picked;
     if(v === "\u0000type"){
-      v = window.prompt("入れる場所の名前を書いてください。\n例： リスト", now);
-      if(v === null) return;
+      v = await uiTypeName("📁 入れる場所の名前",
+        "候補に無いときだけ、ここに書いてください。<br>例： リスト", now);
+      if(v === null) return;                   // やめた（覚えている名前はそのまま）
     }
     saveHintSet(v);
     saveHintRemember(v);
