@@ -58,7 +58,13 @@
   }
   header .ttl{font-weight:700; font-size:14px; flex:1; min-width:44px; overflow:hidden; line-height:1.25;}
   header .ttl .app{font-size:11px; opacity:.72; font-weight:600; letter-spacing:.06em; display:block;}
-  header .mgmt{font-size:14px; display:block; font-weight:700; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  /* 管理番号は押すとコピーできる。📋 は番号とは別の物にして、
+     長い番号で「…」に切られても消えないようにする（押せる所の目印だから）。 */
+  header .mgmt{font-size:14px; display:flex; align-items:center; gap:4px; font-weight:700;
+    min-width:0; overflow:hidden; white-space:nowrap; cursor:pointer;}
+  header .mgmt .mgmt-n{min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;}
+  header .mgmt .mgmt-c{flex:none; font-size:11px; opacity:.8;}
+  header .mgmt.empty{cursor:default;}
   header .mgmt.empty{font-size:12.5px; font-weight:400; opacity:.8;}
   header button{
     background:#fff; color:var(--accent); border:0; border-radius:10px; font-weight:700;
@@ -308,7 +314,7 @@
     35% { transform:scale(1.16) rotate(-1.5deg); }
     100%{ transform:scale(1); }
   }
-  header .flowtag{display:inline-block; margin-left:6px; background:#1b7a3d; color:#fff; font-size:10.5px;
+  header .flowtag{display:inline-block; flex:none; margin-left:6px; background:#1b7a3d; color:#fff; font-size:10.5px;
     font-weight:700; padding:1px 7px; border-radius:9px; vertical-align:middle;
     animation:tagIn var(--t-med) var(--ease-out) both;}
   /* いまどこまで進んだか（下見済／ビラ済／完了）を工程の色で出す */
@@ -1197,7 +1203,7 @@ const GENBA_SCHEMA_VER = 1;
 const APP_NAME_SHORT = "現場入力";
 /* 版は「増えていくだけの通し番号」。メイン（積算・図面）と同じ番号体系で、
    番号が小さいほうが古い。 */
-const APP_VERSION = "168";
+const APP_VERSION = "169";
 function photoContentId(dataUri){
   if(!dataUri || typeof dataUri !== "string") return "";
   let a = 5381, b = 0;
@@ -3224,10 +3230,91 @@ function refreshPhotos(){
   const b=[...app.querySelectorAll('.sec')].find(s=>s.getAttribute("data-sec")==="photos")?.querySelector(".badge");
   if(b) b.textContent=M.chosho_photos.length+"枚";
 }
+/* ============================================================
+   管理番号をひと押しでコピーする
+   ------------------------------------------------------------
+   ★なぜ要るか★
+   スマホ・Android はフォルダを掴めない。だから戸別ファイルを開くときは、
+   端末の「ファイルを選ぶ」画面に並ぶ何百個もの 管理番号.json から探すことになる。
+   小さい字を目で追うのは骨が折れるが、その画面の検索欄に番号を貼り付けられれば早い。
+   ★道は2つ。確かなほうを先に試す★
+     navigator.clipboard … 今どきの iPhone・Android。写せたかどうかが確かに分かる。
+                           ただし https（か端末の中）でないと使えず、古い端末には無い。
+     execCommand         … 古い道。上が使えないときだけ。
+                           ★この道は「写せていないのに『写した』と答える」ことがある★
+                           （実測：試験機では常に成功と答えるのに、貼り付け先は変わらない）
+                           だから先に試してはいけない。
+   ここは押した直後に窓を開く場面ではないので、待って（await して）も困らない。
+   ============================================================ */
+function copyTextSync(s){
+  s = String(s == null ? "" : s);
+  if(!s) return false;
+  let ok = false, ta = null, sel = null, keep = null;
+  try{
+    ta = document.createElement("textarea");
+    ta.value = s;
+    /* ★画面の外へ置くと iPhone では写せない★ 見えない大きさで画面の中に置く。
+       字は 16px 以上にする（それ未満だと iPhone が画面ごと拡大して戻らない）。 */
+    ta.style.cssText = "position:fixed; top:0; left:0; width:1px; height:1px; padding:0; border:0; "
+      + "opacity:0; font-size:16px;";
+    document.body.appendChild(ta);
+    sel = document.getSelection();
+    keep = (sel && sel.rangeCount > 0) ? sel.getRangeAt(0) : null;
+    /* iPhone はこの形にしないと中の字を選べない（選べないと写せない） */
+    ta.contentEditable = "true"; ta.readOnly = false;
+    const rg = document.createRange(); rg.selectNodeContents(ta);
+    if(sel){ sel.removeAllRanges(); sel.addRange(rg); }
+    try{ ta.setSelectionRange(0, 999999); }catch(_){}
+    ok = !!document.execCommand("copy");
+  }catch(e){ console.warn("この道では写せませんでした（別の道を試します）", e); }
+  finally{
+    try{ if(sel){ sel.removeAllRanges(); if(keep) sel.addRange(keep); } }catch(_){}
+    try{ if(ta) ta.remove(); }catch(_){}
+  }
+  return ok;
+}
+async function copyText(s){
+  s = String(s == null ? "" : s);
+  if(!s) return false;
+  try{
+    if(navigator.clipboard && navigator.clipboard.writeText){
+      await navigator.clipboard.writeText(s); return true;
+    }
+  }catch(e){ console.warn("この道では写せませんでした（別の道を試します）", e); }
+  return copyTextSync(s);          // 古い端末・https でない開き方のとき
+}
+/* いま開いている戸別の管理番号をコピーして、次に何をすればよいかまで出す。
+   ★写せなかったときは黙らない★ 黙ると、貼り付けようとして何も出ずに困る。 */
+async function copyMgmtNo(){
+  const no = String((M && M.chosho_mgmt_no) || "").trim();
+  if(!no){ toast("管理番号がまだ入っていません"); return false; }
+  if(await copyText(no)){
+    toast(no + " をコピーしました。ファイルを選ぶ画面の検索に貼り付けられます");
+    return true;
+  }
+  await uiAlert("この端末では、押してコピーすることができませんでした。\n\n"
+    + "お手数ですが、次の番号を手で入れてください。\n\n" + no);
+  return false;
+}
 function updateHeader(){
   const el=document.getElementById("hdr-mgmt");
-  el.textContent = M.chosho_mgmt_no || "管理番号 未入力";
-  el.classList.toggle("empty", !M.chosho_mgmt_no);
+  const no = M.chosho_mgmt_no || "";
+  /* ★番号と 📋 を別の物にする★ ひとつながりの字にすると、長い番号のとき
+     「…」で 📋 まで切られて、押せることが分からなくなる。 */
+  el.innerHTML = "";
+  { const n = document.createElement("span");
+    n.className = "mgmt-n";
+    n.textContent = no || "管理番号 未入力";
+    el.appendChild(n); }
+  if(no){
+    const c = document.createElement("span");
+    c.className = "mgmt-c"; c.textContent = "📋";
+    el.appendChild(c);
+  }
+  el.title = no
+    ? ("押すと 「" + no + "」 をコピーします。\nファイルを選ぶ画面の検索に貼り付けて探せます")
+    : "管理番号がまだ入っていません";
+  el.classList.toggle("empty", !no);
   // どこまで進んだか（下見済／ビラ済／完了）を管理番号の右に出す
   const ph = flowTopPhase(flowOf(M));
   if(ph){
@@ -6371,8 +6458,11 @@ function renderPcGuard(){
           : "このまま保存すると、上の中身はPCのファイルから消えます。")
     +   "<br>先に <b>戸別ファイル（" + esc((String((M && M.chosho_mgmt_no) || "").trim() || "管理番号")) + ".json）</b> を読み込むと、"
     +   "写真も工事日も残したまま続きを入力できます。"
+    +   (canDir ? ""
+         : "<br>📋 で番号をコピーしてから 📂 を押すと、ファイルを選ぶ画面の検索に貼り付けて探せます。")
     + '</div>'
     + '<div class="pcg-btns">'
+    +   (canDir ? "" : '<button type="button" id="pcg-copy" class="alt">📋 管理番号をコピー</button>')
     +   (canDir
          ? ('<button type="button" id="pcg-dir">📁 PCのフォルダから読み込む'
             + (_saveDir ? ("（" + esc(_saveDir.name || "覚えているフォルダ") + "）") : "（フォルダを選びます）")
@@ -6382,6 +6472,8 @@ function renderPcGuard(){
     +     (canDir ? "ファイルを選んで読み込む" : "戸別ファイルを読み込んで編集する") + '</button>'
     +   '<button type="button" id="pcg-force" class="alt">このまま新しく入力する</button>'
     + '</div>';
+  const c = document.getElementById("pcg-copy");
+  if(c) c.addEventListener("click", copyMgmtNo);
   const d = document.getElementById("pcg-dir");
   if(d) d.addEventListener("click", pcGuardDirLoad);
   const a = document.getElementById("pcg-load");
@@ -7750,6 +7842,9 @@ async function newCase(){
 document.getElementById("btn-save").addEventListener("click",saveJson);
 document.getElementById("btn-flow").addEventListener("click",flowAdvance);
 document.getElementById("btn-save-top").addEventListener("click",saveJson);
+/* 上の帯の管理番号を押すとコピーする（ファイルを選ぶ画面の検索に貼り付けるため）。
+   この場所（#hdr-mgmt）は作り直さない＝1回つなげば足りる。 */
+document.getElementById("hdr-mgmt").addEventListener("click", copyMgmtNo);
 document.getElementById("btn-new").addEventListener("click",newCase);
 document.getElementById("btn-list2").addEventListener("click",openDraftModal);
 document.getElementById("draft-close").addEventListener("click",closeDraftModal);
