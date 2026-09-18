@@ -972,9 +972,11 @@
     <h3>📋 履歴・読込</h3>
     <div class="info">入力した内容は、この端末に自動で控えます（<b>💾</b>＝保存済 ／ <b>✏️</b>＝保存後に変更あり ／ 無印＝未保存）。<br>
     下のボタンで、PCや他の端末の <b class="fname">管理番号.json</b> を読めます。<b>📂</b>＝その戸別の続きを編集／<b>📥</b>＝工程の印だけを引き継ぐ（写真や測定値は取り込みません）。<br>
-    <b>📂 はまとめて選べます。</b>ファイルを選ぶ画面で <b>全部（または今日回るぶん）を選んでおく</b>と、ここで <b>管理番号・氏名・住所で絞り込んで</b>開けます。小さい字を目で探さなくて済みます。</div>
-    <button id="btn-import" style="width:100%; padding:15px; border:0; border-radius:11px; background:#455a64; color:#fff; font-weight:700; font-size:15px; margin-bottom:10px;">📂 保存済みJSONを開いて続きを編集</button>
+    開き方は2つあります。<b>📚 まとめて選ぶ</b>＝ファイルを選ぶ画面で <b>全部（または今日回るぶん）を選んでおく</b>と、ここで <b>管理番号・氏名・住所で絞り込んで</b>開けます。何百個を目で探さなくて済みます。<b>📂 1つだけ選ぶ</b>＝ファイルの場所が分かっているときに。</div>
+    <button id="btn-import" style="width:100%; padding:15px; border:0; border-radius:11px; background:#455a64; color:#fff; font-weight:700; font-size:15px; margin-bottom:8px;">📚 まとめて選んで、管理番号で絞り込む</button>
+    <button id="btn-import-one" style="width:100%; padding:13px; border:1px solid #b0bec5; border-radius:11px; background:#fff; color:#37474f; font-weight:700; font-size:14px; margin-bottom:10px;">📂 1つだけ選んで開く</button>
     <input type="file" id="import-file" accept=".json,application/json,*/*" multiple style="display:none;">
+    <input type="file" id="import-one" accept=".json,application/json,*/*" style="display:none;">
     <div id="open-pick" style="display:none; margin-bottom:10px;">
       <input type="search" id="open-pick-q" placeholder="管理番号・氏名・住所で絞り込み" style="width:100%; box-sizing:border-box; padding:11px 12px; border:1px solid #cdd3da; border-radius:10px; font-size:15px; margin-bottom:8px;">
       <div id="open-pick-list"></div>
@@ -1203,7 +1205,7 @@ const GENBA_SCHEMA_VER = 1;
 const APP_NAME_SHORT = "現場入力";
 /* 版は「増えていくだけの通し番号」。メイン（積算・図面）と同じ番号体系で、
    番号が小さいほうが古い。 */
-const APP_VERSION = "169";
+const APP_VERSION = "170";
 function photoContentId(dataUri){
   if(!dataUri || typeof dataUri !== "string") return "";
   let a = 5381, b = 0;
@@ -4940,6 +4942,25 @@ function uiTypeName(title, note, value){
 }
 /* 戸別ファイルらしい名前か（写真やメモを一覧に混ぜない） */
 function openPickIsJson(name){ return /\.json(\.txt)?$/i.test(String(name || "")); }
+/* 選んだファイルが、その管理番号の戸別のものか。
+   ★端末が名前の後ろに何か足して渡してくる★
+     Android … 管理番号_1758012345678.json ／ iPhone … 管理番号 2.json・管理番号 (1).json
+   だから「前が一致」だけで見る。ただし 2621HIN083 と 2621HIN083-01 は別の戸別なので、
+   後ろに付いてよいのは「_数字」「空白＋数字」「(数字)」だけにする。 */
+function openPickIsWanted(mgmt, want){
+  const m = draftNoKey(mgmt), w = draftNoKey(want);
+  if(!m || !w) return false;
+  if(m === w) return true;
+  if(m.indexOf(w) !== 0) return false;
+  return /^(?:_\d+| ?\(\d+\)| \d+)$/.test(m.slice(w.length));
+}
+/* 📂 1つだけ選ぶ（複数は選べない入口）。
+   ★まとめて選ぶのと分けてある★ 1つ開きたいだけなのに選ぶ画面が「選択モード」になると、
+   押す手数が増えて邪魔になる（利用者の指摘・2026-09-18）。 */
+document.getElementById("import-one").addEventListener("change", async e=>{
+  const f = (e.target.files || [])[0]; e.target.value = "";
+  if(f) await openJsonFile(f);
+});
 document.getElementById("import-file").addEventListener("change", async e=>{
   const all = Array.from(e.target.files || []); e.target.value = "";
   if(!all.length) return;
@@ -4951,7 +4972,12 @@ document.getElementById("import-file").addEventListener("change", async e=>{
   if(!fs.length){ fs = all; away = 0; }
   _openPick = fs.map(f => ({ file:f, mgmt: openPickMgmtOf(f.name) }))
                .sort((a,b) => String(a.mgmt).localeCompare(String(b.mgmt), "ja", { numeric:true }));
-  const q = document.getElementById("open-pick-q"); if(q) q.value = "";
+  /* ★いま開こうとしている戸別が選んだ中にあれば、その番号で絞って出す★
+     ここを空のままにすると、何百個の一覧を目で探すことになる。
+     それでは「まとめて選ぶ」意味がない（＝これまでの「自力で探すしかない」の正体）。 */
+  const want  = draftNoKey((M && M.chosho_mgmt_no) || "");
+  const found = want ? _openPick.some(o => openPickIsWanted(o.mgmt, want)) : false;
+  const q = document.getElementById("open-pick-q"); if(q) q.value = found ? want : "";
   /* ★押して何も起きない、を作らない★ 一覧は「履歴・読込」の窓の中にある。
      PCの守りの帯から押したときは窓が閉じているので、開いてから出す。 */
   const dm = document.getElementById("draft-modal");
@@ -4959,7 +4985,20 @@ document.getElementById("import-file").addEventListener("change", async e=>{
     try{ await openDraftModal(); }catch(_){ dm.classList.add("open"); }
   }
   renderOpenPick();
-  toast(fs.length + "個から探せます" + (away ? ("（戸別ファイルでない " + away + " 個は外しました）") : ""));
+  if(found){
+    toast(fs.length + "個から " + want + " を出しました");
+  } else {
+    toast(fs.length + "個から探せます" + (away ? ("（戸別ファイルでない " + away + " 個は外しました）") : ""));
+    /* ★その戸別を開きにきたのに、選んだ中に無い★ 黙っていると、
+       一覧を目で探しつづけることになる。無いことと、その直し方を出す。 */
+    if(want && M && M._viewOnly){
+      await uiAlert("選んだ " + fs.length + "個 の中に、この戸別のファイルがありませんでした。\n\n"
+        + want + ".json\n\n"
+        + "Dropbox などをお使いのときは、いちどそのファイルを Dropbox のアプリで開いて\n"
+        + "端末に取り寄せておかないと、「ファイルを選ぶ」画面に出てこないことがあります。\n\n"
+        + "Dropbox でそのファイルを開いてから、もう一度「📚 まとめて選ぶ」をお試しください。");
+    }
+  }
 });
 { const q = document.getElementById("open-pick-q");
   if(q) q.addEventListener("input", () => renderOpenPick());
@@ -6459,17 +6498,20 @@ function renderPcGuard(){
     +   "<br>先に <b>戸別ファイル（" + esc((String((M && M.chosho_mgmt_no) || "").trim() || "管理番号")) + ".json）</b> を読み込むと、"
     +   "写真も工事日も残したまま続きを入力できます。"
     +   (canDir ? ""
-         : "<br>📋 で番号をコピーしてから 📂 を押すと、ファイルを選ぶ画面の検索に貼り付けて探せます。")
+         : "<br>📚 を押して、ファイルを選ぶ画面で <b>すべて選択</b>（または今日回るぶん）を選ぶと、"
+           + "この戸別のファイルだけを出します。何百個を目で探さなくて済みます。"
+           + "<br>1つずつ探すときは、📋 で番号をコピーして、ファイルを選ぶ画面の検索に貼り付けてください。")
     + '</div>'
     + '<div class="pcg-btns">'
-    +   (canDir ? "" : '<button type="button" id="pcg-copy" class="alt">📋 管理番号をコピー</button>')
     +   (canDir
          ? ('<button type="button" id="pcg-dir">📁 PCのフォルダから読み込む'
             + (_saveDir ? ("（" + esc(_saveDir.name || "覚えているフォルダ") + "）") : "（フォルダを選びます）")
             + '</button>')
          : "")
-    +   '<button type="button" id="pcg-load"' + (canDir ? ' class="alt"' : '') + '>📂 '
-    +     (canDir ? "ファイルを選んで読み込む" : "戸別ファイルを読み込んで編集する") + '</button>'
+    +   '<button type="button" id="pcg-load"' + (canDir ? ' class="alt"' : '') + '>'
+    +     (canDir ? "📂 ファイルを選んで読み込む" : "📚 まとめて選んで、この戸別を出す") + '</button>'
+    +   (canDir ? "" : '<button type="button" id="pcg-one" class="alt">📂 1つだけ選ぶ</button>')
+    +   (canDir ? "" : '<button type="button" id="pcg-copy" class="alt">📋 管理番号をコピー（探す画面に貼り付け）</button>')
     +   '<button type="button" id="pcg-force" class="alt">このまま新しく入力する</button>'
     + '</div>';
   const c = document.getElementById("pcg-copy");
@@ -6480,6 +6522,11 @@ function renderPcGuard(){
   if(a) a.addEventListener("click", () => {
     const inp = document.getElementById("import-file");
     if(inp){ inp.value = ""; inp.click(); }               // 押した直後でないと開かない端末があるので、間に await を挟まない
+  });
+  const o = document.getElementById("pcg-one");
+  if(o) o.addEventListener("click", () => {
+    const inp = document.getElementById("import-one");
+    if(inp){ inp.value = ""; inp.click(); }               // ここも間に await を挟まない
   });
   const b = document.getElementById("pcg-force");
   if(b) b.addEventListener("click", pcGuardForceAsk);
@@ -7849,6 +7896,7 @@ document.getElementById("btn-new").addEventListener("click",newCase);
 document.getElementById("btn-list2").addEventListener("click",openDraftModal);
 document.getElementById("draft-close").addEventListener("click",closeDraftModal);
 document.getElementById("btn-import").addEventListener("click",()=>document.getElementById("import-file").click());
+document.getElementById("btn-import-one").addEventListener("click",()=>document.getElementById("import-one").click());
 document.getElementById("btn-flowshare").addEventListener("click",flowShareStart);
 document.getElementById("flowshare-file").addEventListener("change",async e=>{
   const fs=[...(e.target.files||[])]; e.target.value="";
