@@ -1205,7 +1205,7 @@ const GENBA_SCHEMA_VER = 1;
 const APP_NAME_SHORT = "現場入力";
 /* 版は「増えていくだけの通し番号」。メイン（積算・図面）と同じ番号体系で、
    番号が小さいほうが古い。 */
-const APP_VERSION = "170";
+const APP_VERSION = "171";
 function photoContentId(dataUri){
   if(!dataUri || typeof dataUri !== "string") return "";
   let a = 5381, b = 0;
@@ -3251,8 +3251,11 @@ function refreshPhotos(){
 function copyTextSync(s){
   s = String(s == null ? "" : s);
   if(!s) return false;
-  let ok = false, ta = null, sel = null, keep = null;
+  let ok = false, ta = null, sel = null, keep = null, act = null, ss = null, se = null;
   try{
+    /* いま打っている欄と、その中のどこを打っていたかを覚えておく（あとで戻す） */
+    act = document.activeElement;
+    try{ if(act && act.selectionStart != null){ ss = act.selectionStart; se = act.selectionEnd; } }catch(_){}
     ta = document.createElement("textarea");
     ta.value = s;
     /* ★画面の外へ置くと iPhone では写せない★ 見えない大きさで画面の中に置く。
@@ -3266,32 +3269,50 @@ function copyTextSync(s){
     ta.contentEditable = "true"; ta.readOnly = false;
     const rg = document.createRange(); rg.selectNodeContents(ta);
     if(sel){ sel.removeAllRanges(); sel.addRange(rg); }
-    try{ ta.setSelectionRange(0, 999999); }catch(_){}
+    /* ★ここへ焦点を移すこと★ 移さないと「写す元」にならず、
+       写せていないのに成功と答える（実測。それを信じて貼り付けると前の字が入る）。 */
+    ta.focus();
+    try{ ta.setSelectionRange(0, s.length); }catch(_){}
     ok = !!document.execCommand("copy");
   }catch(e){ console.warn("この道では写せませんでした（別の道を試します）", e); }
   finally{
     try{ if(sel){ sel.removeAllRanges(); if(keep) sel.addRange(keep); } }catch(_){}
     try{ if(ta) ta.remove(); }catch(_){}
+    /* 打っていた欄へ戻す（打ちかけの字・日本語の変換を落とさない） */
+    try{
+      if(act && act !== document.body && act.focus){
+        act.focus();
+        if(ss != null && act.setSelectionRange) act.setSelectionRange(ss, se);
+      }
+    }catch(_){}
   }
   return ok;
 }
+/* どの道で写したかを返す： "api"（確かな道）／"sync"（予備の道）／false（写せなかった） */
 async function copyText(s){
   s = String(s == null ? "" : s);
   if(!s) return false;
   try{
     if(navigator.clipboard && navigator.clipboard.writeText){
-      await navigator.clipboard.writeText(s); return true;
+      await navigator.clipboard.writeText(s); return "api";
     }
   }catch(e){ console.warn("この道では写せませんでした（別の道を試します）", e); }
-  return copyTextSync(s);          // 古い端末・https でない開き方のとき
+  return copyTextSync(s) ? "sync" : false;   // 古い端末・https でない開き方のとき
 }
 /* いま開いている戸別の管理番号をコピーして、次に何をすればよいかまで出す。
    ★写せなかったときは黙らない★ 黙ると、貼り付けようとして何も出ずに困る。 */
 async function copyMgmtNo(){
   const no = String((M && M.chosho_mgmt_no) || "").trim();
   if(!no){ toast("管理番号がまだ入っていません"); return false; }
-  if(await copyText(no)){
+  const how = await copyText(no);
+  if(how === "api"){
     toast(no + " をコピーしました。ファイルを選ぶ画面の検索に貼り付けられます");
+    return true;
+  }
+  if(how === "sync"){
+    /* ★予備の道は「写せたか」を確かめられない★ 言い切らずに、番号も一緒に出す
+       （貼り付けても出てこないときは、この番号を見て手で入れられる）。 */
+    toast(no + " をコピーしました。出てこないときは、この番号を手で入れてください");
     return true;
   }
   await uiAlert("この端末では、押してコピーすることができませんでした。\n\n"
@@ -5654,10 +5675,18 @@ function rcAptToModel(m, row){
   }
   return changed;
 }
-function receptionApplyToModel(m, row){
+/* opt.keepBlank … 台帳が空欄のときは、いまの値を消さない。
+   ★戸別ファイルを読んだ直後に呼ぶときは、必ずこれを付けること★
+     ふだんは「工事予定日・時刻・打合せは台帳が持ち主。空にできないと直せない」ので
+     空欄でも台帳に合わせる（blankWins）。ところがファイルを読んだ直後は、いまの値が
+     ファイルの中身。控え(_rcSrc)が無いと「現場が入れた」と見分けられないので、
+     そのまま空にすると、現場がスマホで決めた工事日がファイルごと消える
+     （事務所は台帳を作り直すまでその日を受け取れない）。 */
+function receptionApplyToModel(m, row, opt){
   if(!m || !row) return false;
   let changed = false;
   const src = (m._rcSrc && typeof m._rcSrc === "object") ? m._rcSrc : null;
+  const keepBlank = !!(opt && opt.keepBlank);
   const set = (k, rk, blankWins) => {
     const v   = String(row[rk] == null ? "" : row[rk]);
     const cur = String(m[k]    == null ? "" : m[k]);
@@ -5667,7 +5696,7 @@ function receptionApplyToModel(m, row){
     if(!cur && v){ m[k] = v; changed = true; return; }
     if(src){
       if(String(src[rk] == null ? "" : src[rk]) === v) return;   // 台帳は変わっていない＝現場が直した
-    } else if(!v && !blankWins){
+    } else if(!v && (!blankWins || keepBlank)){
       return;                                                    // 控えが無い時は、空欄では消さない
     }
     m[k] = v; changed = true;
@@ -6413,18 +6442,31 @@ async function pcGuardAutoLoad(dir){
      ところが読み込んだ直後の値はファイルの中身であって、現場が直したものではない。
      そのまま持ち越すと、事務所が台帳で直した工事日・氏名が入らず、
      ファイルの古い工事日が画面に出たままになる（＝違う日に行ってしまう）。
-     現場で入力した戸別は、その入力を台帳で潰さないために持ち越す。 */
+     現場で入力した戸別は、その入力を台帳で潰さないために持ち越す。
+     ★控えを捨てるときは「台帳が空欄なら消さない」を付けて呼ぶ★
+       控えが無いと receptionApplyToModel は「現場が直した」を見分けられない。
+       工事予定日・時刻・打合せは台帳が持ち主なので、ふだんは空欄でも台帳に合わせるが、
+       ファイルを読んだ直後にそれをやると、現場がスマホで決めた工事日が
+       ファイルごと消えてしまう（台帳が空欄のまま届いているだけ、という場面がある）。
+       台帳に値が入っていれば今までどおり台帳が入る＝版168 の狙いはそのまま。 */
   const wasTouched = (M._touched === true);
   const rcSrc = M._rcSrc;
   const row   = pcGuardRow();
   try{ await loadStateInto(hit.data, hit.name); }
   catch(e){ console.warn("PCのファイルを読めませんでした", e); return false; }
   if(!M) return false;
+  const keepBlank = !(wasTouched && rcSrc);      // 控えを捨てる＝ファイルの値が土台。空欄では消さない
   if(wasTouched && rcSrc) M._rcSrc = rcSrc;
   else delete M._rcSrc;
-  if(row){ try{ receptionApplyToModel(M, row); }catch(e){ console.warn("台帳の入れ直しに失敗", e); } }
+  if(row){ try{ receptionApplyToModel(M, row, { keepBlank: keepBlank }); }
+           catch(e){ console.warn("台帳の入れ直しに失敗", e); } }
   M._viewOnly = false;
-  try{ renderPcGuard(); }catch(_){}
+  /* ★台帳を入れ直したら、必ず画面を描き直す★
+     描き直さないと、画面はファイルの値・中身は台帳の値、という食い違いが残る。
+     字は古いのに押したときの動きは新しい中身で決まるので、工程の「済にする」を押すと
+     逆に取り消され、工事が終わっている戸別では工事完了が黙って落ちる。
+     render() の中で updateHeader() と renderPcGuard() も走る。 */
+  try{ render(); }catch(e){ console.warn("描き直しに失敗", e); try{ renderPcGuard(); }catch(_){} }
   try{ saveDraftFromLedger(); }catch(_){}   // 台帳から写した分は「現場で入力した」にしない
   return true;
 }
