@@ -536,6 +536,12 @@
     display:inline-flex; align-items:center; flex:0 1 auto; min-width:0; max-width:60%;
     transition:transform var(--t-fast) var(--ease), background var(--t-med) var(--ease); }
   .sb-dest-n{ overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+  /* 「物件A ＞ リスト」の「＞ リスト」のところ。長い物件名のときは物件名の方を「…」にして、
+     こちらと「変更」は残す（どこへ入れるのかが見えなくなると困るため）。
+     ★縮めない（flex:none）★ 縮む箱にすると、物件名と一緒に「＞ リ…」まで削られてしまう。
+     中の名前がとても長いときだけ、8字ほどで「…」にする（max-width）。 */
+  .sb-dest-in{ flex:none; max-width:8em; overflow:hidden; text-overflow:ellipsis;
+    white-space:nowrap; margin-left:.25em; }
   /* ★狭い画面（スマホ）では、保存先だけ1行をまるごと使う★
      「どこへ入れるか」はいちばん大事なので、細切れにせず全部見せる。
      残りの3つ（状態・控え・保存済）は上の行で縮められるので、どんな字の幅でもはみ出さない。 */
@@ -1205,7 +1211,7 @@ const GENBA_SCHEMA_VER = 1;
 const APP_NAME_SHORT = "現場入力";
 /* 版は「増えていくだけの通し番号」。メイン（積算・図面）と同じ番号体系で、
    番号が小さいほうが古い。 */
-const APP_VERSION = "171";
+const APP_VERSION = "172";
 function photoContentId(dataUri){
   if(!dataUri || typeof dataUri !== "string") return "";
   let a = 5381, b = 0;
@@ -4460,8 +4466,9 @@ async function saveJsonRun(){
      ただし黙って別の道へ行くと「いつもと違う画面が出た」理由が分からないので、あとで伝える。 */
   let dirLapsed = false;
   if(dir && !(await saveDirOk(dir, false))){ dir = null; dirLapsed = true; }
+  if(dir) dir = await saveDirSettle(dir);    // 前の版で物件のフォルダを覚えていたら、中の「リスト」へ寄せる
   const lapsedLine = () => dirLapsed
-    ? ("\n\n（覚えている保存先" + (saveDirName() ? ("フォルダ「" + saveDirName() + "」") : "フォルダ")
+    ? ("\n\n（覚えている保存先" + (saveDirPlace() ? ("フォルダ「" + saveDirPlace() + "」") : "フォルダ")
        + "へ書く許可が切れていました。\n"
        + "保存バーの 📁 のボタン（フォルダの名前が出ているところ）を押して\n"
        + "選び直すと、次からはそのまま入ります）")
@@ -4478,10 +4485,12 @@ async function saveJsonRun(){
          写真は和集合（相手にしか無い写真は必ず残す）。こちらが空のところは
          相手の中身を消さない。読めないときは今までどおり、そのまま書く。 */
       let mergedNote = "", mgKeys = [], primary = null;
-      const cf = await readExistingCaseFiles(dir, fname, state.chosho_mgmt_no);
+      const cf = await readCaseFilesForWrite(dir, fname, state.chosho_mgmt_no);
       primary = cf.primary;
       if(primary){
-        const base = fileBaseGet(M);
+        /* 物件のすぐ下にも同じ戸別があったときは、控えがそちらから取られていることがある。
+           控えがリストの中身と合わなければ、値の見比べはやめる（写真の歯止めは残す）。 */
+        const base = baseForWrite(fileBaseGet(M), cf);
         const mg = mergeIntoState(state, primary, { model:M, base:base, fname:fname,
                                                     mode:"write", others:cf.others, askable:true });
         if(mg.stop){
@@ -4505,6 +4514,12 @@ async function saveJsonRun(){
         if(mg.removed.length) mergedNote += "\n（PCで消された "
           + Array.from(new Set(mg.removed.map(mergeLabelOf))).join("・") + " を、こちらも消しました）";
         if(cf.names.length > 1) mergedNote += "\n（同じ戸別のファイルが " + cf.names.length + " つありました。写真はどれも残しました。要らない方はPCで片付けてください）";
+        if(cf.rootNames.length){
+          const pn = saveDirPlaceParts(dir).outer || "物件";
+          mergedNote += "\n（「" + pn + "」のすぐ下にも同じ戸別のファイルがありました。"
+            + "写真は両方まとめて「" + (dir.name || "リスト") + "」の方に入れました。"
+            + "すぐ下の方は消していません。PCの「🧩 重複をまとめる」で片付けてください）";
+        }
       }
       /* フォルダにその戸別のファイルが無い＝和集合にする相手がいない。
          控え・副本が知っている写真が手元に無いまま新しく書くと、その写真は消える。 */
@@ -4532,7 +4547,7 @@ async function saveJsonRun(){
       const bad = await saveVerify(fh, state);
       if(bad){
         _lastSaveInfo = { title: "⚠ 保存できていないかもしれません",
-          msg: "「" + (dir.name || "選んだフォルダ") + "」の中\n" + fname + "\n\n"
+          msg: "「" + (saveDirPlace(dir) || "選んだフォルダ") + "」の中\n" + fname + "\n\n"
              + sizeTxt + "\n\n"
              + saveVerifyHead(bad) + bad
              + "\n\nもう一度「保存」を押すか、\n台帳の「まとめて保存」をお試しください。", warn: true };
@@ -4547,7 +4562,7 @@ async function saveJsonRun(){
       if(mgKeys.length) mergedNote += "\n（ファイルに入っていた "
         + Array.from(new Set(mgKeys.map(mergeLabelOf))).join("・") + " を画面にも入れました）";
       render();
-      _lastSaveInfo = { title: "保存しました", msg: "「" + (dir.name || "選んだフォルダ") + "」の中\n" + fname
+      _lastSaveInfo = { title: "保存しました", msg: "「" + (saveDirPlace(dir) || "選んだフォルダ") + "」の中\n" + fname
         + "\n" + saveSizeText(JSON.stringify(state), state)
         + "\n（書いたあと読み返して、中身が入っていることを確かめました）"
         + mergedNote, warn: false };
@@ -4651,7 +4666,7 @@ async function saveJsonRun(){
          どこへ渡したかはこちらでは分からないので、決めつけずに事実だけ書く。 */
       _lastSaveInfo = { title: "共有で渡しました", msg: (sr.name[0] || fname) + "\n" + size2
         + "\n\n中身はきちんと入っています（消えていません）。\n\n"
-        + "渡した先が、PCで読み込むフォルダなら\nそのままPCで読めます。\n"
+        + saveShareWhere() + "\nそのままPCで読めます。\n"
         + "ちがう場所へ渡したときは、そのフォルダへ移してください。"
         + saveHintLine()
         + shareRenameNote(sr.as) + lapsedLine(), warn: true };
@@ -5133,16 +5148,25 @@ let _saveOvTimer = null;
 let _saveOvHide = null;        // 自動で閉じるタイマー（次の知らせが出たら取り消す）
 function saveOverlayShow(fname){
   saveOverlayHide();
+  /* ★選ぶ前に、入れる所を見せる★ PC は覚えているフォルダ、スマホは覚えている名前。
+     どちらも同期で読むだけ（ここで待つと、端末の窓が開かなくなる）。 */
+  let where = "";
+  try{ where = saveDirPlace() || saveHintLabel(); }catch(_){}
   const d = document.createElement("div");
   d.id = "save-ov";
   d.innerHTML = '<div class="save-ov-card"><div class="save-ov-ring"></div>'
     + '<div class="save-ov-t">保存中…</div>'
     + '<div class="save-ov-s">' + esc(fname || "") + "</div>"
+    + (where ? ('<div class="save-ov-s">入れる所：' + esc(where) + "</div>") : "")
     + '<div class="save-ov-w" id="save-ov-w"></div></div>';
   document.body.appendChild(d);
   _saveOvTimer = setTimeout(() => {
     const w = document.getElementById("save-ov-w"); if(!w) return;
-    w.innerHTML = "時間がかかっています。共有の画面が出ていれば、そちらで保存先を選んでください。"
+    const hp = saveHintParts();
+    w.innerHTML = "時間がかかっています。共有の画面が出ていれば、"
+      + (hp.outer ? ("「" + esc(hp.outer) + "」の中の「" + esc(hp.inner) + "」を選んでください。")
+         : hp.inner ? ("「" + esc(hp.inner) + "」を選んでください。")
+         : "そちらで保存先を選んでください。")
       + '<button type="button" id="save-ov-x">閉じる</button>';
     const x = document.getElementById("save-ov-x");
     if(x) x.addEventListener("click", saveOverlayHide);
@@ -5212,15 +5236,27 @@ function renderSaveBar(){
      ここが食い違っていると「保存したのにPCで読めない」になる。
      フォルダを覚えていなければ、そうと分かるように出す。 */
   const dest = saveDirName();
+  const destPP = saveDirPlaceParts();     // 上（物件）が分かれば「物件A ＞ リスト」と出す
+  const hintPP = saveHintParts();         // スマホ：覚えている名前が「物件A/リスト」なら同じ形で出す
   /* 押すと保存先を選び直せる。まちがえて覚えさせたときに直すところが無いと、
      その後ずっと違う場所へ書き込まれ続ける。 */
   /* ★名前は長くなりうる（物件名がそのまま入る）★ 名前のところだけを「…」で切れるように
      包んでおく。包まないと帯が画面より広くなり、画面ごと横に動いてしまう。
      押したときに出る説明（title）には、切らない全部の名前を入れておく。 */
-  const destHtml = dest
+  const destHtml = (dest && destPP.outer && destPP.inner)
+    ? '<button type="button" class="sb-dest" id="sb-dest" title="「保存」を押すと、「' + esc(destPP.outer)
+      + '」フォルダの中の「' + esc(destPP.inner) + '」の 管理番号.json を上書きします。'
+      + '「' + esc(destPP.outer) + '」のすぐ下には入れません。押すと保存先を選び直せます">📁\u00a0<span class="sb-dest-n">'
+      + esc(destPP.outer) + '</span><span class="sb-dest-in">＞ ' + esc(destPP.inner) + '</span> <span class="sb-dest-x">変更</span></button>'
+    : dest
     ? '<button type="button" class="sb-dest" id="sb-dest" title="「保存」を押すと、「' + esc(dest)
       + '」の中の 管理番号.json を上書きします。押すと保存先を選び直せます">📁\u00a0<span class="sb-dest-n">'
       + esc(dest) + '</span> <span class="sb-dest-x">変更</span></button>'
+    : hintPP.outer
+    ? '<button type="button" class="sb-dest" id="sb-dest" title="入れる場所：「' + esc(hintPP.outer)
+      + '」フォルダの中の「' + esc(hintPP.inner) + '」\u000aこの端末ではフォルダを掴めません。保存のたびに、このフォルダに入れるよう出します。'
+      + '「' + esc(hintPP.outer) + '」のすぐ下には入れません。押すと変えられます">📁\u00a0<span class="sb-dest-n">'
+      + esc(hintPP.outer) + '</span><span class="sb-dest-in">＞ ' + esc(hintPP.inner) + '</span> に入れる <span class="sb-dest-x">変更</span></button>'
     : (saveHintName()
       ? '<button type="button" class="sb-dest" id="sb-dest" title="入れる場所： 「' + esc(saveHintName())
         + '」\u000aこの端末ではフォルダを掴めません。保存のたびに、この名前のフォルダに入れるよう出します。押すと変えられます">📁\u00a0<span class="sb-dest-n">'
@@ -5252,13 +5288,17 @@ async function saveDirChange(mode){
       seen[key] = 1;
       items.push({ label: label, value: value, sub: sub, kind: kind });
     };
+    let proj = "";
     try{
       const d = getReceptionData();
-      const proj = d && String(d.project || "").trim();
-      if(proj) add(proj, proj, "受付台帳の物件名", "");
+      proj = String((d && d.project) || "").trim();
     }catch(_){}
-    if(now) add(now, now, "いま覚えている名前", "");
-    saveHintHistory().forEach(h => add(h, h, "前に使った名前", ""));
+    /* いちばん上は「物件A ＞ リスト」（決まりの置き場所）。
+       ★物件名だけの候補は出さない★ 押すだけで物件のすぐ下を覚えてしまうため。 */
+    if(proj) add(proj + " ＞ リスト", proj + "/リスト", "受付台帳の物件名の中の「リスト」（決まりの置き場所）", "");
+    const notBare = h => !proj || h !== proj;
+    if(now && notBare(now)) add(saveHintLabel(now), now, "いま覚えている名前", "");
+    saveHintHistory().filter(notBare).forEach(h => add(saveHintLabel(h), h, "前に使った名前", ""));
     add("自分で書く", "\u0000type", "候補に無いときはこちら", "type");
     if(now) add("覚えない", "", "保存のたびの案内を出しません", "off");
     const picked = await uiPickName("📁 入れる場所の名前",
@@ -5268,14 +5308,20 @@ async function saveDirChange(mode){
     let v = picked;
     if(v === "\u0000type"){
       v = await uiTypeName("📁 入れる場所の名前",
-        "候補に無いときだけ、ここに書いてください。<br>例： リスト", now);
+        "候補に無いときだけ、ここに書いてください。<br>例： 物件A/リスト（「/」で区切ると、中のフォルダまで出します）", now);
       if(v === null) return;                   // やめた（覚えている名前はそのまま）
     }
     saveHintSet(v);
     saveHintRemember(v);
+    /* 自動の候補を選んだときは、物件が変わったら追いかける。ほかの名前は自分で選んだもの。 */
+    {
+      const got = saveHintName();
+      try{ localStorage.setItem(LS_SAVEHINT_AUTO,
+        !got ? "\u0000off" : ((proj && got === proj + "/リスト") ? got : "")); }catch(_){}
+    }
     renderSaveBar();
     await uiAlert(saveHintName()
-      ? ("覚えました。保存のたびに「" + saveHintName() + "」と出します。\n\n"
+      ? ("覚えました。保存のたびに「" + saveHintLabel() + "」と出します。\n\n"
          + "端末の保存画面で、そのフォルダを選んでください。")
       /* ★押して何も起きない、を作らない★ 名前を消したときも、この端末では何が起きるのかを必ず言う。 */
       : ("この端末では保存先のフォルダを選べません。\n"
@@ -5299,23 +5345,16 @@ async function saveDirChange(mode){
     await uiAlert("そのフォルダへ書き込む許可が取れませんでした。\n\nもう一度お試しください。");
     return;
   }
-  /* 工事フォルダの直下を選んでしまいがち（受付台帳がそこにあるため）。
-     中のフォルダの方に戸別ファイルが多ければ、そちらを勧める。 */
-  try{
-    const better = await saveDirSuggestInner(dir);
-    if(better && await uiConfirm("選んだ「" + dir.name + "」には戸別ファイルが " + better.here + " 件、\n"
-        + "その中の「" + better.name + "」には " + better.n + " 件あります。\n\n"
-        + "「" + better.name + "」の方に入れますか？")){
-      dir = better.dir;
-      if(!(await saveDirOk(dir, true))){
-        await uiAlert("「" + better.name + "」へ書き込む許可が取れませんでした。\n\nもう一度お試しください。");
-        return;
-      }
-    }
-  }catch(_){ /* 数えられなくても保存先は選べる */ }
-  await saveDirSet(dir);
+  /* 物件のフォルダ（受付台帳がある所）を選んでしまいがち。中に「リスト」があれば、聞かずにそちらへ入る。
+     手がかりが弱いときだけ、中へ入るか1回聞く。 */
+  const picked = dir;
+  dir = await saveDirAdopt(dir, { ask:true });
   renderSaveBar();
-  toast("保存先を「" + (dir.name || "選んだフォルダ") + "」にしました");
+  if(dir !== picked){
+    toast("保存先を「" + saveDirPlace() + "」にしました（「" + (picked.name || "選んだフォルダ") + "」のすぐ下には入れません）");
+  } else if(!_saveDirAdoptMiss){
+    toast("保存先を「" + (dir.name || "選んだフォルダ") + "」にしました");
+  }
 }
 /* 中身の指紋。saveDraft を通さずにモデルが書き換わっても、次に控えるときに
    「変わった」と気づけるようにする。写真は中身ではなくID・名前だけを見る（重いため）。 */
@@ -5456,6 +5495,7 @@ async function markDraftSaved(){
    ============================================================================ */
 const SAVEDIR_KEY  = "savedir";                   // IndexedDB(maps)に置くフォルダの手がかり
 const LS_SAVEDIR   = "field_savedir_name_v1";     // 画面に出す用のフォルダ名
+const LS_SAVEDIR_PAR = "field_savedir_parent_v1"; // その上のフォルダ（物件）の名前。リストを覚えたときだけ
 /* ★入れる場所の名前★ iPad・Android は保存のたびに端末の保存画面が出て、その既定は
    「最後に使った場所」になる。受付台帳（現場用_….json）を工事フォルダの直下から選ぶと、
    そのあとの戸別の保存も直下に落ち、本当は「リスト」に入れたいのに散らばってしまう。
@@ -5463,18 +5503,57 @@ const LS_SAVEDIR   = "field_savedir_name_v1";     // 画面に出す用のフォ
 const LS_SAVEHINT  = "field_savedir_hint_v1";
 // この画面が覚えているフォルダ。IndexedDBに残せない端末でも、1回選べばその後は聞かない。
 let _saveDir = null;
+/* ★覚えているフォルダの「上のフォルダ」（物件）★ 物件のフォルダを選んだときに、自分で中の「リスト」に
+   入った場合だけ持つ。{ dir:リスト, parent:物件, name:物件の名前 } の組で持つので、
+   _saveDir が別のフォルダに替わったときに、古い親を取り違えない。 */
+let _saveDirPar = null;
 async function saveDirGet(){
   if(_saveDir) return _saveDir;
-  try{ const r = await idbMapGet(SAVEDIR_KEY); _saveDir = (r && r.handle) || null; }catch(_){ _saveDir = null; }
+  try{
+    const r = await idbMapGet(SAVEDIR_KEY);
+    _saveDir = (r && r.handle) || null;
+    // 親の無い古い記録は、今までどおり（名前だけ）
+    _saveDirPar = (_saveDir && r.parent)
+      ? { dir:_saveDir, parent:r.parent, name:(r.parentName || r.parent.name || "") } : null;
+  }catch(_){ _saveDir = null; _saveDirPar = null; }
   return _saveDir;
 }
-async function saveDirSet(h){
+async function saveDirSet(h, parent){
   _saveDir = h || null;
+  _saveDirPar = (h && parent) ? { dir:h, parent:parent, name:(parent.name || "") } : null;
+  /* ★前のフォルダで当たった所・名前の一覧を捨てる★
+     残すと、別の物件に替えたあとも前の物件のファイルを読んでしまう。 */
+  _caseDirHit = null; _caseDirHitRoot = null; _cfIdx = null;
+  _saveDirRootOk = new WeakMap();
   let kept = false;
-  try{ await idbMapPut({ key:SAVEDIR_KEY, handle:h, savedAt:Date.now() }); kept = true; }
+  try{ await idbMapPut({ key:SAVEDIR_KEY, handle:h, parent:(h && parent) || null,
+                        parentName:(h && parent && parent.name) || "", savedAt:Date.now() }); kept = true; }
   catch(e){ console.warn("保存先フォルダを覚えられませんでした（この画面の間だけ覚えます）", e); }
   // アプリを開き直しても残る時だけ名前を控える（次回も同じ所に入る、と言い切れる場合だけ出す）
   try{ localStorage.setItem(LS_SAVEDIR, kept ? ((h && h.name) || "") : ""); }catch(_){}
+  try{ localStorage.setItem(LS_SAVEDIR_PAR, kept ? ((h && parent && parent.name) || "") : ""); }catch(_){}
+}
+/* 覚えているフォルダの上のフォルダ（物件）。分からなければ null */
+function saveDirParentOf(dir){
+  return (_saveDirPar && dir && _saveDirPar.dir === dir) ? _saveDirPar.parent : null;
+}
+/* 画面に出す保存先の名前を、「物件A」と「リスト」に分けて返す（上が分からなければ outer は空） */
+function saveDirPlaceParts(dir){
+  if(dir === undefined) dir = _saveDir;
+  if(!dir){
+    let n = "", p = "";
+    try{ n = localStorage.getItem(LS_SAVEDIR) || ""; p = localStorage.getItem(LS_SAVEDIR_PAR) || ""; }catch(_){}
+    return { outer: n ? p : "", inner: n };
+  }
+  const n = dir.name || "";
+  const par = saveDirParentOf(dir);
+  const p = par ? ((_saveDirPar && _saveDirPar.name) || par.name || "") : "";
+  return { outer: n ? p : "", inner: n };
+}
+/* 画面に出す保存先の名前。上が分かれば「物件A ＞ リスト」、分からなければ名前だけ */
+function saveDirPlace(dir){
+  const pp = saveDirPlaceParts(dir);
+  return pp.outer ? (pp.outer + " ＞ " + pp.inner) : pp.inner;
 }
 function saveDirName(){
   if(_saveDir && _saveDir.name) return _saveDir.name;
@@ -5487,10 +5566,60 @@ function saveHintName(){
 function saveHintSet(v){
   try{ localStorage.setItem(LS_SAVEHINT, String(v == null ? "" : v).trim()); }catch(_){}
 }
-/* 保存のあとの案内に添える一文（名前を覚えていなければ空） */
+/* ★入れる場所の名前を「物件A」と「リスト」に分けて返す★
+   区切りは半角の「/」（フォルダの名前には使えない字）。"物件A/リスト" の形で覚える。
+   「/」の無い前からの名前（「リスト」や物件名だけ）は、今までどおり名前1つ（outer は空）。 */
+function saveHintParts(v){
+  const s = String(v === undefined ? saveHintName() : (v == null ? "" : v)).trim();
+  const a = s.split("/").map(x => x.trim()).filter(Boolean);
+  if(a.length < 2) return { outer:"", inner:(a[0] || "") };
+  return { outer:a.slice(0, -1).join(" ＞ "), inner:a[a.length - 1] };
+}
+/* 画面に出す形：「物件A ＞ リスト」または「名前」 */
+function saveHintLabel(v){
+  const pp = saveHintParts(v);
+  return pp.outer ? (pp.outer + " ＞ " + pp.inner) : pp.inner;
+}
+/* 文の中で言う形：「「物件A」フォルダの中の「リスト」」または「「名前」フォルダ」（覚えていなければ空） */
+function saveHintWhere(){
+  const pp = saveHintParts();
+  if(!pp.inner) return "";
+  return pp.outer ? ("「" + pp.outer + "」フォルダの中の「" + pp.inner + "」") : ("「" + pp.inner + "」フォルダ");
+}
+/* 保存のあとの案内に添える一文（名前を覚えていなければ空）。
+   入れる所と、入れない所（物件のすぐ下）をはっきり言う。
+   ※「ここに入れないと、PCで読めない」とは言わない（PCは下のフォルダまで読むので、正しくない） */
 function saveHintLine(){
-  const n = saveHintName();
-  return n ? ("\n\n★入れる場所： 「" + n + "」フォルダ★\nここに入れないと、PCが読み込めません。") : "";
+  const pp = saveHintParts();
+  if(!pp.inner) return "";
+  if(pp.outer) return "\n\n★入れる場所：「" + pp.outer + "」フォルダの中の「" + pp.inner + "」フォルダ★\n"
+    + "（「" + pp.outer + "」フォルダのすぐ下には入れません。管理番号.json が並んでいるフォルダです）";
+  return "\n\n★入れる場所：「" + pp.inner + "」フォルダ★\n（管理番号.json が並んでいるフォルダです）";
+}
+/* 共有で渡したあとの知らせの頭。入れる場所の名前を覚えていれば、下の★を指す */
+function saveShareWhere(){
+  return saveHintParts().inner ? "渡した先が、下の★のフォルダなら" : "渡した先が、PCで読み込むフォルダなら";
+}
+/* ★受付台帳を取り込んだら、入れる場所を黙って「物件A/リスト」に決める★（押す回数0回）
+   自分で選んだ名前は書き替えない。「覚えない」を選んだ人には出さない。
+   前の版の「物件名だけ（＝物件のすぐ下）」を覚えている端末も、ここで「物件名/リスト」に直る。
+   LS_SAVEHINT_AUTO＝自動で決めた値（物件が変わったら追いかける）／"\u0000off"＝覚えない、を選んだ */
+const LS_SAVEHINT_AUTO = "field_savedir_hint_auto_v1";
+function saveHintAuto(newProj, oldProj){
+  /* ★フォルダを掴める端末（PC）では決めない★ 決めると保存バーの「未設定 選ぶ」が消え、
+     「この端末ではフォルダを掴めません」と正しくない説明が出て、📁で選ばなくなる。 */
+  if(window.showDirectoryPicker) return "";
+  newProj = String(newProj || "").trim(); if(!newProj) return "";
+  oldProj = String(oldProj || "").trim();
+  let auto = ""; try{ auto = localStorage.getItem(LS_SAVEHINT_AUTO) || ""; }catch(_){}
+  if(auto === "\u0000off") return "";                        // 「覚えない」を選んだ人には出さない
+  const cur = saveHintName(), target = newProj + "/リスト";
+  if(cur === target) return "";
+  const mine = cur && cur !== auto && cur !== oldProj && cur !== newProj && cur !== (oldProj + "/リスト");
+  if(mine) return "";                                        // 自分で選んだ名前は書き替えない
+  saveHintSet(target); saveHintRemember(target);
+  try{ localStorage.setItem(LS_SAVEHINT_AUTO, target); }catch(_){}
+  return target;
 }
 /* フォルダへ書く許可があるか。ask=true なら聞き直す（許可はブラウザを閉じると切れることがある） */
 /* そのフォルダの直下にある戸別ファイル（管理番号.json）の数をざっと数える
@@ -5499,26 +5628,127 @@ async function saveDirCountCases(dir, cap){
   let n = 0;
   try{
     for await (const [name, h] of dir.entries()){
-      if(h && h.kind === "file" && /\.json(\.txt)?$/i.test(name) && !/^現場用|^受付台帳/.test(name)) n++;
+      if(h && h.kind === "file" && /\.json(\.txt)?$/i.test(name) && !/^現場用|^受付台帳|^特別記録_/.test(name)) n++;
       if(n >= (cap || 200)) break;
     }
   }catch(_){}
   return n;
 }
-/* 選んだフォルダより、その中のフォルダの方に戸別ファイルが多ければ、それを返す */
-async function saveDirSuggestInner(dir){
-  const here = await saveDirCountCases(dir, 200);
-  let best = null, looked = 0;
+/* 中を見なくてよいフォルダ（控えなどの作業用・写真の置き場）。PCの読み込みと同じ決め方 */
+function saveDirSkipChild(name){
+  const s = String(name || "").trim();
+  return !s || /^[_.]/.test(s) || /(写真|画像|フォト|サムネ)/.test(s)
+      || /^(DCIM|photos?|images?|img|pic(ture)?s?|thumbnails?|thumbs)$/i.test(s);
+}
+/* ★選んだフォルダ（物件）の中の「リスト」を見つける★ 見つからなければ null（選んだフォルダをそのまま使う）。
+   strong … 聞かずに入ってよい手がかり（「リスト」という名前／受付台帳が横にある）。
+   ・「リスト」という名前のフォルダがあれば、中が空でもそこ（新しい物件）
+   ・受付台帳が直下にあれば、戸別がいちばん多い中のフォルダ（直下の数とは比べない。
+     直下にまちがって溜まったファイルで、まちがいが強まらないように）
+   ・どちらでもなければ、中のフォルダの方が直下より戸別が多いときだけ（弱い手がかり） */
+async function saveDirFindList(dir){
+  let here = 0, ledger = false, named = null, looked = 0; const kids = [];
   try{
     for await (const [name, h] of dir.entries()){
-      if(!h || h.kind !== "directory") continue;
-      if(/^_/.test(name)) continue;                 // 控えなどの作業用フォルダは勧めない
+      if(h && h.kind === "file"){
+        if(/^(現場用|受付台帳)/.test(name)) ledger = true;
+        else if(/\.json(\.txt)?$/i.test(name) && !/^特別記録_/.test(name)) here++;
+        continue;
+      }
+      if(!h || h.kind !== "directory" || saveDirSkipChild(name)) continue;
       if(++looked > 20) break;
-      const n = await saveDirCountCases(h, 200);
-      if(n > here && (!best || n > best.n)) best = { dir: h, name: name, n: n, here: here };
+      kids.push([name, h]);
+      if(!named && String(name).normalize("NFKC").trim() === "リスト") named = { dir:h, name:name, strong:true };
     }
-  }catch(_){}
+  }catch(_){ return null; }               // 中を見られないフォルダ → 今までどおり
+  if(named) return named;
+  let best = null;
+  for(const [name, h] of kids){
+    const n = await saveDirCountCases(h, 200);
+    if(n > 0 && (!best || n > best.n)) best = { dir:h, name:name, n:n, here:here };
+  }
+  if(!best) return null;
+  best.strong = ledger;
+  if(!best.strong && !(best.n > here)) return null;
   return best;
+}
+/* ★選んだフォルダから、覚える所を決めて覚える★（保存バーの📁・まとめて保存・帯の📁 の3か所）
+   ask … 弱い手がかりのとき、中へ入るか聞くか。聞かないときは選んだフォルダのまま。
+   ※ どれも窓（フォルダを選ぶ画面）が閉じたあとに呼ぶ。窓の前には挟まないこと。 */
+let _saveDirAdoptMiss = "";      // 中のフォルダは見つかったが、書く許可が取れなかったときの名前
+async function saveDirAdopt(picked, opt){
+  _saveDirAdoptMiss = "";
+  let f = null; try{ f = await saveDirFindList(picked); }catch(_){}
+  if(f && !f.strong){
+    if(!(opt && opt.ask)) f = null;
+    else if(!(await uiConfirm("選んだ「" + (picked.name || "フォルダ") + "」には戸別ファイルが " + f.here + " 件、\n"
+        + "その中の「" + f.name + "」には " + f.n + " 件あります。\n\n"
+        + "「" + f.name + "」の方に入れますか？"))) f = null;
+  }
+  if(f && !(await saveDirOk(f.dir, false)) && !(await saveDirOk(f.dir, true))){
+    _saveDirAdoptMiss = f.name || "";
+    toast("「" + (f.name || "中のフォルダ") + "」へ書き込む許可が取れませんでした。「"
+      + (picked.name || "選んだフォルダ") + "」に入れます");
+    f = null;
+  }
+  if(f && f.strong !== true){
+    /* 弱い手がかりで入る中のフォルダが、じつは物件のフォルダ（中に「リスト」がある）なら、そこまで降りる。
+       降りられないときは中へ入らない（物件のすぐ下を親つきで覚えると、二度とリストへ寄らない） */
+    const t = await saveDirInto(f.dir, picked);
+    if(t){ await saveDirSet(t.dir, t.parent); return t.dir; }
+    _saveDirAdoptMiss = f.name || "";
+    toast("「" + (f.name || "中のフォルダ") + "」の中の「リスト」へ書き込む許可が取れませんでした。「"
+      + (picked.name || "選んだフォルダ") + "」に入れます");
+    f = null;
+  }
+  if(f){ await saveDirSet(f.dir, picked); return f.dir; }
+  await saveDirSet(picked, null); return picked;
+}
+/* ★中のフォルダ c を覚えるときの行き先★（弱い手がかりで中へ入る所・読んで当たった所を覚え直す所）
+   c の中にさらに「リスト」や受付台帳（強い手がかり）があれば、c は物件のフォルダ。
+   その中のリストまで降りて { dir:リスト, parent:c } を返す。
+   降りられない（書く許可が無い）ときは null＝覚え直さない。許可は聞き直さない。
+   強い手がかりが無ければ { dir:c, parent:parent }。 */
+async function saveDirInto(c, parent){
+  let f = null; try{ f = await saveDirFindList(c); }catch(_){}
+  if(f && f.strong){
+    if(!(await saveDirOk(f.dir, false))) return null;
+    return { dir:f.dir, parent:c };
+  }
+  return { dir:c, parent:parent };
+}
+/* フォルダの名前が「リスト」か（リストそのものを直接覚えている端末を見分ける） */
+function saveDirNamedList(dir){
+  return !!dir && String(dir.name || "").normalize("NFKC").trim() === "リスト";
+}
+/* ★根元（覚えている親）が「物件」と確かめられるか★ 中に「リスト」や受付台帳があり、
+   しかも覚えているフォルダがそのリストのとき だけ true。1つの根元につき中をなめるのは1回。
+   親が工事フォルダ（物件の上）だと、兄弟の別の物件まで読んでしまうので、そのときは子を見ない。 */
+let _saveDirRootOk = new WeakMap();
+async function saveDirRootIsProj(root, dir){
+  let f = _saveDirRootOk.get(root);
+  if(f === undefined){
+    f = null; try{ f = await saveDirFindList(root); }catch(_){}
+    _saveDirRootOk.set(root, f);
+  }
+  return !!(f && f.strong && f.dir === dir);
+}
+/* ★前の版で物件のフォルダ（リストの上）を覚えたままの端末を、黙ってリストへ寄せる★
+   聞かずに寄せるのは強い手がかりのときだけ。許可は聞き直さない（窓を出さない）。
+   1つのフォルダにつき、中をなめるのは1回だけ。 */
+const _saveDirChecked = new WeakSet();
+async function saveDirSettle(dir){
+  if(!dir || dir !== _saveDir) return dir;            // 試験で差し替えた saveDirGet には触らない
+  if(saveDirParentOf(dir)) return dir;                // もうリストを覚えている
+  if(_saveDirChecked.has(dir)) return dir;
+  _saveDirChecked.add(dir);
+  let f = null; try{ f = await saveDirFindList(dir); }catch(_){}
+  if(!f || !f.strong) return dir;
+  if(!(await saveDirOk(f.dir, false))) return dir;
+  await saveDirSet(f.dir, dir);
+  try{ renderSaveBar(); }catch(_){}
+  toast("保存先を「" + saveDirPlace() + "」にそろえました");
+  return f.dir;
 }
 async function saveDirOk(h, ask){
   if(!h || !h.queryPermission) return false;
@@ -6049,13 +6279,16 @@ async function saveAllDrafts(mode){
         await uiAlert("そのフォルダへ書き込む許可が取れませんでした。\n\nもう一度お試しください。");
         return;
       }
-      await saveDirSet(dir);      // 「保存」1件ぶんの行き先も、ここで選んだ所にそろえる
+      /* 「保存」1件ぶんの行き先も、ここで選んだ所にそろえる。
+         物件のフォルダを選んだときは、中の「リスト」へ（手がかりが弱いときは聞かずに選んだ所のまま） */
+      dir = await saveDirAdopt(dir, { ask:false });
       renderSaveBar();
     }
   } else {
     // フォルダを選べない端末（Android等）。覚えているものがあれば使い、無ければ共有／ダウンロードへ。
     dir = await saveDirGet();
     if(dir && !(await saveDirOk(dir, true))) dir = null;
+    if(dir) dir = await saveDirSettle(dir);
   }
   const okNos = [], ngNos = [];
   let where = "";
@@ -6066,10 +6299,11 @@ async function saveAllDrafts(mode){
       try{
         /* ★1件ずつの保存と同じように、書き潰す前にいまの中身を読んで融合する★
            ここを通さないと、台帳から開いただけの戸別で PCの写真が0枚になる。 */
-        const cf0 = await readExistingCaseFiles(dir, f.name, f.no);
+        const cf0 = await readCaseFilesForWrite(dir, f.name, f.no);
         f.cf = cf0; f.keys = [];
         if(cf0.primary){
-          const mg0 = mergeIntoState(f.state, cf0.primary, { model:f.model, base:fileBaseGet(f.model),
+          const base0 = baseForWrite(fileBaseGet(f.model), cf0);   // 物件のすぐ下にも同じ戸別があったとき
+          const mg0 = mergeIntoState(f.state, cf0.primary, { model:f.model, base:base0,
                                                              fname:f.name, mode:"write", others:cf0.others, askable:false });
           if(mg0.stop){ console.warn("まとめて保存 別の戸別のファイル", f.name, mg0.reason); ngNos.push(f.no); continue; }
           f.keys = mg0.changed;
@@ -6103,7 +6337,7 @@ async function saveAllDrafts(mode){
         okNos.push(f);
       }catch(e){ console.warn("まとめて保存 失敗", f.name, e); ngNos.push(f.no); }
     }
-    where = "「" + (dir.name || "選んだフォルダ") + "」";
+    where = "「" + (saveDirPlace(dir) || "選んだフォルダ") + "」";
     if(keptAll.length){
       await uiAlert("ファイルに入っていた中身を残しました（" + keptAll.length + "件）。\n\n"
         + keptAll.slice(0, 3).join("\n")
@@ -6177,7 +6411,7 @@ async function saveAllDrafts(mode){
       await uiAlert((shared ? "共有で渡しました： " : "ダウンロードに入れました： ") + okNos.length + " 件\n\n"
         + "中身はきちんと入っています（消えていません）。\n\n"
         + (shared
-            ? ("渡した先が、PCで読み込むフォルダなら\nそのままPCで読めます。\n"
+            ? (saveShareWhere() + "\nそのままPCで読めます。\n"
                + "ちがう場所へ渡したときは、そのフォルダへ移してください。"
                + shareRenameNote(sharedAs))
             : ("この端末の「ダウンロード」に入りました。\n"
@@ -6378,6 +6612,7 @@ function pcGuardSig(row){
      そちらの道は何も変えていない。
    ============================================================ */
 let _caseDirHit = null;          // 前に当たったフォルダ（次もまずここから探す）
+let _caseDirHitRoot = null;      // そのとき探した根元（物件）。根元が変わったら _caseDirHit は見ない
 /* 掴んでいるフォルダが、いま読めるか。★許可は聞き直さない★
    聞き直すと、押してもいないのに窓が出る。 */
 async function caseDirReady(){
@@ -6400,21 +6635,33 @@ async function caseFileFromDir(dir, no){
     if(!cf || !cf.primary) return null;
     return { data: cf.primary, name: cf.pick || fname, dir: d, count: (cf.names || []).length };
   };
-  if(_caseDirHit && _caseDirHit !== dir){
+  /* 探す根元＝物件のフォルダ。リストを覚えているときはその上、そうでなければ覚えているフォルダ */
+  const root = saveDirParentOf(dir) || dir;
+  if(_caseDirHit && _caseDirHitRoot === root && _caseDirHit !== dir){
     const h0 = await look(_caseDirHit);
     if(h0) return h0;
   }
   const h1 = await look(dir);
-  if(h1){ _caseDirHit = dir; return h1; }
+  if(h1){ _caseDirHit = dir; _caseDirHitRoot = root; return h1; }
+  /* 前の版で物件のすぐ下にできた写し。読むだけで、覚え直さない（次もリストを先に見る） */
+  if(root !== dir){
+    const h3 = await look(root);
+    if(h3){ h3.fromRoot = true; return h3; }
+  }
+  /* ★親を覚えているのに、根元が物件と確かめられない（工事フォルダなど）ときは、子を見ない★
+     見ると兄弟の別の物件のファイルを読み、そのあとの保存で別の物件の戸別をここへ書いてしまう。 */
+  if(root !== dir && !(await saveDirRootIsProj(root, dir))) return null;
+  const list = dir;                                  // 覚えているフォルダ（もう見た）
+  dir = root;                                        // ここからは物件のフォルダのすぐ下を見る
   let looked = 0;
   try{
     for await (const [name, h] of dir.entries()){
       if(!h || h.kind !== "directory") continue;
-      if(/^_/.test(name)) continue;                  // 控えなどの作業用フォルダは見ない
-      if(h === _caseDirHit) continue;                // もう見た
+      if(saveDirSkipChild(name)) continue;           // 控えなどの作業用・写真のフォルダは見ない
+      if(h === list || h === _caseDirHit) continue;  // もう見た
       if(++looked > 20) break;
       const h2 = await look(h);
-      if(h2){ _caseDirHit = h; return h2; }
+      if(h2){ _caseDirHit = h; _caseDirHitRoot = root; return h2; }
     }
   }catch(_){}
   return null;
@@ -6432,6 +6679,7 @@ async function pcGuardAutoLoad(dir){
   if(!no) return false;
   if(!dir) dir = await caseDirReady();
   if(!dir) return false;
+  dir = await saveDirSettle(dir);    // 前の版で物件のフォルダを覚えていたら、中の「リスト」へ寄せる
   let hit = null;
   try{ hit = await caseFileFromDir(dir, no); }
   catch(e){ console.warn("PCのフォルダを見られませんでした", e); }
@@ -6468,6 +6716,28 @@ async function pcGuardAutoLoad(dir){
      render() の中で updateHeader() と renderPcGuard() も走る。 */
   try{ render(); }catch(e){ console.warn("描き直しに失敗", e); try{ renderPcGuard(); }catch(_){} }
   try{ saveDraftFromLedger(); }catch(_){}   // 台帳から写した分は「現場で入力した」にしない
+  /* ★物件のフォルダのまま覚えていて、中のフォルダで見つかったときは、そちらを覚え直す★
+     （手がかりが弱くて「リスト」へ寄せられなかった場合の補い。窓は出さない）
+     リストを覚えているときに ほかのフォルダで当たった場合は、読むだけで覚え直さない。 */
+  /* ★覚え直すのは、覚えているフォルダが「リスト」そのものでなく、直下に戸別が1件も無いときだけ★
+       「リスト」を直接覚えている端末で、中の「完了」などで当たったときに、保存先が黙ってそこへ移ると、
+       同じ戸別が2か所にできていく。
+     ★当たった中のフォルダがじつは物件（中に「リスト」がある）なら、そのリストまで降りる★
+       降りずに物件を覚えると、物件のすぐ下へ書き、二度とリストへ寄らない。降りられなければ覚え直さない。 */
+  try{
+    if(hit.dir && hit.dir !== dir && !hit.fromRoot && dir === _saveDir && !saveDirParentOf(dir)
+       && !saveDirNamedList(dir)
+       && (await saveDirCountCases(dir, 1)) === 0
+       && (await saveDirOk(hit.dir, false))){
+      const t = await saveDirInto(hit.dir, dir);
+      if(t){
+        await saveDirSet(t.dir, t.parent);
+        try{ renderSaveBar(); }catch(_){}
+        try{ renderPcGuard(); }catch(_){}
+        toast("保存先を「" + saveDirPlace() + "」にそろえました");
+      }
+    }
+  }catch(e){ console.warn("保存先を覚え直せませんでした", e); }
   return true;
 }
 /* 帯の「📁 PCのフォルダから読み込む」。
@@ -6495,7 +6765,7 @@ async function pcGuardDirLoad(){
       await uiAlert("そのフォルダへ書き込む許可が取れませんでした。\n\nもう一度お試しください。");
       return;
     }
-    await saveDirSet(dir);                          // 保存の行き先も、ここで選んだ所にそろえる
+    dir = await saveDirAdopt(dir, { ask:false });   // 保存の行き先も、ここで選んだ所（物件なら中の「リスト」）にそろえる
     try{ renderSaveBar(); }catch(_){}
   }
   toast("PCのフォルダを見ています…");
@@ -6503,7 +6773,7 @@ async function pcGuardDirLoad(){
     toast("PCのファイルを読み込みました。このまま入力できます");
     return;
   }
-  await uiAlert("「" + (dir.name || "選んだフォルダ") + "」の中に、この戸別のファイルが見つかりませんでした。\n\n"
+  await uiAlert("「" + (saveDirPlace() || dir.name || "選んだフォルダ") + "」の中に、この戸別のファイルが見つかりませんでした。\n\n"
     + (String((M && M.chosho_mgmt_no) || "").trim() || "管理番号") + ".json\n\n"
     + "別の物件のフォルダを覚えているのかもしれません。\n"
     + "上の帯の 📁（フォルダの名前が出ているところ）から選び直すか、\n"
@@ -6547,7 +6817,7 @@ function renderPcGuard(){
     + '<div class="pcg-btns">'
     +   (canDir
          ? ('<button type="button" id="pcg-dir">📁 PCのフォルダから読み込む'
-            + (_saveDir ? ("（" + esc(_saveDir.name || "覚えているフォルダ") + "）") : "（フォルダを選びます）")
+            + (_saveDir ? ("（" + esc(saveDirPlace() || "覚えているフォルダ") + "）") : "（フォルダを選びます）")
             + '</button>')
          : "")
     +   '<button type="button" id="pcg-load"' + (canDir ? ' class="alt"' : '') + '>'
@@ -6909,12 +7179,16 @@ function isNothingNewHere(m){
 /* ============================================================
    同じ戸別が別の名前で入っているファイル（管理番号.json.txt ／ 管理番号_数字.json）
    ============================================================ */
+/* フォルダの名前一覧の控え。リストとその上（物件）を交互に読むので、いくつか持つ（最大4つ・2分） */
 let _cfIdx = null;
 async function caseFileIndex(dir){
-  if(_cfIdx && _cfIdx.dir === dir && (Date.now() - _cfIdx.at) < 120000) return _cfIdx.map;
+  const now = Date.now();
+  const list = Array.isArray(_cfIdx) ? _cfIdx.filter(x => x && (now - x.at) < 120000) : [];
+  const got = list.find(x => x.dir === dir);
+  if(got) return got.map;
   const map = [];
   try{ for await (const [name, h] of dir.entries()){ if(h && h.kind === "file") map.push(name); } }catch(_){}
-  _cfIdx = { dir: dir, at: Date.now(), map: map };
+  _cfIdx = [{ dir: dir, at: Date.now(), map: map }].concat(list).slice(0, 4);
   return map;
 }
 function caseNameRe(no){
@@ -6953,6 +7227,40 @@ async function readExistingCaseFiles(dir, fname, no){
   out.primary = pick.data;
   out.others = got.filter(g => g !== pick).map(g => g.data);
   return out;
+}
+/* ★書く前の読み合わせ（リストへ書くとき）★
+   リストにあれば、リストが必ず土台。物件のすぐ下（前の版でできた写し）にもあれば、
+   写真の和集合と「リストに無い欄を埋める」ためだけに others へ足す。
+   リストに無く、すぐ下にだけあるときは、すぐ下の写しを土台にする（書く先はリスト）。
+   すぐ下のファイルは読むだけ。消さない。上のフォルダの許可は聞き直さない。 */
+async function readCaseFilesForWrite(dir, fname, no){
+  const cf = await readExistingCaseFiles(dir, fname, no);
+  cf.rootNames = [];
+  const par = saveDirParentOf(dir);
+  if(!par || !draftNoKey(no)) return cf;
+  if(!(await saveDirOk(par, false))) return cf;
+  let cp = null; try{ cp = await readExistingCaseFiles(par, fname, no); }catch(_){ return cf; }
+  if(!cp || !cp.primary) return cf;
+  cf.rootNames = cp.names.slice();
+  if(!cf.primary){ cf.primary = cp.primary; cf.pick = cp.pick; cf.others = cf.others.concat(cp.others); }
+  else { cf.others = cf.others.concat([cp.primary], cp.others); cf.baseStale = true; }
+  return cf;
+}
+/* ★リストとすぐ下の両方にあるときの控え★
+   控えがすぐ下の写しから取られていると、「リスト≠控え」の欄を「PCが直した」と読み違えて、
+   現場の入力を黙って古い値へ戻してしまう。控えがリストの中身と合っていればそのまま使い、
+   合わなければ値の見比べをやめた写しを渡す（写真の歯止めは残す）。
+   一度リストへ書けば控えはリストの中身になるので、次の保存からは見比べに戻る。 */
+function baseFitsFile(b, fileObj){
+  if(!b || !fileObj) return false;
+  let st; try{ st = fileBaseStateOf(fileObj); }catch(_){ return false; }
+  return Object.keys(b.state).concat(Object.keys(b.sig))
+    .every(k => MERGE_NEVER.has(k) || baseSame(b, k, st[k]));
+}
+function baseForWrite(b, cf){
+  if(!b || !cf || !cf.baseStale || b.stale) return b;
+  if(baseFitsFile(b, cf.primary)) return b;
+  return Object.assign({}, b, { stale:true });
 }
 
 /* ============================================================
@@ -7482,6 +7790,7 @@ async function flowShareDirFiles(){
   let dir = await saveDirGet();
   if(!dir || !dir.values) return null;
   if(!(await saveDirOk(dir, true))) return null;
+  dir = await saveDirSettle(dir);    // 前の版で物件のフォルダを覚えていたら、中の「リスト」へ寄せる
   const out = [];
   try{
     for await (const h of dir.values()){
@@ -7490,6 +7799,18 @@ async function flowShareDirFiles(){
       out.push({ name: h.name, handle: h });
     }
   }catch(e){ console.warn("保存先フォルダを読めませんでした", e); return null; }
+  /* 物件のすぐ下にも入っていることがある（スマホで前の案内どおりに入れた分）。聞き直さずに読めるときだけ足す。
+     受付台帳などは、読んだあとで戸別でないものとして外れる。 */
+  const par = saveDirParentOf(dir);
+  if(par && typeof par.values === "function"){
+    try{
+      if(await saveDirOk(par, false)){
+        for await (const h of par.values()){
+          if(h && h.kind === "file" && /\.json(\.txt)?$/i.test(h.name)) out.push({ name: h.name, handle: h });
+        }
+      }
+    }catch(e){ console.warn("物件のフォルダを読めませんでした", e); }
+  }
   return out;
 }
 /* 「📥 他の端末の保存を読み込む」の入口。
@@ -9121,8 +9442,9 @@ async function spSaveFile(rec){
   /* 戸別の「保存」と同じ。許可が切れているときは聞き直さずに落として、あとで伝える。 */
   let dirLapsed = false;
   if(dir && !(await saveDirOk(dir, false))){ dir = null; dirLapsed = true; }
+  if(dir) dir = await saveDirSettle(dir);    // 前の版で物件のフォルダを覚えていたら、中の「リスト」へ寄せる
   const lapsedLine = () => dirLapsed
-    ? ("\n\n（覚えている保存先" + (saveDirName() ? ("フォルダ「" + saveDirName() + "」") : "フォルダ")
+    ? ("\n\n（覚えている保存先" + (saveDirPlace() ? ("フォルダ「" + saveDirPlace() + "」") : "フォルダ")
        + "へ書く許可が切れていました。\n"
        + "保存バーの 📁 のボタン（フォルダの名前が出ているところ）を押して\n"
        + "選び直すと、次からはそのまま入ります）")
@@ -9141,14 +9463,14 @@ async function spSaveFile(rec){
            控えないと、次に保存したときに別の名前のファイルがもう1つできてしまう。 */
         try{ await spPersist(rec, false); }catch(_){}
         return { ok:false, warn:true, title:"⚠ 保存できていないかもしれません",
-          msg: "「" + (dir.name || "選んだフォルダ") + "」の中\n" + fname + "\n" + sizeTxt + "\n\n"
+          msg: "「" + (saveDirPlace(dir) || "選んだフォルダ") + "」の中\n" + fname + "\n" + sizeTxt + "\n\n"
              + saveVerifyHead(bad) + bad
              + "\n\nもう一度「保存」を押してください。" };
       }
       rec.fileSavedAt = Date.now(); rec.fileRev = rec.rev | 0;
       await spPersist(rec, false);
       return { ok:true, title:"保存しました",
-        msg: "「" + (dir.name || "選んだフォルダ") + "」の中\n" + fname + "\n" + sizeTxt, warn:false };
+        msg: "「" + (saveDirPlace(dir) || "選んだフォルダ") + "」の中\n" + fname + "\n" + sizeTxt, warn:false };
     }catch(e){ console.warn("特別記録：覚えているフォルダへ書けませんでした", e); }
   }
   // ② 保存先を選ぶ
@@ -9173,7 +9495,8 @@ async function spSaveFile(rec){
       await spPersist(rec, false);
       return { ok:true, title:"共有で渡しました", msg:(sr.name[0] || fname) + "\n" + sizeTxt
         + "\n\n中身はきちんと入っています（消えていません）。\n\n"
-        + "渡した先が、PCで読み込むフォルダなら\nそのままPCで読めます。"
+        + saveShareWhere() + "\nそのままPCで読めます。"
+        + saveHintLine()
         + shareRenameNote(sr.as) + lapsedLine(), warn:true };
     }
   }
@@ -9187,7 +9510,8 @@ async function spSaveFile(rec){
   return { ok:true, title:"ダウンロードに入れました", msg: fname + "\n" + sizeTxt
     + "\n\n中身はきちんと入っています（消えていません）。\n\n"
     + "この端末の「ダウンロード」に入りました。\n"
-    + "PCで読み込むフォルダとちがう場合は、\nそのフォルダへ移してください。" + lapsedLine(), warn:true };
+    + "PCで読み込むフォルダとちがう場合は、\nそのフォルダへ移してください。"
+    + saveHintLine() + lapsedLine(), warn:true };
 }
 function spStale(rec){ return !rec.fileSavedAt || (rec.rev | 0) > (rec.fileRev | 0); }
 /* ---- 画面 ---- */
@@ -9366,6 +9690,8 @@ function renderSpecialEdit(host){
 /* 受付台帳の行をこの端末に保存する。件数を返す。
    受付台帳ファイル単体からも、現場用（ひとまとめ）からも同じ道を通す。 */
 function receptionSaveRows(src){
+  // 前の物件名（入れる場所を自動で決めた値を、物件が変わったときに追いかけるため）
+  let oldProj = ""; try{ const d0 = getReceptionData(); oldProj = String((d0 && d0.project) || ""); }catch(_){}
   const rows = (src && src.rows) || [];
   const norm = rows.map(x=>({
     mgmt_no:toHalfWidthAn(x.mgmt_no||x.chosho_mgmt_no||"").trim(),   // 突き合わせは半角で
@@ -9419,6 +9745,8 @@ function receptionSaveRows(src){
   _rcLastKept = rcPersist({ type:"antenna_reception_ledger",
     importedAt:Date.now(), exportedAt:(src&&src.exportedAt)||"", project:(src&&src.project)||"",
     mainVersion:(src&&src.appVersion)||"", rows:norm });
+  // 入れる場所を「物件/リスト」に決める（押す回数0回。自分で選んだ名前には触らない）
+  try{ if(saveHintAuto(src && src.project, oldProj)) renderSaveBar(); }catch(_){}
   try{ renderReceptionSort(); }catch(_){}
   try{ renderReceptionList(document.getElementById("reception-search").value||""); }catch(_){}
   try{ renderAppVer(); }catch(_){}
@@ -9463,6 +9791,7 @@ document.getElementById("reception-file").addEventListener("change",e=>{
       await uiAlert((kept ? "✅ 受付台帳を取り込みました（" : "受付台帳を読み込みました（")+n+"件）"
         + (kept ? "" : "\n\n" + RC_KEEP_NG + "\n")
         + (project ? ("\n物件："+project) : "")
+        + ((saveHintWhere() && !window.showDirectoryPicker && !saveDirName()) ? ("\n入れる場所："+saveHintWhere()) : "")
         + (when ? ("\nPCで書き出した日時："+when) : "")
         + (gotMap ? ("\n地図も取り込みました（建物 "+gotMap+"件）") : "")
         + "\n\n"
