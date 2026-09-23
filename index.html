@@ -6330,7 +6330,7 @@ async function saveAllDrafts(mode){
   const okNos = [], ngNos = [];
   let where = "";
   if(dir){
-    const keptAll = [], conflictNos = [], photoNg = [], buildNos = [];
+    const keptAll = [], conflictNos = [], photoNg = [], buildNos = [], unsureNos = [];
     try{ await caseFileIndex(dir); }catch(_){}     // フォルダの名前一覧は1回だけ読む
     for(const f of files){
       try{
@@ -6339,10 +6339,18 @@ async function saveAllDrafts(mode){
         const cf0 = await readCaseFilesForWrite(dir, f.name, f.no);
         f.cf = cf0; f.keys = [];
         if(cf0.primary){
-          const base0 = baseForWrite(fileBaseGet(f.model), cf0);   // 物件のすぐ下にも同じ戸別があったとき
+          const b0 = fileBaseGet(f.model);
+          const base0 = baseForWrite(b0, cf0);   // 物件のすぐ下にも同じ戸別があったとき
           const mg0 = mergeIntoState(f.state, cf0.primary, { model:f.model, base:base0,
                                                              fname:f.name, mode:"write", others:cf0.others, askable:false });
           if(mg0.stop){ console.warn("まとめて保存 別の戸別のファイル", f.name, mg0.reason); ngNos.push(f.no); continue; }
+          /* ★控えの出どころが確かでない（物件のすぐ下の写しから取ったかもしれない）のに、この端末の値で書こうとしている★
+             1件ずつの保存なら1回聞くところ。まとめて保存は聞けないので、黙って書くと
+             PCがあとでリストで直した値（工事日・備考など）が、この端末の古い値へ戻る。
+             書かずに残す（下書きはそのまま＝写真も入力も減らない）。1件ずつ開いて保存してもらう。 */
+          if(base0 !== b0 && !baseUseValues(base0) && (mg0.mine.length || mg0.conflicts.length)){
+            unsureNos.push(f.no); ngNos.push(f.no); continue;
+          }
           f.keys = mg0.changed;
           f.conflicts = mg0.conflicts;
           if(mg0.kept.length || mg0.changed.length){
@@ -6386,6 +6394,13 @@ async function saveAllDrafts(mode){
         + conflictNos.slice(0, 3).join("\n")
         + (conflictNos.length > 3 ? ("\nほか " + (conflictNos.length - 3) + "件") : "")
         + "\n\nまとめて保存では PCの内容を残しました。\n直したいときは、その戸別を1件ずつ開いて保存してください。");
+    }
+    if(unsureNos.length){
+      await uiAlert("PCのファイルと この端末の、どちらの値が新しいか分からない戸別が " + unsureNos.length + " 件あります。\n\n"
+        + unsureNos.slice(0, 5).join("・")
+        + (unsureNos.length > 5 ? ("\nほか " + (unsureNos.length - 5) + "件") : "")
+        + "\n\nまとめて保存では、この戸別は書いていません（この端末の入力と写真は、そのまま残っています）。\n"
+        + "その戸別を1件ずつ開いて「保存」を押してください。保存の前に確かめの画面が出ます。");
     }
     if(buildNos.length){
       await uiAlert("PCのファイルに下見の内容が入っている戸別が " + buildNos.length + " 件あります。\n\n"
