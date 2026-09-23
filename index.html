@@ -4502,7 +4502,7 @@ async function saveJsonRun(){
         else if(mg.buildAsk) mergedNote += "\n（材料はPCのファイルの内容を残しました）";
         /* 控えがあるのに使えない（すぐ下の写しもある）ときは、欄ごとの決まりで現場の値が残る所
            （TVの台数・測定値など）も聞く。数え漏らすと、PCがリストで直した値が黙って戻る。 */
-        const chg = (cf.rootPrimary && fileBaseGet(M) && !baseUseValues(base)) ? mergeChangesFile(state, primary) : [];
+        const chg = (fileBaseGet(M) && !baseUseValues(base)) ? mergeChangesFile(state, primary) : [];
         if(!baseUseValues(base) && (mg.mine.length || mg.conflicts.length || chg.length)){
           /* 控えが無い＝「PCが直したのか、現場が直したのか」を見分けられない。1回だけ確かめる。 */
           const what = Array.from(new Set(mg.mine.concat(mg.conflicts.map(c => c.label), chg))).join("・");
@@ -4596,7 +4596,9 @@ async function saveJsonRun(){
                選んだのはリストの方かもしれない。見比べると、PCがリストで直していない欄まで
                「PCが直した」と読んで、現場の入力を黙って戻す。見比べをやめて、1回だけ聞く。 */
             const b0 = fileBaseGet(M);
-            const base = (b0 && !b0.stale && b0.from === "root" && !baseFitsFile(b0, oj))
+            /* 印 root＝すぐ下の写しから取った／印の欄そのものが無い＝前の版の控え（どこから取ったか分からない） */
+            const b0Unsure = !!(b0 && (b0.from === "root" || !("from" in b0)));
+            const base = (b0 && !b0.stale && b0Unsure && !baseFitsFile(b0, oj))
               ? Object.assign({}, b0, { stale:true }) : b0;
             const mgp = mergeIntoState(state, oj, { model:M, base:base, fname:(handle.name || fname),
                                                     mode:"write", others:[], askable:true });
@@ -4607,8 +4609,10 @@ async function saveJsonRun(){
             if(mgp.conflicts.length) await mergeApplyAnswers(state, mgp.conflicts);
             if(await mergeApplyBuild(state, mgp)) pickedNote += "\n（材料はこの端末の内容にしました）";
             else if(mgp.buildAsk) pickedNote += "\n（材料はPCのファイルの内容を残しました）";
-            if(base !== b0){
-              const what = Array.from(new Set(mgp.mine.concat(mgp.conflicts.map(c => c.label), mergeChangesFile(state, oj)))).join("・");
+            /* ★控えが無い・使えないときは、覚えているフォルダの道と同じく1回だけ確かめる★ */
+            if(!baseUseValues(base)){
+              const what = Array.from(new Set(mgp.mine.concat(mgp.conflicts.map(c => c.label),
+                                                             b0 ? mergeChangesFile(state, oj) : []))).join("・");
               if(what && !(await uiConfirm("PCのファイルに中身が入っています。\n\n" + what + "\n\n"
                   + "このまま保存すると、上のものはこの端末の内容に置き換わります。\n"
                   + "（📷 写真は消えません。両方まとめて残ります）\n\n"
@@ -6369,7 +6373,7 @@ async function saveAllDrafts(mode){
              PCがあとでリストで直した値（工事日・備考・TVの台数・測定値など）が、この端末の古い値へ戻る。
              ファイルの値が1つでも変わる／この端末の材料を捨てることになるなら、書かずに残す
              （下書きはそのまま＝写真も入力も減らない。渡した扱いにもしない）。1件ずつ開いて保存してもらう。 */
-          if(cf0.rootPrimary && b0 && !baseUseValues(base0)
+          if(b0 && !baseUseValues(base0)
              && (mergeChangesFile(f.state, cf0.primary).length || mergeBuildDrops(f.state, mg0))){
             unsureNos.push(f.no); continue;
           }
@@ -7310,8 +7314,11 @@ async function readCaseFilesForWrite(dir, fname, no){
   cf.rootNames = [];
   const par = saveDirParentOf(dir);
   if(!par || !draftNoKey(no)) return cf;
-  if(!(await saveDirOk(par, false))) return cf;
-  let cp = null; try{ cp = await readExistingCaseFiles(par, fname, no); }catch(_){ return cf; }
+  /* ★物件（親）を読めないときは、すぐ下に写しがあるかもしれない（rootUnread）★
+     ブラウザを開き直したあとは、リストの許可だけ戻って物件の許可が無いことがある（許可は聞き直さない）。
+     黙って「写しは無い」とすると、すぐ下の写しから取った控えのまま見比べ、現場の入力を黙って戻す。 */
+  if(!(await saveDirOk(par, false))){ cf.rootUnread = true; return cf; }
+  let cp = null; try{ cp = await readExistingCaseFiles(par, fname, no); }catch(_){ cf.rootUnread = true; return cf; }
   if(!cp || !cp.primary) return cf;
   cf.rootNames = cp.names.slice();
   if(!cf.primary){ cf.primary = cp.primary; cf.pick = cp.pick; cf.others = cf.others.concat(cp.others); }
@@ -7341,7 +7348,8 @@ function baseFitsFile(b, fileObj){
     .every(k => MERGE_NEVER.has(k) || baseSame(b, k, st[k]));
 }
 function baseForWrite(b, cf){
-  if(!b || !cf || !cf.rootPrimary || b.stale) return b;
+  if(!b || !cf || b.stale) return b;
+  if(!cf.rootPrimary && !cf.rootUnread) return b;       // すぐ下の写しが無いと分かっている
   if(baseFitsFile(b, cf.primary)) return b;              // 控え＝土台の中身
   if(b.from === "list" && cf.primary !== cf.rootPrimary) return b;   // 土台はリスト、控えもリストから（PCがリストを直した）
   return Object.assign({}, b, { stale:true });           // 出どころが確かでない → 値の見比べをやめる（1件保存では1回聞く）
@@ -7566,7 +7574,7 @@ function mergeIntoState(state, old, opt){
 
   /* 1) 写真（いちばん先に・必ず・例外なし） ----------------------------- */
   const before = ((state.chosho_photos) || []).filter(p => p && p.dataUri).length;
-  state.chosho_photos = mergePhotosUnion(state.chosho_photos, old.chosho_photos, base);
+  state.chosho_photos = mergePhotosUnion(state.chosho_photos, old.chosho_photos, useB ? base : null);   // 使えない控えで名前・印を見比べない
   others.forEach(o => { state.chosho_photos = mergePhotosUnion(state.chosho_photos, o && o.chosho_photos, base, { addOnly:true }); });
   const after = ((state.chosho_photos) || []).filter(p => p && p.dataUri).length;
   out.photosAdded = Math.max(0, after - before);
