@@ -4500,9 +4500,12 @@ async function saveJsonRun(){
         if(mg.conflicts.length) await mergeApplyAnswers(state, mg.conflicts);
         if(await mergeApplyBuild(state, mg)) mergedNote += "\n（材料はこの端末の内容にしました）";
         else if(mg.buildAsk) mergedNote += "\n（材料はPCのファイルの内容を残しました）";
-        if(!baseUseValues(base) && (mg.mine.length || mg.conflicts.length)){
+        /* 控えがあるのに使えない（すぐ下の写しもある）ときは、欄ごとの決まりで現場の値が残る所
+           （TVの台数・測定値など）も聞く。数え漏らすと、PCがリストで直した値が黙って戻る。 */
+        const chg = (cf.rootPrimary && fileBaseGet(M) && !baseUseValues(base)) ? mergeChangesFile(state, primary) : [];
+        if(!baseUseValues(base) && (mg.mine.length || mg.conflicts.length || chg.length)){
           /* 控えが無い＝「PCが直したのか、現場が直したのか」を見分けられない。1回だけ確かめる。 */
-          const what = Array.from(new Set(mg.mine.concat(mg.conflicts.map(c => c.label)))).join("・");
+          const what = Array.from(new Set(mg.mine.concat(mg.conflicts.map(c => c.label), chg))).join("・");
           if(!(await uiConfirm("PCのファイルに中身が入っています。\n\n" + what + "\n\n"
               + "このまま保存すると、上のものはこの端末の内容に置き換わります。\n"
               + "（📷 写真は消えません。両方まとめて残ります）\n\n"
@@ -4589,7 +4592,12 @@ async function saveJsonRun(){
           const oj = JSON.parse(txt);
           if(flowShareIsCase(oj)){
             pickedOld = oj;
-            const base = fileBaseGet(M);
+            /* ★控えが物件のすぐ下の写しから取ったもので、選んだファイルの中身と合わない★
+               選んだのはリストの方かもしれない。見比べると、PCがリストで直していない欄まで
+               「PCが直した」と読んで、現場の入力を黙って戻す。見比べをやめて、1回だけ聞く。 */
+            const b0 = fileBaseGet(M);
+            const base = (b0 && !b0.stale && b0.from === "root" && !baseFitsFile(b0, oj))
+              ? Object.assign({}, b0, { stale:true }) : b0;
             const mgp = mergeIntoState(state, oj, { model:M, base:base, fname:(handle.name || fname),
                                                     mode:"write", others:[], askable:true });
             if(mgp.stop){
@@ -4599,6 +4607,14 @@ async function saveJsonRun(){
             if(mgp.conflicts.length) await mergeApplyAnswers(state, mgp.conflicts);
             if(await mergeApplyBuild(state, mgp)) pickedNote += "\n（材料はこの端末の内容にしました）";
             else if(mgp.buildAsk) pickedNote += "\n（材料はPCのファイルの内容を残しました）";
+            if(base !== b0){
+              const what = Array.from(new Set(mgp.mine.concat(mgp.conflicts.map(c => c.label), mergeChangesFile(state, oj)))).join("・");
+              if(what && !(await uiConfirm("PCのファイルに中身が入っています。\n\n" + what + "\n\n"
+                  + "このまま保存すると、上のものはこの端末の内容に置き換わります。\n"
+                  + "（📷 写真は消えません。両方まとめて残ります）\n\n"
+                  + "先に「📂 戸別ファイルを読み込んで編集する」で読み込むと、\nPCの中身を残したまま続きを入力できます。\n\n"
+                  + "それでも、このまま保存しますか？"))) return false;
+            }
             pickedKeys = mgp.changed;
             if(mgp.kept.length) pickedNote += "\n（ファイルに入っていた " + mgp.kept.join("・") + " を残しました）";
             const lost = photoLossVsFiles(state, [oj]);
@@ -5724,6 +5740,10 @@ async function saveDirAdopt(picked, opt){
     f = null;
   }
   if(f){ await saveDirSet(f.dir, picked); return f.dir; }
+  /* ★覚えている「リスト」をもう一度選んだときは、親（物件）も覚えたままにする★
+     親を忘れると、物件のすぐ下の古い写しを読まなくなり、保存バーの「物件 ＞」も消える。 */
+  const par0 = saveDirParentOf(_saveDir);
+  if(par0 && (await saveDirSame(picked, _saveDir))){ await saveDirSet(picked, par0); return picked; }
   await saveDirSet(picked, null); return picked;
 }
 /* ★中のフォルダ c を覚えるときの行き先★（弱い手がかりで「はい」と答えて中へ入る所）
@@ -6281,7 +6301,7 @@ async function saveAllDrafts(mode){
   const pickTxt = window.showDirectoryPicker
     ? ("\n\nこのあと【保存先のフォルダを選ぶ画面】が出ます。\n"
        + "PCが読み込むフォルダを選んでください。"
-       + (saveDirName() ? ("\n（前回は「" + saveDirName() + "」でした。違う所にしたい時はここで選び直せます）") : ""))
+       + (saveDirName() ? ("\n（前回は「" + (saveDirPlace() || saveDirName()) + "」でした。違う所にしたい時はここで選び直せます）") : ""))
     : "";
   const nothingTxt = skippedNothing.length
     ? ("\n\n※ この端末で何も入力していない戸別 " + skippedNothing.length + " 件は、PCのファイルを書き替えません（写真も工事日も残ります）")
@@ -6328,7 +6348,7 @@ async function saveAllDrafts(mode){
     if(dir) dir = await saveDirSettle(dir);
   }
   const okNos = [], ngNos = [];
-  let where = "";
+  let where = "", heldN = 0;
   if(dir){
     const keptAll = [], conflictNos = [], photoNg = [], buildNos = [], unsureNos = [];
     try{ await caseFileIndex(dir); }catch(_){}     // フォルダの名前一覧は1回だけ読む
@@ -6344,13 +6364,19 @@ async function saveAllDrafts(mode){
           const mg0 = mergeIntoState(f.state, cf0.primary, { model:f.model, base:base0,
                                                              fname:f.name, mode:"write", others:cf0.others, askable:false });
           if(mg0.stop){ console.warn("まとめて保存 別の戸別のファイル", f.name, mg0.reason); ngNos.push(f.no); continue; }
-          /* ★控えの出どころが確かでない（物件のすぐ下の写しから取ったかもしれない）のに、この端末の値で書こうとしている★
+          /* ★控えがあるのに使えない（物件のすぐ下の写しから取ったかもしれない・前に読み返しが合わなかった）★
              1件ずつの保存なら1回聞くところ。まとめて保存は聞けないので、黙って書くと
-             PCがあとでリストで直した値（工事日・備考など）が、この端末の古い値へ戻る。
-             書かずに残す（下書きはそのまま＝写真も入力も減らない）。1件ずつ開いて保存してもらう。 */
-          if(base0 !== b0 && !baseUseValues(base0) && (mg0.mine.length || mg0.conflicts.length)){
-            unsureNos.push(f.no); ngNos.push(f.no); continue;
+             PCがあとでリストで直した値（工事日・備考・TVの台数・測定値など）が、この端末の古い値へ戻る。
+             ファイルの値が1つでも変わる／この端末の材料を捨てることになるなら、書かずに残す
+             （下書きはそのまま＝写真も入力も減らない。渡した扱いにもしない）。1件ずつ開いて保存してもらう。 */
+          if(cf0.rootPrimary && b0 && !baseUseValues(base0)
+             && (mergeChangesFile(f.state, cf0.primary).length || mergeBuildDrops(f.state, mg0))){
+            unsureNos.push(f.no); continue;
           }
+          /* ★材料をどちらにするか聞くところ★（ファイルにも下見の内容があり、この端末も材料を入れた）
+             まとめて保存では聞けない。PCの材料で書くと、書いたあと控えを取り直すので
+             この端末の材料は下書きからも消え、あとで1件ずつ保存しても戻せない。書かずに残す。 */
+          if(mergeBuildDrops(f.state, mg0)){ buildNos.push(f.no); continue; }
           f.keys = mg0.changed;
           f.conflicts = mg0.conflicts;
           if(mg0.kept.length || mg0.changed.length){
@@ -6358,7 +6384,6 @@ async function saveAllDrafts(mode){
             if(mg0.kept.length) keptAll.push((f.no || f.name) + "（" + mg0.kept.join("・") + "）");
           }
           if(mg0.conflicts.length) conflictNos.push(f.no + "（" + mg0.conflicts.map(c => c.label).join("・") + "）");
-          if(mg0.buildAsk && Object.keys(mg0.buildSwap).length) buildNos.push(f.no);
         }
         /* 写真が1枚でも減るなら書かない */
         {
@@ -6383,6 +6408,7 @@ async function saveAllDrafts(mode){
       }catch(e){ console.warn("まとめて保存 失敗", f.name, e); ngNos.push(f.no); }
     }
     where = "「" + (saveDirPlace(dir) || "選んだフォルダ") + "」";
+    heldN = unsureNos.length + buildNos.length;
     if(keptAll.length){
       await uiAlert("ファイルに入っていた中身を残しました（" + keptAll.length + "件）。\n\n"
         + keptAll.slice(0, 3).join("\n")
@@ -6400,14 +6426,15 @@ async function saveAllDrafts(mode){
         + unsureNos.slice(0, 5).join("・")
         + (unsureNos.length > 5 ? ("\nほか " + (unsureNos.length - 5) + "件") : "")
         + "\n\nまとめて保存では、この戸別は書いていません（この端末の入力と写真は、そのまま残っています）。\n"
-        + "その戸別を1件ずつ開いて「保存」を押してください。保存の前に確かめの画面が出ます。");
+        + "その戸別を1件ずつ開き、中身を確かめてから「保存」を押してください。");
     }
     if(buildNos.length){
-      await uiAlert("PCのファイルに下見の内容が入っている戸別が " + buildNos.length + " 件あります。\n\n"
+      await uiAlert("PCのファイルにも この端末にも、下見の内容（アンテナ・取付・ケーブルなど）が入っている戸別が "
+        + buildNos.length + " 件あります。\n\n"
         + buildNos.slice(0, 5).join("・")
         + (buildNos.length > 5 ? ("\nほか " + (buildNos.length - 5) + "件") : "")
-        + "\n\nまとめて保存では、材料（アンテナ・取付・ケーブルなど）はPCの内容を残しました。\n"
-        + "この端末の内容にしたいときは、その戸別を1件ずつ開いて「保存」を押してください。");
+        + "\n\nまとめて保存では、この戸別は書いていません（この端末の入力と写真は、そのまま残っています）。\n"
+        + "その戸別を1件ずつ開いて「保存」を押してください。材料をどちらにするか聞かれます。");
     }
     if(photoNg.length){
       await uiAlert("⚠ 写真が減りそうなので、" + photoNg.length + " 件は保存していません。\n\n"
@@ -6480,9 +6507,9 @@ async function saveAllDrafts(mode){
   renderReceptionList(sv ? sv.value : "");
   setBusy(false);
   const verb = isAll ? "に保存し直しました" : "に保存しました";
-  toast(ngNos.length
-    ? (okNos.length + "件を" + where + verb + "（" + ngNos.length + "件は失敗）")
-    : (okNos.length + "件を" + where + verb));
+  const tail = [ngNos.length ? (ngNos.length + "件は失敗") : "", heldN ? (heldN + "件は書かずに残しました") : ""]
+    .filter(Boolean).join("・");
+  toast(okNos.length + "件を" + where + verb + (tail ? ("（" + tail + "）") : ""));
 }
 
 /* ============================================================================
@@ -7319,6 +7346,30 @@ function baseForWrite(b, cf){
   if(b.from === "list" && cf.primary !== cf.rootPrimary) return b;   // 土台はリスト、控えもリストから（PCがリストを直した）
   return Object.assign({}, b, { stale:true });           // 出どころが確かでない → 値の見比べをやめる（1件保存では1回聞く）
 }
+/* ★書くと、いまファイルに入っている値が変わる欄★（写真・書いた時刻・管理番号などは見ない）。呼び名の並びを返す。
+   控えが使えないとき、融合は「現場が触ったか」を欄ごとの決まり（TVの台数・測定値・材料…）で推し量る。
+   その決まりのどれで現場の値が残っても、ファイルの値が変わるならここで拾える（1つずつ数え漏らさない）。
+   同じ形にそろえてから見比べる（数字と文字の違いなどで「変わる」と読まない）。そろえられなければ「変わる」扱い。 */
+function mergeChangesFile(state, old){
+  let a, b;
+  try{ a = fileBaseStateOf(state); b = fileBaseStateOf(old); }catch(_){ return ["PCのファイルの中身"]; }
+  const out = new Set();
+  Object.keys(b).forEach(k => {
+    if(MERGE_NEVER.has(k)) return;
+    if(JSON.stringify(a[k]) !== JSON.stringify(b[k])) out.add(mergeLabelOf(k));
+  });
+  return Array.from(out);
+}
+/* ★この端末で入れた材料を、PCの材料に替えて書くことになるか★（材料をどちらにするか聞くところ）
+   聞けない道（まとめて保存）でそのまま書くと、書いたあと控えを取り直すので、この端末の材料は下書きからも消える。 */
+function mergeBuildDrops(state, mg){
+  if(!mg || !mg.buildAsk) return false;
+  const keys = Object.keys(mg.buildSwap || {});
+  if(!keys.length) return false;
+  let a, b;
+  try{ a = fileBaseStateOf(Object.assign({}, state, mg.buildSwap)); b = fileBaseStateOf(state); }catch(_){ return true; }
+  return keys.some(k => JSON.stringify(a[k]) !== JSON.stringify(b[k]));
+}
 
 /* ============================================================
    写真の歯止め（どの道でも通す）
@@ -7378,7 +7429,7 @@ function photoMissingText(n){
    フォルダを掴める端末（PCの Chrome / Edge）だけで効く。スマホでは相手を読めない
    ので、上の帯と確かめが守りになる。
    ============================================================ */
-function mergePhotosUnion(mine, theirs, base){
+function mergePhotosUnion(mine, theirs, base, opt){
   const my = Array.isArray(mine) ? mine.slice() : [];
   const th = Array.isArray(theirs) ? theirs : [];
   const idOf = p => String((p && p.id) || ((p && p.dataUri) ? photoContentId(p.dataUri) : ""));
@@ -7391,6 +7442,10 @@ function mergePhotosUnion(mine, theirs, base){
                       if(p.chosho) o.chosho = true;
                       return o;
                     });
+  /* ★土台ではない別のファイル（物件のすぐ下の古い写し・同じ戸別の別名）からは、足りない写真を足すだけ★
+     名前と印には触らない。控えと見比べると、控えより古い写しの名前・印を「PCが直した」と読み違え、
+     保存するたびに正しい名前・印と古いものが入れ替わる（工事調書に載る写真が抜けたり戻ったりする）。 */
+  if(opt && opt.addOnly) return missing.concat(my);
   /* 同じ写真が両方にあるときの、名前と「工事調書に載せる」印の決め方。
      控えがあれば「現場が直したか／PCが直したか」を見分ける。
      控えが無ければ、PCの印は足す・こちらが名前を付けていなければPCの名前を使う。 */
@@ -7512,7 +7567,7 @@ function mergeIntoState(state, old, opt){
   /* 1) 写真（いちばん先に・必ず・例外なし） ----------------------------- */
   const before = ((state.chosho_photos) || []).filter(p => p && p.dataUri).length;
   state.chosho_photos = mergePhotosUnion(state.chosho_photos, old.chosho_photos, base);
-  others.forEach(o => { state.chosho_photos = mergePhotosUnion(state.chosho_photos, o && o.chosho_photos, base); });
+  others.forEach(o => { state.chosho_photos = mergePhotosUnion(state.chosho_photos, o && o.chosho_photos, base, { addOnly:true }); });
   const after = ((state.chosho_photos) || []).filter(p => p && p.dataUri).length;
   out.photosAdded = Math.max(0, after - before);
   if(after < before) throw new Error("融合で写真が減りました（" + before + "→" + after + "）");
