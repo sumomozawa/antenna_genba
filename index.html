@@ -4447,11 +4447,7 @@ async function saveJsonRun(){
   /* ここでは新しくフォルダを選ばせない。すでに覚えているフォルダがある時だけ使う。
      （ここで選ばせると、選ぶのをやめたときに保存そのものが消えてしまう。
        フォルダを覚えるのは「まとめて保存」の役目。） */
-  /* ★ここでは許可を「聞き直さない」（ask=false）★
-     聞き直すと、その窓で「押した直後」の権利を使い切ってしまい、
-     そのあとの「保存先を選ぶ」窓が開けなくなって、
-     ダウンロードへ落ちる。すでに許可があるフォルダだけ使う。
-     許可を取り直すのは「まとめて保存」の役目。 */
+  /* ★覚えているフォルダへ書く許可が切れていたら（ブラウザを開き直したあと）、下で1回だけ聞き直す★ */
   if(nothingNew){
     _lastSaveInfo = { title: "PCの中身をそのまま残しました",
       msg: "この戸別は、この端末でまだ何も入力していません。\n\n"
@@ -4461,18 +4457,14 @@ async function saveJsonRun(){
     return true;                        // 💾は付けない（渡すものが無い）
   }
   let dir = await saveDirGet();
-  /* 覚えているフォルダへ書く許可は、ブラウザを開き直すと切れることがある。
-     ここで聞き直すと「押した直後」の権利を使い切って窓が開かなくなるので、聞かずに落とす。
-     ただし黙って別の道へ行くと「いつもと違う画面が出た」理由が分からないので、あとで伝える。 */
-  let dirLapsed = false;
-  if(dir && !(await saveDirOk(dir, false))){ dir = null; dirLapsed = true; }
+  /* ★覚えているフォルダへ書く許可が切れていたら、ここで1回聞き直す★（押した直後なので聞ける）
+     聞かずに「保存先を選ぶ」画面へ回すと、そこで選んだ既にあるファイルは、ブラウザがページへ渡す前に
+     中身を空にする（Chrome の決まり）。読み合わせができないまま書くので、PCがあとで足した写真や
+     直した工事日が黙って消える。許可が取れれば①の道で、ファイルを読んでから書ける。
+     取れなかった（「許可しない」を選んだ）ときは、ほかの道へ回さずに止める（下の dirLapsed）。 */
+  let dirLapsed = false, dirErr = null;
+  if(dir && !(await saveDirOk(dir, true))){ dir = null; dirLapsed = true; }
   if(dir) dir = await saveDirSettle(dir);    // 前の版で物件のフォルダを覚えていたら、中の「リスト」へ寄せる
-  const lapsedLine = () => dirLapsed
-    ? ("\n\n（覚えている保存先" + (saveDirPlace() ? ("フォルダ「" + saveDirPlace() + "」") : "フォルダ")
-       + "へ書く許可が切れていました。\n"
-       + "保存バーの 📁 のボタン（フォルダの名前が出ているところ）を押して\n"
-       + "選び直すと、次からはそのまま入ります）")
-    : "";
   /* ★控え・写真IDの副本が知っている写真が、この端末に無いとき★
      ここではまだ止めない。「相手のファイルを読んで和集合にできたか」は道によって違うので、
      書き込みの直前ごとに photoGateStop() で止める（下の4か所）。
@@ -4491,9 +4483,10 @@ async function saveJsonRun(){
       if((cf.unreadable || []).indexOf(fname) >= 0){
         _lastSaveInfo = { title: "⚠ ファイルを読めないので、保存していません",
           msg: "「" + (saveDirPlace(dir) || "選んだフォルダ") + "」の中\n" + fname + "\n\n"
-             + "ファイルはありますが、いま読めませんでした（ほかのアプリが使っている最中かもしれません）。\n"
+             + "ファイルはありますが、いま読めませんでした（ほかのアプリが使っている最中か、ファイルが壊れているのかもしれません）。\n"
              + "読めないまま書くと、PCで入れた写真が消えることがあるので、書いていません。\n\n"
-             + "少し待ってから、もう一度「保存」を押してください。\n（この端末の入力と写真は、そのまま残っています）", warn: true };
+             + "少し待ってから、もう一度「保存」を押してください。\n"
+             + "何度押しても同じときは、PCでこのファイルを開いて確かめてください。\n（この端末の入力と写真は、そのまま残っています）", warn: true };
         toast("⚠ ファイルを読めないので保存していません");
         return true;                       // 💾は付けない＝「まとめて保存」に残す
       }
@@ -4531,7 +4524,21 @@ async function saveJsonRun(){
       }
       /* フォルダにその戸別のファイルが無い＝和集合にする相手がいない。
          控え・副本が知っている写真が手元に無いまま新しく書くと、その写真は消える。 */
-      if(!primary && !cf.others.length && await photoGateStop(M, state)) return true;
+      if(!primary && !cf.others.length && await photoGateStop(M, state)){
+        /* 今の保存先にこの戸別のファイルが無い＝どのファイルからも写真は消えない（新しいファイルに入らないだけ）。
+           写真の入ったファイルは、前の版の置き場所（物件のすぐ下など）にあることが多い。「消えます」とは言わず、何を読み込めばよいかを言う。 */
+        const par = saveDirParentOf(dir);
+        if(_lastSaveInfo){
+          let n = 0; try{ n = await photosMissing(M, state); }catch(_){}
+          _lastSaveInfo.msg = "「" + (saveDirPlace(dir) || "選んだフォルダ") + "」に、この戸別のファイル（" + fname + "）がありません。\n\n"
+            + "この端末が前に読んだファイルには、この端末に無い写真が " + n + "枚 入っていました。\n"
+            + (par ? ("そのファイルは「" + (par.name || "物件") + "」のすぐ下など、リストの外にあるのかもしれません（そのファイルは書き替えていません）。\n\n")
+                   : "そのファイルは、ほかのフォルダにあるのかもしれません（そのファイルは書き替えていません）。\n\n")
+            + "このまま書くと、その写真の入っていないファイルがリストにできるので、保存していません。\n\n"
+            + "上の帯の「📂 戸別ファイルを読み込んで編集する」から、その写真が入っているファイルを読み込んでから、\nもう一度「保存」を押してください。";
+        }
+        return true;
+      }
       /* ★融合に穴があっても、読めたファイルの写真が1枚でも落ちるなら書かない★ */
       {
         const lost = photoLossVsFiles(state, [primary].concat(cf.others).filter(Boolean));
@@ -4576,7 +4583,30 @@ async function saveJsonRun(){
         + mergedNote, warn: false };
       toast("保存しました：" + (dir.name ? (dir.name + "／") : "") + fname);
       return true;
-    }catch(e){ console.warn("覚えている保存先フォルダへ書けませんでした", e); }   // 下へ
+    }catch(e){ console.warn("覚えている保存先フォルダへ書けませんでした", e); dirErr = e; }
+  }
+  /* ★保存先（物件 ＞ リスト）を覚えている端末は、ほかの道（保存先を選ぶ画面・共有・ダウンロード）へ回さない★
+     保存先を選ぶ画面で同じファイルを選ぶと、読み合わせる前にブラウザが中身を空にするので、PCの写真が消える。
+     共有・ダウンロードでは、PCが読む「リスト」に入らない。書かずに止めて、どうすればよいかを言う（💾は付けない）。 */
+  if(dirErr){
+    _lastSaveInfo = { title: "⚠ 保存先へ書けなかったので、保存していません",
+      msg: "「" + (saveDirPlace() || "覚えている保存先") + "」の中\n" + fname + "\n\n"
+         + "いま書けませんでした（ほかのアプリが使っている最中か、フォルダを移した・名前を変えたのかもしれません）。\n\n"
+         + "少し待ってから、もう一度「保存」を押してください。\n"
+         + "フォルダを移した・名前を変えたときは、保存バーの 📁 のボタン（フォルダの名前が出ているところ）を押して選び直してください。\n\n"
+         + "（この端末の入力と写真は、そのまま残っています）", warn: true };
+    toast("⚠ 保存先へ書けなかったので、保存していません");
+    return true;
+  }
+  if(dirLapsed){
+    _lastSaveInfo = { title: "⚠ 保存先へ書く許可が取れないので、保存していません",
+      msg: "覚えている保存先" + (saveDirPlace() ? ("フォルダ「" + saveDirPlace() + "」") : "フォルダ") + "へ書く許可が切れていました。\n"
+         + "許可が取れなかったので、保存していません。\n\n"
+         + "もう一度「保存」を押して、ブラウザの確かめで「許可する」を選んでください。\n"
+         + "または、保存バーの 📁 のボタン（フォルダの名前が出ているところ）を押して選び直すと、次からはそのまま入ります。\n\n"
+         + "（この端末の入力と写真は、そのまま残っています）", warn: true };
+    toast("⚠ 保存先へ書く許可が取れないので、保存していません");
+    return true;                                  // 💾は付けない＝「まとめて保存」に残す
   }
   // ② File System Access（保存先を選ぶ）
   if(window.showSaveFilePicker){
@@ -4584,6 +4614,9 @@ async function saveJsonRun(){
       /* ★覚えているフォルダ（リスト）から開く★ id だけだと、フォルダを選ぶ窓で最後に選んだ「物件」で開き、
          そのまま保存すると物件のすぐ下に写しができる（次の保存で、PCがリストで直した値が黙って消える）。
          startIn の取っ手は id より先に効き、許可が切れていても使える。覚えていなければ今までどおり id に任せる。 */
+      /* ★写真の歯止めは、画面を開く前に★ この画面で選んだ既にあるファイルは、ブラウザがページへ渡す前に
+         中身を空にする（Chrome の決まり）。選ばせてから止めると、PCのファイルが空のまま残る。 */
+      if(await photoGateStop(M, state)) return true;
       const handle=await window.showSaveFilePicker(Object.assign({
         id:"genba-save",                 // フォルダを選ぶ窓と同じ場所から開く（毎回たどり直さない）
         suggestedName:fname,
@@ -4658,8 +4691,7 @@ async function saveJsonRun(){
         toast("⚠ 読み合わせられないので保存していません");
         return true;                              // 💾は付けない＝「まとめて保存」に残す
       }
-      /* 読めなかった＝和集合にできていない。控え・副本が知っている写真が手元に無ければ書かない。 */
-      if(!pickedOld && await photoGateStop(M, state)) return true;
+      /* 読めなかった＝和集合にできていない。写真の歯止めは画面を開く前に通してある。 */
       const w=await handle.createWritable();
       await w.write(new Blob([JSON.stringify(state)], { type:"application/json" })); await w.close();
       // 覚えているフォルダへ書いたときと同じように、読み返して中身を確かめる
@@ -4678,7 +4710,7 @@ async function saveJsonRun(){
         + Array.from(new Set(pickedKeys.map(mergeLabelOf))).join("・") + " を画面にも入れました）";
       render();
       _lastSaveInfo = { title: "保存しました", msg: (handle.name || fname) + "\n" + saveSizeText(JSON.stringify(state), state) + pickedNote
-        + "\n（書いたあと読み返して、中身が入っていることを確かめました）" + lapsedLine(), warn: false };
+        + "\n（書いたあと読み返して、中身が入っていることを確かめました）", warn: false };
       toast("保存しました："+fname);
       return true;
     }catch(e){ if(e && e.name==="AbortError") return false; /* 失敗時は下へフォールバック */ }
@@ -4700,7 +4732,7 @@ async function saveJsonRun(){
         + saveShareWhere() + "\nそのままPCで読めます。\n"
         + "ちがう場所へ渡したときは、そのフォルダへ移してください。"
         + saveHintLine()
-        + shareRenameNote(sr.as) + lapsedLine(), warn: true };
+        + shareRenameNote(sr.as), warn: true };
       toast("共有で渡しました："+(sr.name[0] || fname));
       return true;
     }
@@ -4717,7 +4749,7 @@ async function saveJsonRun(){
     + "\n\n中身はきちんと入っています（消えていません）。\n\n"
     + "この端末の「ダウンロード」に入りました。\n"
     + "PCで読み込むフォルダとちがう場合は、\nそのフォルダへ移してください。"
-    + saveHintLine() + lapsedLine(), warn: true };
+    + saveHintLine(), warn: true };
   toast("ダウンロードに入れました："+fname);
   return true;
 }
@@ -6414,9 +6446,14 @@ async function saveAllDrafts(mode){
           if(mergeBuildDrops(f.state, mg0)){ buildNos.push(f.no); continue; }
           /* ★PCとこの端末の両方で直した欄（工事日・時刻・打合せ・備考）がある★ まとめて保存では聞けない。
              PCの値で書くと、書いたあと控えを取り直すので、この端末の値は下書きからも消える（材料と同じ）。書かずに残す。 */
-          if(mg0.conflicts.length){
-            conflictNos.push(f.no + "（" + Array.from(new Set(mg0.conflicts.map(c => c.label))).join("・") + "）"); continue;
+          /* 受付台帳から入った値（この端末では打っていない）は「両方で直した」に数えない。PCの台帳とPCのファイルの
+             食い違いなので、ファイルの値で書く（版171と同じ。この端末で打った値は失わない）。画面にも入る旨を知らせる。 */
+          const rc0 = mergeRcBase(f.model);
+          const conf0 = mg0.conflicts.filter(c => !(rc0 && baseHas(rc0, c.key) && baseSame(rc0, c.key, c.mine)));
+          if(conf0.length){
+            conflictNos.push(f.no + "（" + Array.from(new Set(conf0.map(c => c.label))).join("・") + "）"); continue;
           }
+          mg0.conflicts.forEach(c => { if(mg0.kept.indexOf(c.label) < 0) mg0.kept.push(c.label); });
           f.keys = mg0.changed;
           f.text = JSON.stringify(f.state);        // ★融合のあとは必ず作り直す★（PCが消した欄・写真の名前と印も入れる）
           if(mg0.kept.length) keptAll.push((f.no || f.name) + "（" + mg0.kept.join("・") + "）");
@@ -6466,9 +6503,10 @@ async function saveAllDrafts(mode){
         + "その戸別を1件ずつ開き、中身を確かめてから「保存」を押してください。");
     }
     if(unreadNos.length){
-      await uiAlert("⚠ ファイルはあるのに、いま読めない戸別が " + unreadNos.length + " 件あります（ほかのアプリが使っている最中かもしれません）。\n\n"
+      await uiAlert("⚠ ファイルはあるのに、いま読めない戸別が " + unreadNos.length + " 件あります（ほかのアプリが使っている最中か、ファイルが壊れているのかもしれません）。\n\n"
         + unreadNos.slice(0, 5).join("・")
-        + "\n\nこの戸別は書いていません（この端末の入力と写真は、そのまま残っています）。\n少し待ってから、もう一度お試しください。");
+        + "\n\nこの戸別は書いていません（この端末の入力と写真は、そのまま残っています）。\n少し待ってから、もう一度お試しください。\n"
+        + "何度試しても同じときは、PCでそのファイルを開いて確かめてください。");
     }
     if(buildNos.length){
       await uiAlert("PCのファイルにも この端末にも、下見の内容（アンテナ・取付・ケーブルなど）が入っている戸別が "
@@ -6759,12 +6797,15 @@ async function caseFileFromDir(dir, no){
   };
   /* 探す根元＝物件のフォルダ。リストを覚えているときはその上、そうでなければ覚えているフォルダ */
   const root = saveDirParentOf(dir) || dir;
+  /* ★いつも今の保存先（リスト）を先に見る★ 前にほかのフォルダ（「完了」「リスト - コピー」など）で当たっていても、
+     そこを先に見ると、リストにある戸別まで古い写しで開き、保存でPCの新しい値を戻してしまう。
+     前に当たったフォルダは、リストに無いときの近道にだけ使う。 */
+  const h1 = await look(dir);
+  if(h1){ _caseDirHit = dir; _caseDirHitRoot = root; return h1; }
   if(_caseDirHit && _caseDirHitRoot === root && _caseDirHit !== dir){
     const h0 = await look(_caseDirHit);
     if(h0) return h0;
   }
-  const h1 = await look(dir);
-  if(h1){ _caseDirHit = dir; _caseDirHitRoot = root; return h1; }
   /* 前の版で物件のすぐ下にできた写し。読むだけで、覚え直さない（次もリストを先に見る） */
   if(root !== dir){
     const h3 = await look(root);
@@ -6887,11 +6928,18 @@ async function pcGuardDirLoad(){
     toast("PCのファイルを読み込みました。このまま入力できます");
     return;
   }
+  /* 物件（親）を覚えていても、その許可が無いと物件のすぐ下は探せていない（ブラウザを開き直したあと） */
+  const par = saveDirParentOf(_saveDir);
+  const parNg = !!(par && !(await saveDirOk(par, false)));
   await uiAlert("「" + (saveDirPlace() || dir.name || "選んだフォルダ") + "」の中に、この戸別のファイルが見つかりませんでした。\n\n"
     + (String((M && M.chosho_mgmt_no) || "").trim() || "管理番号") + ".json\n\n"
-    + "別の物件のフォルダを覚えているのかもしれません。\n"
-    + "上の帯の 📁（フォルダの名前が出ているところ）から選び直すか、\n"
-    + "下の「📂 ファイルを選んで読み込む」から選んでください。");
+    + (parNg
+       ? ("「" + (par.name || "物件") + "」のすぐ下は、いま見る許可が無いので探していません。\n"
+          + "上の帯の 📁（フォルダの名前が出ているところ）で「" + (par.name || "物件") + "」を選び直すと、そこも探します。\n"
+          + "または、下の「📂 ファイルを選んで読み込む」から選んでください。")
+       : ("別の物件のフォルダを覚えているのかもしれません。\n"
+          + "上の帯の 📁（フォルダの名前が出ているところ）から選び直すか、\n"
+          + "下の「📂 ファイルを選んで読み込む」から選んでください。")));
 }
 /* 見るだけにするか（PCに中身があり、まだ戸別ファイルを読んでいない） */
 function pcGuardNeeded(model, row){
@@ -7984,7 +8032,7 @@ async function flowShareDirFiles(){
     try{
       if(await saveDirOk(par, false)){
         for await (const h of par.values()){
-          if(h && h.kind === "file" && /\.json(\.txt)?$/i.test(h.name)) out.push({ name: h.name, handle: h });
+          if(h && h.kind === "file" && /\.json(\.txt)?$/i.test(h.name)) out.push({ name: h.name, handle: h, root: true });
         }
       }
     }catch(e){ console.warn("物件のフォルダを読めませんでした", e); }
@@ -8056,7 +8104,9 @@ async function flowShareRead(list, fromDir){
       if(!flowShareIsCase(data)){ notCase++; continue; } // 受付台帳・地図などは対象外
       const r = flowShareRecOf(data, it.name);
       if(!r){ notCase++; continue; }
+      r.root = !!it.root;                                // 物件のすぐ下のファイル（保存はそこへ書かない）
       const cur = byItem[r.no];
+      if(cur) cur.root = cur.root && r.root;
       // 同じ管理番号が2つ以上あったら、あとから直した方（editedAt が新しい方）を採る
       if(cur){ if(String(r.rec.editedAt || "") >= String(cur.rec.editedAt || "")) cur.rec = flowShareMergeRec(cur.rec, r.rec); }
       else { byItem[r.no] = r; items.push(r); }
@@ -8143,7 +8193,7 @@ async function flowShareItemsApply(items, byNo, openNo){
     const fileMs = Date.parse(it.rec.editedAt || "") || 0;
     const notMine = !mineMs || (fileMs && fileMs > mineMs + 60000);
     let markChanged = false;
-    if(notMine && model._otherFile !== it.rec.from){ model._otherFile = it.rec.from; markChanged = true; marked++; }
+    if(notMine && !it.root && model._otherFile !== it.rec.from){ model._otherFile = it.rec.from; markChanged = true; marked++; }
     if(changed) drafts++;
     if(isOpen) continue;                       // 開いている戸別は最後に persistDraft でまとめて控える
     if(!changed && !markChanged) continue;
@@ -9617,9 +9667,9 @@ async function spSaveFile(rec){
   const sizeTxt = saveSizeText(json, state);
   // ① 覚えているフォルダ
   let dir = await saveDirGet();
-  /* 戸別の「保存」と同じ。許可が切れているときは聞き直さずに落として、あとで伝える。 */
+  /* 戸別の「保存」と同じ。許可が切れているときは1回聞き直し、取れなければ下の道へ落として、あとで伝える。 */
   let dirLapsed = false;
-  if(dir && !(await saveDirOk(dir, false))){ dir = null; dirLapsed = true; }
+  if(dir && !(await saveDirOk(dir, true))){ dir = null; dirLapsed = true; }
   if(dir) dir = await saveDirSettle(dir);    // 前の版で物件のフォルダを覚えていたら、中の「リスト」へ寄せる
   const lapsedLine = () => dirLapsed
     ? ("\n\n（覚えている保存先" + (saveDirPlace() ? ("フォルダ「" + saveDirPlace() + "」") : "フォルダ")
