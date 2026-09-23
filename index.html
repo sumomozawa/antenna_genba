@@ -4584,7 +4584,7 @@ async function saveJsonRun(){
       /* ★覚えているフォルダの道と同じように、選んだファイルの中身を読んで融合する★
          ここを通さないと、保存先をまだ覚えていない初回や、ブラウザを開き直したあとの
          最初の保存で、PCの写真や工事日が消えてしまう。 */
-      let pickedNote = "", pickedKeys = [], pickedOld = null, pickedMerged = false, pickedErr = null;
+      let pickedNote = "", pickedKeys = [], pickedOld = null, pickedMerged = false, pickedErr = null, pickedFrom = "";
       try{
         const cur = await handle.getFile();
         const txt = await cur.text();
@@ -4600,6 +4600,10 @@ async function saveJsonRun(){
             const b0Unsure = !!(b0 && (b0.from === "root" || !("from" in b0)));
             const base = (b0 && !b0.stale && b0Unsure && !baseFitsFile(b0, oj))
               ? Object.assign({}, b0, { stale:true }) : b0;
+            /* ★リストから取った控えで、選んだファイルがその控えと同じ中身なら、書いたあとも印 list を残す★
+               印を落とすと、次に物件（親）の許可が無いときや、すぐ下に写しがあるときに、
+               ふつうの保存でも毎回聞く・まとめて保存で書かない、になる。 */
+            if(b0 && b0.from === "list" && baseUseValues(base) && baseFitsFile(b0, oj)) pickedFrom = "list";
             const mgp = mergeIntoState(state, oj, { model:M, base:base, fname:(handle.name || fname),
                                                     mode:"write", others:[], askable:true });
             if(mgp.stop){
@@ -4662,7 +4666,7 @@ async function saveJsonRun(){
         return true;                             // 💾は付けない＝「まとめて保存」に残す
       }
       await markDraftSaved(); saveStateFile();   // ← 読み返して確かめてから💾
-      fileBaseAfterWrite(M, state, (handle.name || fname), pickedOld, pickedKeys);
+      fileBaseAfterWrite(M, state, (handle.name || fname), pickedOld, pickedKeys, pickedFrom);
       if(pickedKeys.length) pickedNote += "\n（ファイルに入っていた "
         + Array.from(new Set(pickedKeys.map(mergeLabelOf))).join("・") + " を画面にも入れました）";
       render();
@@ -6374,7 +6378,8 @@ async function saveAllDrafts(mode){
              ファイルの値が1つでも変わる／この端末の材料を捨てることになるなら、書かずに残す
              （下書きはそのまま＝写真も入力も減らない。渡した扱いにもしない）。1件ずつ開いて保存してもらう。 */
           if(b0 && !baseUseValues(base0)
-             && (mergeChangesFile(f.state, cf0.primary).length || mergeBuildDrops(f.state, mg0))){
+             && (mg0.mine.length || mg0.conflicts.length
+                 || mergeChangesFile(f.state, cf0.primary).length || mergeBuildDrops(f.state, mg0))){
             unsureNos.push(f.no); continue;
           }
           /* ★材料をどちらにするか聞くところ★（ファイルにも下見の内容があり、この端末も材料を入れた）
@@ -7352,6 +7357,10 @@ function baseForWrite(b, cf){
   if(!cf.rootPrimary && !cf.rootUnread) return b;       // すぐ下の写しが無いと分かっている
   if(baseFitsFile(b, cf.primary)) return b;              // 控え＝土台の中身
   if(b.from === "list" && cf.primary !== cf.rootPrimary) return b;   // 土台はリスト、控えもリストから（PCがリストを直した）
+  /* すぐ下を読めない（物件の許可が無い）ときは、すぐ下の写しから取ったかもしれない控え
+     （印 root・印の欄が無い前の版の控え）だけ疑う。📂 で読んだ控えや保存先を選ぶ画面で書いた控え（印 ""）まで
+     疑うと、ブラウザを開き直したあとのふつうの保存で毎回聞く・書かないになる。 */
+  if(!cf.rootPrimary && b.from !== "root" && ("from" in b)) return b;
   return Object.assign({}, b, { stale:true });           // 出どころが確かでない → 値の見比べをやめる（1件保存では1回聞く）
 }
 /* ★書くと、いまファイルに入っている値が変わる欄★（写真・書いた時刻・管理番号などは見ない）。呼び名の並びを返す。
@@ -7574,12 +7583,27 @@ function mergeIntoState(state, old, opt){
 
   /* 1) 写真（いちばん先に・必ず・例外なし） ----------------------------- */
   const before = ((state.chosho_photos) || []).filter(p => p && p.dataUri).length;
-  state.chosho_photos = mergePhotosUnion(state.chosho_photos, old.chosho_photos, useB ? base : null);   // 使えない控えで名前・印を見比べない
+  /* ★控えはあるが使えない（出どころが確かでない・古い扱い）ときは、両方にある写真の名前・印をこの端末のまま残す★
+     控えで見比べると、控えより古い写しの名前・印を「PCが直した」と読み違える。控えなしの決まり（PCの印は足す）だと、
+     PCが直した名前・外した印を黙って戻す。どちらが直したか分からないので、違いがあれば「この端末の値」に数える
+     （1件保存では確かめの窓に出る・まとめて保存では書かずに残す）。 */
+  const keepPh = !!(base && !useB);
+  state.chosho_photos = mergePhotosUnion(state.chosho_photos, old.chosho_photos, useB ? base : null, keepPh ? { addOnly:true } : undefined);   // 使えない控えで名前・印を見比べない
   others.forEach(o => { state.chosho_photos = mergePhotosUnion(state.chosho_photos, o && o.chosho_photos, base, { addOnly:true }); });
   const after = ((state.chosho_photos) || []).filter(p => p && p.dataUri).length;
   out.photosAdded = Math.max(0, after - before);
   if(after < before) throw new Error("融合で写真が減りました（" + before + "→" + after + "）");
   if(out.photosAdded) out.kept.push("写真 " + out.photosAdded + "枚");
+  if(keepPh){
+    const idOf = p => String((p && p.id) || ((p && p.dataUri) ? photoContentId(p.dataUri) : ""));
+    const th = new Map();
+    ((old.chosho_photos) || []).forEach(p => { if(p && p.dataUri) th.set(idOf(p), p); });
+    const differs = (state.chosho_photos || []).some(p => {
+      const t = p && p.dataUri && th.get(idOf(p));
+      return !!t && (String(p.label || "") !== String(t.label || "") || !!p.chosho !== !!t.chosho);
+    });
+    if(differs) out.mine.push("写真の名前・工事調書の印");
+  }
   if(others.length) out.altFiles = (opt && opt.altNames) || [];
 
   /* 2) 触らないもの ---------------------------------------------------- */
