@@ -4486,10 +4486,21 @@ async function saveJsonRun(){
          相手の中身を消さない。読めないときは今までどおり、そのまま書く。 */
       let mergedNote = "", mgKeys = [], primary = null;
       const cf = await readCaseFilesForWrite(dir, fname, state.chosho_mgmt_no);
+      /* ★ファイルはあるのに、いま読めない（ほかのアプリが使っている・書きかけ）★
+         「無い」とみなして書くと、はじめての保存として上書きし、PCの写真が消える。書かない。 */
+      if((cf.unreadable || []).indexOf(fname) >= 0){
+        _lastSaveInfo = { title: "⚠ ファイルを読めないので、保存していません",
+          msg: "「" + (saveDirPlace(dir) || "選んだフォルダ") + "」の中\n" + fname + "\n\n"
+             + "ファイルはありますが、いま読めませんでした（ほかのアプリが使っている最中かもしれません）。\n"
+             + "読めないまま書くと、PCで入れた写真が消えることがあるので、書いていません。\n\n"
+             + "少し待ってから、もう一度「保存」を押してください。\n（この端末の入力と写真は、そのまま残っています）", warn: true };
+        toast("⚠ ファイルを読めないので保存していません");
+        return true;                       // 💾は付けない＝「まとめて保存」に残す
+      }
       primary = cf.primary;
       if(primary){
-        /* 物件のすぐ下にも同じ戸別があったときは、控えがそちらから取られていることがある。
-           控えがリストの中身と合わなければ、値の見比べはやめる（写真の歯止めは残す）。 */
+        /* 控えがどこから取ったものか分からないとき（今の保存先から取っておらず、ファイルの中身とも違う）は、
+           値の見比べはやめる（写真の歯止めは残す）。 */
         const base = baseForWrite(fileBaseGet(M), cf);
         const mg = mergeIntoState(state, primary, { model:M, base:base, fname:fname,
                                                     mode:"write", others:cf.others, askable:true });
@@ -4500,7 +4511,7 @@ async function saveJsonRun(){
         if(mg.conflicts.length) await mergeApplyAnswers(state, mg.conflicts);
         if(await mergeApplyBuild(state, mg)) mergedNote += "\n（材料はこの端末の内容にしました）";
         else if(mg.buildAsk) mergedNote += "\n（材料はPCのファイルの内容を残しました）";
-        /* 控えがあるのに使えない（すぐ下の写しもある）ときは、欄ごとの決まりで現場の値が残る所
+        /* 控えがあるのに使えないときは、欄ごとの決まりで現場の値が残る所
            （TVの台数・測定値など）も聞く。数え漏らすと、PCがリストで直した値が黙って戻る。 */
         const chg = (fileBaseGet(M) && !baseUseValues(base)) ? mergeChangesFile(state, primary) : [];
         if(!baseUseValues(base) && (mg.mine.length || mg.conflicts.length || chg.length)){
@@ -4517,12 +4528,6 @@ async function saveJsonRun(){
         if(mg.removed.length) mergedNote += "\n（PCで消された "
           + Array.from(new Set(mg.removed.map(mergeLabelOf))).join("・") + " を、こちらも消しました）";
         if(cf.names.length > 1) mergedNote += "\n（同じ戸別のファイルが " + cf.names.length + " つありました。写真はどれも残しました。要らない方はPCで片付けてください）";
-        if(cf.rootNames.length){
-          const pn = saveDirPlaceParts(dir).outer || "物件";
-          mergedNote += "\n（「" + pn + "」のすぐ下にも同じ戸別のファイルがありました。"
-            + "写真は両方まとめて「" + (dir.name || "リスト") + "」の方に入れました。"
-            + "すぐ下の方は消していません。PCの「🧩 重複をまとめる」で片付けてください）";
-        }
       }
       /* フォルダにその戸別のファイルが無い＝和集合にする相手がいない。
          控え・副本が知っている写真が手元に無いまま新しく書くと、その写真は消える。 */
@@ -4560,7 +4565,7 @@ async function saveJsonRun(){
       }
       /* ★ファイルから採った分をモデルにも取り込み、控えを取り直す★
          ここを外すと控えとモデルがずれ、次の保存でPCの中身を消してしまう。 */
-      fileBaseAfterWrite(M, state, fname, primary, mgKeys, saveDirParentOf(dir) ? "list" : "root");
+      fileBaseAfterWrite(M, state, fname, primary, mgKeys, (dir === _saveDir) ? "list" : "");
       await persistDraft(); await markDraftSaved(); saveStateFile();
       if(mgKeys.length) mergedNote += "\n（ファイルに入っていた "
         + Array.from(new Set(mgKeys.map(mergeLabelOf))).join("・") + " を画面にも入れました）";
@@ -4576,11 +4581,14 @@ async function saveJsonRun(){
   // ② File System Access（保存先を選ぶ）
   if(window.showSaveFilePicker){
     try{
-      const handle=await window.showSaveFilePicker({
+      /* ★覚えているフォルダ（リスト）から開く★ id だけだと、フォルダを選ぶ窓で最後に選んだ「物件」で開き、
+         そのまま保存すると物件のすぐ下に写しができる（次の保存で、PCがリストで直した値が黙って消える）。
+         startIn の取っ手は id より先に効き、許可が切れていても使える。覚えていなければ今までどおり id に任せる。 */
+      const handle=await window.showSaveFilePicker(Object.assign({
         id:"genba-save",                 // フォルダを選ぶ窓と同じ場所から開く（毎回たどり直さない）
         suggestedName:fname,
         types:[{description:"戸別JSON",accept:{"application/json":[".json"]}}]
-      });
+      }, _saveDir ? { startIn:_saveDir } : {}));
       /* ★覚えているフォルダの道と同じように、選んだファイルの中身を読んで融合する★
          ここを通さないと、保存先をまだ覚えていない初回や、ブラウザを開き直したあとの
          最初の保存で、PCの写真や工事日が消えてしまう。 */
@@ -4592,18 +4600,17 @@ async function saveJsonRun(){
           const oj = JSON.parse(txt);
           if(flowShareIsCase(oj)){
             pickedOld = oj;
-            /* ★控えが物件のすぐ下の写しから取ったもので、選んだファイルの中身と合わない★
-               選んだのはリストの方かもしれない。見比べると、PCがリストで直していない欄まで
-               「PCが直した」と読んで、現場の入力を黙って戻す。見比べをやめて、1回だけ聞く。 */
+            /* ★選んだファイルが今の保存先（リスト）の中か★ 確かめられたときだけ、今の保存先から取った控えを使う。
+               確かめられなければ、控えがファイルの中身と同じときだけ使い、違えば見比べをやめて1回聞く
+               （物件のすぐ下の写しを選んでいると、リストから取った控えで見比べて現場の入力を黙って戻すため）。 */
+            let inSave = false;
+            try{ const rp = (_saveDir && _saveDir.resolve) ? await _saveDir.resolve(handle) : null;
+                 inSave = Array.isArray(rp) && rp.length === 1; }catch(_){}
             const b0 = fileBaseGet(M);
-            /* 印 root＝すぐ下の写しから取った／印の欄そのものが無い＝前の版の控え（どこから取ったか分からない） */
-            const b0Unsure = !!(b0 && (b0.from === "root" || !("from" in b0)));
-            const base = (b0 && !b0.stale && b0Unsure && !baseFitsFile(b0, oj))
-              ? Object.assign({}, b0, { stale:true }) : b0;
-            /* ★リストから取った控えで、選んだファイルがその控えと同じ中身なら、書いたあとも印 list を残す★
-               印を落とすと、次に物件（親）の許可が無いときや、すぐ下に写しがあるときに、
-               ふつうの保存でも毎回聞く・まとめて保存で書かない、になる。 */
-            if(b0 && b0.from === "list" && baseUseValues(base) && baseFitsFile(b0, oj)) pickedFrom = "list";
+            const base = baseForWrite(b0, { primary: oj, sameDir: inSave });
+            /* 書いたあとの控えに今の保存先の印を付けるのは、選んだファイルが今の保存先の中と分かるときだけ
+               （今の保存先から取った控えと同じ中身＝そのファイル、も含む） */
+            if(_saveDir && (inSave || (b0 && b0.ep && b0.ep === _saveDirEp && baseFitsFile(b0, oj)))) pickedFrom = "list";
             const mgp = mergeIntoState(state, oj, { model:M, base:base, fname:(handle.name || fname),
                                                     mode:"write", others:[], askable:true });
             if(mgp.stop){
@@ -4797,7 +4804,7 @@ async function loadStateInto(s, fname){
     if(M._lastDraftKey) m._lastDraftKey = M._lastDraftKey;
     if(M._pcGuardAck) m._pcGuardAck = M._pcGuardAck;
     /* ★見るだけの間に撮った写真を消さない（写真は和集合）★ */
-    m.chosho_photos = mergePhotosUnion(m.chosho_photos, M.chosho_photos);
+    m.chosho_photos = mergePhotosUnion(m.chosho_photos, M.chosho_photos, null, { addOnly:true });   // 名前・印はファイル（入力ありは3つ見比べの結果）
   }
   M=m;
   guideFilledFields.clear(); // 別案件を開いた時に前案件のガイド自動入力マークを持ち越さない（ガイド有効なら直後のautoReflectで付け直す）
@@ -5531,6 +5538,11 @@ let _saveDir = null;
    入った場合だけ持つ。{ dir:リスト, parent:物件, name:物件の名前 } の組で持つので、
    _saveDir が別のフォルダに替わったときに、古い親を取り違えない。 */
 let _saveDirPar = null;
+/* ★今の保存先の印（ep）★ 保存先が替わるたびに新しくする（同じフォルダを選び直したときはそのまま）。
+   控えにもこの印を残し、「今の保存先から取った控えか」を見分ける（baseForWrite）。
+   前の版から続く端末は、はじめて開いたときに新しい印を付ける（前の版の控えには印が無い＝どこから取ったか分からない）。 */
+let _saveDirEp = "";
+function saveDirNewEp(){ return "e" + Date.now().toString(36) + Math.floor(Math.random() * 1e6).toString(36); }
 async function saveDirGet(){
   if(_saveDir) return _saveDir;
   try{
@@ -5539,10 +5551,19 @@ async function saveDirGet(){
     // 親の無い古い記録は、今までどおり（名前だけ）
     _saveDirPar = (_saveDir && r.parent)
       ? { dir:_saveDir, parent:r.parent, name:(r.parentName || r.parent.name || "") } : null;
-  }catch(_){ _saveDir = null; _saveDirPar = null; }
+    _saveDirEp = (_saveDir && r.ep) ? String(r.ep) : "";
+    if(_saveDir && !_saveDirEp){
+      _saveDirEp = saveDirNewEp();
+      try{ await idbMapPut(Object.assign({}, r, { ep:_saveDirEp })); }catch(_){}
+    }
+  }catch(_){ _saveDir = null; _saveDirPar = null; _saveDirEp = ""; }
   return _saveDir;
 }
 async function saveDirSet(h, parent){
+  let prev = _saveDir;
+  if(!prev){ try{ prev = await saveDirGet(); }catch(_){ prev = null; } }
+  const same = !!(h && prev && _saveDirEp && (await saveDirSame(h, prev)));
+  _saveDirEp = h ? (same ? _saveDirEp : saveDirNewEp()) : "";
   _saveDir = h || null;
   _saveDirPar = (h && parent) ? { dir:h, parent:parent, name:(parent.name || "") } : null;
   /* ★前のフォルダで当たった所・名前の一覧を捨てる★
@@ -5551,7 +5572,7 @@ async function saveDirSet(h, parent){
   _saveDirRootOk = new WeakMap();
   let kept = false;
   try{ await idbMapPut({ key:SAVEDIR_KEY, handle:h, parent:(h && parent) || null,
-                        parentName:(h && parent && parent.name) || "", savedAt:Date.now() }); kept = true; }
+                        parentName:(h && parent && parent.name) || "", ep:_saveDirEp, savedAt:Date.now() }); kept = true; }
   catch(e){ console.warn("保存先フォルダを覚えられませんでした（この画面の間だけ覚えます）", e); }
   // アプリを開き直しても残る時だけ名前を控える（次回も同じ所に入る、と言い切れる場合だけ出す）
   try{ localStorage.setItem(LS_SAVEDIR, kept ? ((h && h.name) || "") : ""); }catch(_){}
@@ -5749,7 +5770,7 @@ async function saveDirAdopt(picked, opt){
   }
   if(f){ await saveDirSet(f.dir, picked); return f.dir; }
   /* ★覚えている「リスト」をもう一度選んだときは、親（物件）も覚えたままにする★
-     親を忘れると、物件のすぐ下の古い写しを読まなくなり、保存バーの「物件 ＞」も消える。 */
+     親を忘れると、読み込みで物件のすぐ下の古い写しを探せなくなり、保存バーの「物件 ＞」も消える。 */
   const par0 = saveDirParentOf(_saveDir);
   if(par0 && (await saveDirSame(picked, _saveDir))){ await saveDirSet(picked, par0); return picked; }
   await saveDirSet(picked, null); return picked;
@@ -6249,14 +6270,18 @@ async function saveAllDrafts(mode){
   nos.forEach(no => {
     const rec = byNo[draftNoKey(no)];
     if(!rec || !rec.model){ missing.push(no); return; }
+    /* ★いま開いている戸別は、画面の中身（M）そのもので書き、控えも M で取り直す★（1件保存と同じ）
+       下書きの写し（rec.model）だけ取り直すと、画面の M は古い控えのまま残り、次の下書きの確定で書き戻される
+       （以後のまとめて保存で毎回「どちらの値が新しいか分からない」になる）。 */
+    const model = (M && M._lastDraftKey && rec.key === M._lastDraftKey) ? M : rec.model;
     /* ★この端末で何も入力していない戸別は、PCのファイルを書き替えない★
        （台帳の印が付いているだけの戸別も同じ。PCの写真・図面・積算を守る） */
-    if(isNothingNewHere(rec.model)){ skippedNothing.push(no); return; }
-    const st = buildStateOf(rec.model);
+    if(isNothingNewHere(model)){ skippedNothing.push(no); return; }
+    const st = buildStateOf(model);
     files.push({ no, key: rec.key, name: sanitizeFilename(draftNoKey(no) || no) + ".json",
                  text: JSON.stringify(st), state: st,   // state＝書いたあと読み返して確かめるため
-                 model: rec.model, rec: rec,            // ★戸別ごとの控えで判定する（他の戸別のものを使わない）
-                 other: (rec.model && rec.model._otherFile) || "" });
+                 model: model, rec: rec,                // ★戸別ごとの控えで判定する（他の戸別のものを使わない）
+                 other: (model && model._otherFile) || "" });
   });
   if(!files.length){
     if(skippedNothing.length || openedOnly.length){
@@ -6358,7 +6383,7 @@ async function saveAllDrafts(mode){
   const okNos = [], ngNos = [];
   let where = "", heldN = 0;
   if(dir){
-    const keptAll = [], conflictNos = [], photoNg = [], buildNos = [], unsureNos = [];
+    const keptAll = [], conflictNos = [], photoNg = [], buildNos = [], unsureNos = [], unreadNos = [];
     try{ await caseFileIndex(dir); }catch(_){}     // フォルダの名前一覧は1回だけ読む
     for(const f of files){
       try{
@@ -6366,13 +6391,14 @@ async function saveAllDrafts(mode){
            ここを通さないと、台帳から開いただけの戸別で PCの写真が0枚になる。 */
         const cf0 = await readCaseFilesForWrite(dir, f.name, f.no);
         f.cf = cf0; f.keys = [];
+        if((cf0.unreadable || []).indexOf(f.name) >= 0){ unreadNos.push(f.no); ngNos.push(f.no); continue; }   // あるのに読めない＝書かない
         if(cf0.primary){
           const b0 = fileBaseGet(f.model);
-          const base0 = baseForWrite(b0, cf0);   // 物件のすぐ下にも同じ戸別があったとき
+          const base0 = baseForWrite(b0, cf0);   // どこから取った控えか分からなければ、見比べに使わない
           const mg0 = mergeIntoState(f.state, cf0.primary, { model:f.model, base:base0,
                                                              fname:f.name, mode:"write", others:cf0.others, askable:false });
           if(mg0.stop){ console.warn("まとめて保存 別の戸別のファイル", f.name, mg0.reason); ngNos.push(f.no); continue; }
-          /* ★控えがあるのに使えない（物件のすぐ下の写しから取ったかもしれない・前に読み返しが合わなかった）★
+          /* ★控えがあるのに使えない（どこから取ったか分からない・前に読み返しが合わなかった）★
              1件ずつの保存なら1回聞くところ。まとめて保存は聞けないので、黙って書くと
              PCがあとでリストで直した値（工事日・備考・TVの台数・測定値など）が、この端末の古い値へ戻る。
              ファイルの値が1つでも変わる／この端末の材料を捨てることになるなら、書かずに残す
@@ -6386,13 +6412,14 @@ async function saveAllDrafts(mode){
              まとめて保存では聞けない。PCの材料で書くと、書いたあと控えを取り直すので
              この端末の材料は下書きからも消え、あとで1件ずつ保存しても戻せない。書かずに残す。 */
           if(mergeBuildDrops(f.state, mg0)){ buildNos.push(f.no); continue; }
-          f.keys = mg0.changed;
-          f.conflicts = mg0.conflicts;
-          if(mg0.kept.length || mg0.changed.length){
-            f.text = JSON.stringify(f.state);
-            if(mg0.kept.length) keptAll.push((f.no || f.name) + "（" + mg0.kept.join("・") + "）");
+          /* ★PCとこの端末の両方で直した欄（工事日・時刻・打合せ・備考）がある★ まとめて保存では聞けない。
+             PCの値で書くと、書いたあと控えを取り直すので、この端末の値は下書きからも消える（材料と同じ）。書かずに残す。 */
+          if(mg0.conflicts.length){
+            conflictNos.push(f.no + "（" + Array.from(new Set(mg0.conflicts.map(c => c.label))).join("・") + "）"); continue;
           }
-          if(mg0.conflicts.length) conflictNos.push(f.no + "（" + mg0.conflicts.map(c => c.label).join("・") + "）");
+          f.keys = mg0.changed;
+          f.text = JSON.stringify(f.state);        // ★融合のあとは必ず作り直す★（PCが消した欄・写真の名前と印も入れる）
+          if(mg0.kept.length) keptAll.push((f.no || f.name) + "（" + mg0.kept.join("・") + "）");
         }
         /* 写真が1枚でも減るなら書かない */
         {
@@ -6411,13 +6438,13 @@ async function saveAllDrafts(mode){
         if(bad){ console.warn("まとめて保存 読み返し不一致", f.name, bad); ngNos.push(f.no);
                  try{ const b = fileBaseGet(f.model); if(b) b.stale = true; }catch(_){}
                  continue; }
-        try{ fileBaseAfterWrite(f.model, f.state, f.name, f.cf && f.cf.primary, f.keys, saveDirParentOf(dir) ? "list" : "root"); }
+        try{ fileBaseAfterWrite(f.model, f.state, f.name, f.cf && f.cf.primary, f.keys, (dir === _saveDir) ? "list" : ""); }
         catch(e){ console.warn("控えの取り直しに失敗", f.no, e); }
         okNos.push(f);
       }catch(e){ console.warn("まとめて保存 失敗", f.name, e); ngNos.push(f.no); }
     }
     where = "「" + (saveDirPlace(dir) || "選んだフォルダ") + "」";
-    heldN = unsureNos.length + buildNos.length;
+    heldN = unsureNos.length + buildNos.length + conflictNos.length;
     if(keptAll.length){
       await uiAlert("ファイルに入っていた中身を残しました（" + keptAll.length + "件）。\n\n"
         + keptAll.slice(0, 3).join("\n")
@@ -6428,7 +6455,8 @@ async function saveAllDrafts(mode){
       await uiAlert("PCと この端末の両方で直していた戸別が " + conflictNos.length + " 件あります。\n\n"
         + conflictNos.slice(0, 3).join("\n")
         + (conflictNos.length > 3 ? ("\nほか " + (conflictNos.length - 3) + "件") : "")
-        + "\n\nまとめて保存では PCの内容を残しました。\n直したいときは、その戸別を1件ずつ開いて保存してください。");
+        + "\n\nまとめて保存では、この戸別は書いていません（この端末の入力と写真は、そのまま残っています）。\n"
+        + "その戸別を1件ずつ開いて「保存」を押すと、どちらにするか聞かれます。");
     }
     if(unsureNos.length){
       await uiAlert("PCのファイルと この端末の、どちらの値が新しいか分からない戸別が " + unsureNos.length + " 件あります。\n\n"
@@ -6436,6 +6464,11 @@ async function saveAllDrafts(mode){
         + (unsureNos.length > 5 ? ("\nほか " + (unsureNos.length - 5) + "件") : "")
         + "\n\nまとめて保存では、この戸別は書いていません（この端末の入力と写真は、そのまま残っています）。\n"
         + "その戸別を1件ずつ開き、中身を確かめてから「保存」を押してください。");
+    }
+    if(unreadNos.length){
+      await uiAlert("⚠ ファイルはあるのに、いま読めない戸別が " + unreadNos.length + " 件あります（ほかのアプリが使っている最中かもしれません）。\n\n"
+        + unreadNos.slice(0, 5).join("・")
+        + "\n\nこの戸別は書いていません（この端末の入力と写真は、そのまま残っています）。\n少し待ってから、もう一度お試しください。");
     }
     if(buildNos.length){
       await uiAlert("PCのファイルにも この端末にも、下見の内容（アンテナ・取付・ケーブルなど）が入っている戸別が "
@@ -6511,6 +6544,7 @@ async function saveAllDrafts(mode){
     }
   }
   for(const f of okNos) await markDraftSavedFor(f.key, f.model);
+  if(okNos.some(f => f.model === M)){ try{ render(); }catch(_){} }   // 取り込んだ分を画面にも出す
   await refreshDraftInfo();
   const sv = document.getElementById("reception-search");
   renderReceptionList(sv ? sv.value : "");
@@ -6796,7 +6830,12 @@ async function pcGuardAutoLoad(dir){
   catch(e){ console.warn("PCのファイルを読めませんでした", e); return false; }
   if(!M) return false;
   /* 控えの出どころ：覚えているリスト（親つき）そのものから読んだときだけ "list" */
-  if(M._fileBase) M._fileBase.from = (!hit.fromRoot && hit.dir === dir && saveDirParentOf(dir)) ? "list" : "root";
+  if(M._fileBase){
+    /* 今の保存先そのものから読んだときだけ印 list（と今の保存先の印）。物件のすぐ下・中のほかのフォルダは root */
+    const inSave = !hit.fromRoot && hit.dir === dir && dir === _saveDir;
+    M._fileBase.from = inSave ? "list" : "root";
+    M._fileBase.ep = inSave ? _saveDirEp : "";
+  }
   const keepBlank = !(wasTouched && rcSrc);      // 控えを捨てる＝ファイルの値が土台。空欄では消さない
   if(wasTouched && rcSrc) M._rcSrc = rcSrc;
   else delete M._rcSrc;
@@ -7012,9 +7051,9 @@ function fileBaseReduce(st){
   }
   return { state: state, sig: sig };
 }
-/* from … 控えをどこから取ったか。"list"＝覚えているリスト（親つき）を読んだ／へ書いた、
-   "root"＝物件のすぐ下の写し・親の無いフォルダ・ほかの子フォルダ、""＝分からない（ファイルを選んだ道・前の版）。
-   baseForWrite が「控えはルートの写しから取ったか」を、見た目の一致で当てずにこれで決める。 */
+/* from … 控えをどこから取ったか。"list"＝今の保存先（リスト）そのものを読んだ／へ書いた（ep に今の保存先の印も残す）、
+   "root"＝物件のすぐ下の写し・中のほかのフォルダ、""＝分からない（📂・保存先を選ぶ画面で選んだファイル）。
+   印の欄が無い＝前の版の控え。baseForWrite は、印 ep が今の保存先と同じか、ファイルと同じ中身かで使うかを決める。 */
 function fileBaseSet(model, st, fname, fileObj, from){
   if(!model || !st) return;
   const no = draftNoKey(st.chosho_mgmt_no);
@@ -7024,6 +7063,7 @@ function fileBaseSet(model, st, fname, fileObj, from){
     v: FB_VER, no: no, file: String(fname || ""), at: Date.now(),
     fileEditedAt: String((fileObj && fileObj.editedAt) || st.editedAt || ""),
     theirOrigin: String((fileObj && fileObj._origin) || ""), stale: false, from: String(from || ""),
+    ep: (from === "list") ? _saveDirEp : "",               // 今の保存先の印（そこから取った控えのときだけ）
     state: r.state, sig: r.sig,
     /* ★写真は st から採れないことがある★ 読み込みの控えは fileBaseStateOf で作り、
        そこでは容量のため chosho_photos を外してある。そのときは読んだファイルから採る。
@@ -7226,6 +7266,19 @@ function adoptStateIntoModel(model, st, keys){
 }
 function fileBaseAfterWrite(model, st, fname, fileObj, keys, from){
   adoptStateIntoModel(model, st, keys);
+  /* ★同じ写真の名前と「工事調書に載せる」印は、書いた中身に合わせる★（写真の中身は写さない＝容量は増えない・枚数は変えない）
+     合わせないと、控えは PC の名前・印、画面は前の名前・印のまま残り、次の保存で「現場が直した」と読まれて戻る。 */
+  {
+    const idOf = p => String((p && p.id) || ((p && p.dataUri) ? photoContentId(p.dataUri) : ""));
+    const wrote = new Map();
+    ((st && st.chosho_photos) || []).forEach(p => { if(p && p.dataUri) wrote.set(idOf(p), p); });
+    (model.chosho_photos || []).forEach(p => {
+      const w = p && p.dataUri && wrote.get(idOf(p));
+      if(!w) return;
+      p.label = String(w.label || "");
+      if(w.chosho) p.chosho = true; else delete p.chosho;
+    });
+  }
   const mine = buildStateOf(model);                          // ★adopt 後のモデルから作る＝控え＝モデル
   /* ★控えの写真は「ファイルへ書いた分（和集合）」★
      手元の分だけにすると、PCの写真を控えが忘れてしまい、
@@ -7274,7 +7327,7 @@ function caseNameRe(no){
   return new RegExp("^" + e + "(?:[ _\\-(][^\\\\/]*)?\\.json(?:\\.txt)?$", "i");
 }
 async function readExistingCaseFiles(dir, fname, no){
-  const out = { primary: null, others: [], names: [], pick: "" };
+  const out = { primary: null, others: [], names: [], pick: "", unreadable: [] };
   if(!dir) return out;
   no = draftNoKey(no);
   if(!no){
@@ -7282,7 +7335,7 @@ async function readExistingCaseFiles(dir, fname, no){
        番号で照らし合わせられないので、同じ名前のファイルだけを読んで和集合にする。
        ここで読まないと、前に同じ名前で保存した写真が消える。
        読んだファイルに管理番号が入っていたら、別の戸別なので融合の門番が止める。 */
-    const j0 = await readExistingCaseFile(dir, fname);
+    const j0 = await readExistingCaseFile(dir, fname, out.unreadable);
     if(j0){ out.primary = j0; out.names = [fname]; out.pick = fname; }
     return out;
   }
@@ -7292,7 +7345,7 @@ async function readExistingCaseFiles(dir, fname, no){
   (await caseFileIndex(dir)).forEach(n => { if(re.test(n) && names.indexOf(n) < 0) names.push(n); });
   const got = [];
   for(const n of names.slice(0, 6)){
-    const j = await readExistingCaseFile(dir, n);
+    const j = await readExistingCaseFile(dir, n, out.unreadable);
     if(!j) continue;
     if(draftNoKey(j.chosho_mgmt_no) !== no) continue;      // ★中の管理番号でふるう（最後の砦）
     got.push({ name: n, data: j });
@@ -7306,61 +7359,37 @@ async function readExistingCaseFiles(dir, fname, no){
   out.others = got.filter(g => g !== pick).map(g => g.data);
   return out;
 }
-/* ★書く前の読み合わせ（リストへ書くとき）★
-   リストと物件のすぐ下（前の版でできた写し）の両方にあれば、中の更新日時（editedAt）の新しい方を土台にする
-   （メインの🧩・一覧と同じ物差し。同じならリスト）。もう片方は写真の和集合と「土台に無い欄を埋める」ためだけに others へ。
-   ★リストを必ず土台にしない★ PCがすぐ下の写し（新しい方）を直していると、古いリストを土台にして
-     PCの直し（金額など）と現場の前の入力が黙って消える。
-   rootPrimary … すぐ下の写し（両方にあったときだけ）。土台がリストかどうかは cf.primary !== cf.rootPrimary で分かる。
-   リストに無く、すぐ下にだけあるときは、すぐ下の写しを土台にする（書く先はリスト）。
-   すぐ下のファイルは読むだけ。消さない。上のフォルダの許可は聞き直さない。 */
+/* ★書く前の読み合わせ★ 読むのは今の保存先（リスト）の中だけ（同じ戸別の別名ファイルも含む）。
+   ★物件のすぐ下の古いファイル（前の版の現場入力が作ったもの）は、保存のときには読まない★（利用者の決め 2026-09-23）
+     読んで混ぜると、土台・控え・許可の組み合わせが増え、PCの直しや現場の入力が黙って戻る穴が次々に出た。
+     すぐ下のファイルには触らず、消さない。そこにしか無い写真は、PCの「🧩 重複をまとめる」でリストへまとめる。
+   ★ファイルはあるのに読めないときは、unreadable に名前が入る★（書く側は、そのとき書かない） */
 async function readCaseFilesForWrite(dir, fname, no){
-  const cf = await readExistingCaseFiles(dir, fname, no);
-  cf.rootNames = [];
-  const par = saveDirParentOf(dir);
-  if(!par || !draftNoKey(no)) return cf;
-  /* ★物件（親）を読めないときは、すぐ下に写しがあるかもしれない（rootUnread）★
-     ブラウザを開き直したあとは、リストの許可だけ戻って物件の許可が無いことがある（許可は聞き直さない）。
-     黙って「写しは無い」とすると、すぐ下の写しから取った控えのまま見比べ、現場の入力を黙って戻す。 */
-  if(!(await saveDirOk(par, false))){ cf.rootUnread = true; return cf; }
-  let cp = null; try{ cp = await readExistingCaseFiles(par, fname, no); }catch(_){ cf.rootUnread = true; return cf; }
-  if(!cp || !cp.primary) return cf;
-  cf.rootNames = cp.names.slice();
-  if(!cf.primary){ cf.primary = cp.primary; cf.pick = cp.pick; cf.others = cf.others.concat(cp.others); }
-  else {
-    cf.rootPrimary = cp.primary;
-    const tl = Date.parse(cf.primary.editedAt || "") || 0, tr = Date.parse(cp.primary.editedAt || "") || 0;
-    if(tr > tl){ cf.others = [cf.primary].concat(cf.others, cp.others); cf.primary = cp.primary; cf.pick = cp.pick; }
-    else cf.others = cf.others.concat([cp.primary], cp.others);
-  }
-  return cf;
+  return await readExistingCaseFiles(dir, fname, no);
 }
-/* ★リストとすぐ下の両方にあるときの控え★
-   3つ見比べ（現場・控え・ファイル）は、控えが土台（cf.primary）の前の中身のときだけ正しい。
-   控えが別の方から取られていると、「土台≠控え」の欄を「PCが直した」と読み違えて、
-   現場の入力を黙って古い値へ戻してしまう。控えをそのまま使うのは次のときだけ：
-     ・控え＝土台の中身
-     ・土台がリストで、控えもリストから取った（印 from="list"）＝PCがリストを直した
-   どれでもなければ、値の見比べをやめた写しを渡す（写真の歯止めは残す）。1件保存では確かめの窓が1回出る。
-   一度リストへ書けば控えはリストの中身（印 from="list"）になるので、次の保存からは見比べに戻る。
-   ★出どころが確かでないときは推し量らない★ 日付の新しさで「使える」と決めると、
-     すぐ下の写しから取った控えでリストを見比べてしまい、現場の入力が黙って古い値へ戻る（反証で見つかった）。
-     分からないときは聞く方へ倒す。 */
+/* ★控えを見比べに使ってよいか★
+   3つ見比べ（現場・控え・ファイル）は、控えがそのファイルの前の中身のときだけ正しい。控えを使うのは次のときだけ：
+     ・控えが、今の保存先から読んだ／へ書いたもの（印 ep が今の保存先と同じ）＝PCがあとでそのファイルを直した
+     ・控えが、ファイルの中身と同じ（写真の名前・印も含む）
+   それ以外（物件のすぐ下の写し・📂 で選んだファイル・保存先を選び直す前・前の版の控え）は、どこから取ったか
+   分からないので、値の見比べをやめた写しを渡す（写真の歯止めは残す）。1件保存では1回聞き、まとめて保存では書かずに残す。
+   保存先を覚えていない端末（保存先を選ぶ画面だけで保存する）は、今までどおり控えを使う（すぐ下の写しの心配が無い）。
+   cf.sameDir === false … 保存先を選ぶ画面で選んだファイルが、今の保存先の中と確かめられなかった */
 function baseFitsFile(b, fileObj){
   if(!b || !fileObj) return false;
   let st; try{ st = fileBaseStateOf(fileObj); }catch(_){ return false; }
-  return Object.keys(b.state).concat(Object.keys(b.sig))
-    .every(k => MERGE_NEVER.has(k) || baseSame(b, k, st[k]));
+  if(!Object.keys(b.state).concat(Object.keys(b.sig)).every(k => MERGE_NEVER.has(k) || baseSame(b, k, st[k]))) return false;
+  /* 両方にある写真の名前・「工事調書に載せる」印も同じか（3つ見比べに使うので、欄だけ見て「同じ」としない） */
+  const fp = new Map();
+  (fileObj.chosho_photos || []).forEach(p => { if(p && p.dataUri) fp.set(String(p.id || photoContentId(p.dataUri)), p); });
+  return (b.photos || []).every(bp => { const p = fp.get(String(bp.id));
+    return !p || (String(p.label || "") === String(bp.label || "") && !!p.chosho === !!bp.chosho); });
 }
 function baseForWrite(b, cf){
-  if(!b || !cf || b.stale) return b;
-  if(!cf.rootPrimary && !cf.rootUnread) return b;       // すぐ下の写しが無いと分かっている
-  if(baseFitsFile(b, cf.primary)) return b;              // 控え＝土台の中身
-  if(b.from === "list" && cf.primary !== cf.rootPrimary) return b;   // 土台はリスト、控えもリストから（PCがリストを直した）
-  /* すぐ下を読めない（物件の許可が無い）ときは、すぐ下の写しから取ったかもしれない控え
-     （印 root・印の欄が無い前の版の控え）だけ疑う。📂 で読んだ控えや保存先を選ぶ画面で書いた控え（印 ""）まで
-     疑うと、ブラウザを開き直したあとのふつうの保存で毎回聞く・書かないになる。 */
-  if(!cf.rootPrimary && b.from !== "root" && ("from" in b)) return b;
+  if(!b || b.stale || !cf || !cf.primary) return b;
+  if(!_saveDir) return b;                                              // 保存先を覚えていない端末＝今までどおり
+  if(cf.sameDir !== false && b.ep && b.ep === _saveDirEp) return b;    // 今の保存先から取った控え
+  if(baseFitsFile(b, cf.primary)) return b;                            // 控え＝ファイルの中身
   return Object.assign({}, b, { stale:true });           // 出どころが確かでない → 値の見比べをやめる（1件保存では1回聞く）
 }
 /* ★書くと、いまファイルに入っている値が変わる欄★（写真・書いた時刻・管理番号などは見ない）。呼び名の並びを返す。
@@ -7459,7 +7488,7 @@ function mergePhotosUnion(mine, theirs, base, opt){
                       if(p.chosho) o.chosho = true;
                       return o;
                     });
-  /* ★土台ではない別のファイル（物件のすぐ下の古い写し・同じ戸別の別名）からは、足りない写真を足すだけ★
+  /* ★土台ではない別のファイル（同じ戸別の別名：管理番号.json.txt・管理番号 2.json など）からは、足りない写真を足すだけ★
      名前と印には触らない。控えと見比べると、控えより古い写しの名前・印を「PCが直した」と読み違え、
      保存するたびに正しい名前・印と古いものが入れ替わる（工事調書に載る写真が抜けたり戻ったりする）。 */
   if(opt && opt.addOnly) return missing.concat(my);
@@ -7741,8 +7770,9 @@ function mergeIntoState(state, old, opt){
   /* 4) 相手にしか無いキー ----------------------------------------------
      ★入れてはいけないものを除く★ 端末の中だけの控え（_fileBase）や目印が
      古いファイルに入っていても、持ち帰って書き出さない。 */
+  /* ★入れるのは土台のファイルの欄だけ★ 同じ戸別の別名ファイルは写真を足すだけ（1)）。
+     土台に無い欄を古い別名から埋めると、PCが消した欄（完了書なし・アパートの世帯数・保留・持ち越し）が黙って戻る。 */
   for(const k in old){ if(!MERGE_NEVER.has(k) && !(k in state)){ state[k] = old[k]; out.changed.push(k); } }
-  others.forEach(o => { for(const k in o){ if(!MERGE_NEVER.has(k) && !(k in state)){ state[k] = o[k]; out.changed.push(k); } } });
 
   /* 5) 残りのキーを1つずつ --------------------------------------------- */
   const done = new Set(["chosho_photos","measurements","asbestos","text_annotations"]);
@@ -7872,15 +7902,19 @@ async function mergeApplyAnswers(state, conflicts){
   }
 }
 /* 書き込む先のファイルを読む（無ければ null）。読めなければ null。 */
-async function readExistingCaseFile(dir, fname){
+async function readExistingCaseFile(dir, fname, bad){
   if(!dir || !fname) return null;
+  let fh;
+  try{ fh = await dir.getFileHandle(fname, { create: false }); }
+  catch(_){ return null; }                     // 無い＝はじめての保存。ふつうのこと。
+  /* ★あるのに読めない（ほかのアプリが使っている・書きかけ・壊れている）ときは、bad に名前を入れる★
+     「無い」と同じに扱うと、はじめての保存とみなして上書きし、PCの写真が消える。 */
   try{
-    const fh = await dir.getFileHandle(fname, { create: false });
     const txt = await (await fh.getFile()).text();
     if(!txt || !txt.trim()) return null;
     const j = JSON.parse(txt);
     return flowShareIsCase(j) ? j : null;      // 戸別ファイルでないものは触らない
-  }catch(_){ return null; }                    // 無い＝はじめての保存。ふつうのこと。
+  }catch(_){ if(bad) bad.push(fname); return null; }
 }
 
 /* 戸別ファイル（管理番号.json）かどうか。受付台帳・現場用（ひとまとめ）・地図は対象外。 */
@@ -9620,8 +9654,8 @@ async function spSaveFile(rec){
   // ② 保存先を選ぶ
   if(window.showSaveFilePicker){
     try{
-      const h = await window.showSaveFilePicker({ id:"genba-save", suggestedName: fname,
-        types:[{ description:"特別記録JSON", accept:{ "application/json":[".json"] } }] });
+      const h = await window.showSaveFilePicker(Object.assign({ id:"genba-save", suggestedName: fname,
+        types:[{ description:"特別記録JSON", accept:{ "application/json":[".json"] } }] }, _saveDir ? { startIn:_saveDir } : {}));
       const w = await h.createWritable();
       await w.write(new Blob([json], { type:"application/json" })); await w.close();
       rec.fileSavedAt = Date.now(); rec.fileRev = rec.rev | 0;
@@ -10041,6 +10075,8 @@ window.addEventListener("pagehide", flushPersist);
   /* 受付台帳の本体（IndexedDB）を読む。写しより新しければ入れ替えて描き直す。 */
   try{
     await rcLoadFromIdb();
+    /* 前の版で「物件名だけ」を覚えたスマホも、台帳を取り込み直すのを待たずに「物件名/リスト」へ（自分で選んだ名前には触らない） */
+    try{ const pj = String(((getReceptionData() || {}).project) || ""); if(pj && saveHintAuto(pj, pj)) renderSaveBar(); }catch(_){}
     try{ renderReceptionSort(); }catch(_){}
     try{ renderReceptionList(document.getElementById("reception-search").value||""); }catch(_){}
     try{ renderAppVer(); }catch(_){}
