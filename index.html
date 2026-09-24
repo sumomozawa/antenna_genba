@@ -1104,6 +1104,7 @@ const OPT = {
   antenna_46:[["","主と同型"],["antenna_u206","U206（20素子）"],["antenna_u146","U146（14素子）"],["antenna_ls56","LS56"]],
   antenna_50:[["","主と同型"],["antenna_u206","U206（20素子）"],["antenna_u146","U146（14素子）"],["antenna_ls56","LS56"]],
   ch46:[["no","1本（主のみ 八戸+二戸）"],["yes","2本（主 + 46CH専用三沢局）"],["triple","3本（14-24/46/50 個別）"]],
+  antenna_stations:[["","八戸＋めんこい（ふだん）"],["hachinohe_misawa","八戸＋三沢"],["ninohe_misawa","めんこい＋三沢"]],
   bs_cs:[["no","なし"],["yes","あり"]],
   bs_antenna_state:[["new","新規"],["existing","既存利用"],["replace","交換（新規）"]],
   bsmix_type:[["mixer","衛星ミキサー MXHWD"],["bc_amp","BC増幅器 BCBW35SS（混合+増幅）"]],
@@ -1120,6 +1121,7 @@ const OPT = {
   amplifier:[["amp_3u43","3U 3UB43-A04（3入力）"],["amp_1u45","1U UB45SS"],["amp_1ubc45","1UBC UBCBW45SS（UHF+BS対応）"]],
   line_booster:[["no","なし"],["yes","UB18L"]],
   line_booster_46:[["no","なし"],["yes","UB18L"]],
+  line_booster_pos:[["","HPFの下（ふだん）"],["sp_right","分配後 50ch（めんこい）だけ"],["sp_left","分配後 14-24ch（八戸）だけ"]],
   hpf:[["no","なし"],["hpf_dtf","DTF-UPWS-FP-a"],["hpf_std","HPF（標準）"]],
   outer_splitter:[["sp_2cw","2分配器WP SP2CW"],["sp_2cdw","2分配器WP SP2CDW（全通電）"],["sp_3cw","3分配器WP SP3CW"]],
   indoor_split:[["unknown","既設分配（数不明・既存流用）"],["2","2分配（新規）"],["3","3分配（新規）"],["4","4分配（新規）"],["5","5分配（新規）"],["6","6分配（新規）"],["8","8分配（新規）"]],
@@ -1161,11 +1163,11 @@ const DEFAULT_MEASUREMENTS = {
 // フォーム既定値（新規戸別＝index.html の初期値と一致）
 const DEFAULTS = {
   work_type:"catv_to_uhf",is_catv:"yes",high_work:"yes",snow_guard:"no",indoor_adj:"yes",
-  antenna_main:"antenna_u206",antenna_46:"",antenna_50:"",ch46:"yes",bs_cs:"no",
+  antenna_main:"antenna_u206",antenna_46:"",antenna_50:"",ch46:"yes",antenna_stations:"",bs_cs:"no",
   bs_antenna_state:"new",bsmix_type:"mixer",bsmix_state:"new",mount_type:"side_base_hafu",
   side_base_1:"side_sb22s",side_base_2:"none",side_base_3:"none",mast:"",mast_2:"",mast_3:"",
   connector_type:"mj25s",connector_qty:"0",turnbuckle_qty:"4",amplifier:"amp_3u43",
-  line_booster:"yes",line_booster_46:"no",hpf:"hpf_std",outer_splitter:"sp_2cw",indoor_split:"unknown",split_all_pass:"no",
+  line_booster:"yes",line_booster_46:"no",hpf:"hpf_std",outer_splitter:"sp_2cw",indoor_split:"unknown",split_all_pass:"no",line_booster_pos:"",
   power_pos:"tv_back",indoor_wire:"existing",outer_wire:"existing",tv_count:"4",
   remove_safety:"yes",remove_drop:"yes",cable_drop_len:"20",dummy_attached:"yes",use_fa:"yes",
   fa_splitter:"no",fa_splitter_pos:"instead",meas_show:"yes",
@@ -1211,7 +1213,7 @@ const GENBA_SCHEMA_VER = 1;
 const APP_NAME_SHORT = "現場入力";
 /* 版は「増えていくだけの通し番号」。メイン（積算・図面）と同じ番号体系で、
    番号が小さいほうが古い。 */
-const APP_VERSION = "173";
+const APP_VERSION = "174";
 function photoContentId(dataUri){
   if(!dataUri || typeof dataUri !== "string") return "";
   let a = 5381, b = 0;
@@ -1584,6 +1586,7 @@ async function photoFitForStorage(dataUri){
 // 書出し時にそのまま復元する＝PC側の ag_placement 等を現場入力の往復で失わない）。
 const GENBA_KNOWN_KEYS = new Set([
   "work_type","is_catv","high_work","snow_guard","indoor_adj",
+  "antenna_stations","line_booster_pos",   // 版174
   "antenna_main","antenna_46","antenna_50","ch46","bs_cs","bs_antenna_state","bsmix_type","bsmix_state",
   "mount_type","side_base_1","side_base_2","side_base_3","mast","mast_2","mast_3",
   "connector_type","connector_qty","turnbuckle_qty","amplifier","line_booster","line_booster_46","hpf","outer_splitter",
@@ -2465,6 +2468,8 @@ const SECTIONS = [
   { id:"antenna", ico:"📡", title:"アンテナ", fields:[
     {id:"antenna_main", type:"select", label:"主アンテナ"},
     {id:"ch46", type:"select", label:"UHFアンテナ本数"},
+    {id:"antenna_stations", type:"seg", label:"主アンテナで受ける局", show:staShown,
+     hint:"ふだんは八戸（14-24ch）とめんこい（二戸局50ch）を主アンテナで受け、三沢（46ch）は別のアンテナです。違う組み合わせの現場のときだけ選びます。金額は変わりません（図面の文字だけが変わります）。"},
     {id:"antenna_46", type:"select", label:"46CH用アンテナ", show:m=>m.ch46!=="no"},
     {id:"antenna_50", type:"select", label:"50CH用アンテナ", show:m=>m.ch46==="triple"},
     {id:"bs_cs", type:"seg", label:"BS/CS"},
@@ -2493,6 +2498,9 @@ const SECTIONS = [
      hint:"主系統（八戸14-24ch。二戸50chが一緒のこともあります）のアンテナの下に入れるぶんです。"},
     {id:"line_booster_46", type:"seg", label:"ラインブースター（46CH系統）", show:m=>m.ch46!=="no",
      hint:"46CH（三沢局）専用アンテナの下に入れるぶんです。主系統のぶんとは別に1台つきます。"},
+    {id:"line_booster_pos", type:"seg", label:"ラインブースター（主系統）の場所", show:lbPosShown,
+     get opts(){ return lbPosOptsFor(M); },
+     hint:"ふだんはHPFの下（2分配器の手前）。アンテナ直下の2分配器の後、片方だけ上げたいとき（めんこいだけ等）に選びます。台数・金額は変わりません。"},
     {id:"hpf", type:"select", label:"HPF"},
     {id:"outer_splitter", type:"select", label:"外部分配器"},
     {id:"indoor_split", type:"select", label:"宅内分配"},
@@ -2545,6 +2553,23 @@ const SECTIONS = [
   // 値は buildState が M の既定値から出力し続けるので互換性(78キー)は維持。設定はPCの index.html 側で行う。
 ];
 function isSideBase(m){ return m.mount_type==="side_base_hafu"||m.mount_type==="side_base_wall"||m.mount_type==="side_base_double"; }
+/* 版174: 主アンテナで受ける局。3本構成・3分配器WP では選ぶ余地が無いので出さない（PCの stationLayout と同じ）。 */
+function staShown(m){
+  return m.ch46!=="triple" && !(m.amplifier==="amp_3u43" && m.outer_splitter==="sp_3cw");
+}
+/* 版174: ラインブースターの場所。主アンテナの真下に2分配がある戸建てで、ラインブースター「あり」のときだけ出す
+   （PCの lbPosApplicable ＋ アパートでない、と同じ）。 */
+function lbPosShown(m){
+  return m.line_booster==="yes" && m.amplifier==="amp_3u43" && m.ch46!=="triple"
+    && m.outer_splitter!=="sp_3cw" && !mIsApt();
+}
+/* 分配器の枝の名前は「主アンテナで受ける局」で変わる（PCの lbPosLeft/lbPosRight と同じ局の並び）。値は固定。 */
+function lbPosOptsFor(m){
+  const st=(m&&m.antenna_stations)||"";
+  const name={ sp_right:(st==="hachinohe_misawa"||st==="ninohe_misawa") ? "46ch（三沢）" : "50ch（めんこい）",
+               sp_left:(st==="ninohe_misawa") ? "50ch（めんこい）" : "14-24ch（八戸）" };
+  return OPT.line_booster_pos.map(([v,l])=>name[v] ? [v,"分配後 "+name[v]+"だけ"] : [v,l]);
+}
 
 /* ============================================================================
    4) レンダリング
@@ -3625,6 +3650,7 @@ document.getElementById("pick-input").addEventListener("change",e=>{ handlePhoto
 function buildState(){
   syncTvArrays(M);
   const STR_FIELDS = ["work_type","is_catv","high_work","snow_guard","indoor_adj",
+    "antenna_stations","line_booster_pos",   // 版174
     "antenna_main","antenna_46","antenna_50","ch46","bs_cs","bs_antenna_state","bsmix_type","bsmix_state",
     "mount_type","side_base_1","side_base_2","side_base_3","mast","mast_2","mast_3",
     "connector_type","connector_qty","turnbuckle_qty","amplifier","line_booster","line_booster_46","hpf","outer_splitter",
