@@ -1211,7 +1211,7 @@ const GENBA_SCHEMA_VER = 1;
 const APP_NAME_SHORT = "現場入力";
 /* 版は「増えていくだけの通し番号」。メイン（積算・図面）と同じ番号体系で、
    番号が小さいほうが古い。 */
-const APP_VERSION = "172";
+const APP_VERSION = "173";
 function photoContentId(dataUri){
   if(!dataUri || typeof dataUri !== "string") return "";
   let a = 5381, b = 0;
@@ -7276,6 +7276,19 @@ function mergeUntouchedVal(k, v){
   if(mergeIsUnset(v)) return true;
   try{ return JSON.stringify(v) === JSON.stringify(mergeFreshState()[k]); }catch(_){ return false; }
 }
+/* ★メイン（PC）のエディタで作りたての戸別を保存したときに入る値のうち、現場入力の作りたてと違うもの★
+   これだけでは「ファイルに下見の内容が入っている」と見なさない。見なすと、PCで保存しただけのファイルに
+   現場が下見を入れたとき、1件保存で「PCに下見の内容が入っています」と聞かれ（「いいえ」で現場の下見が
+   PCの既定値に置き換わる）、まとめて保存では書かずに残ってしまう。
+   メインの既定値を変えたら、ここも合わせること（smoke_v173_genba.js が見張っている）。 */
+const MERGE_MAIN_FRESH = { side_base_2:"side_sb22s", mast:"mast_m182z", mast_2:"mast_m182z" };
+/* ファイルのこの欄は、まだ誰も下見で入れていない値か（現場入力・メインどちらの作りたてとも同じ／現場に欄が無い） */
+function mergeFileUntouchedVal(k, v){
+  if(isPassthroughKey(k)) return true;           // 現場に欄が無い（メインだけが必ず書く tv_power など）
+  if(mergeUntouchedVal(k, v)) return true;
+  return Object.prototype.hasOwnProperty.call(MERGE_MAIN_FRESH, k)
+      && JSON.stringify(v) === JSON.stringify(MERGE_MAIN_FRESH[k]);
+}
 /* TVの台数と4つの配列を必ずそろえる（syncTvArrays と同じ埋め方） */
 function mergeTvSyncState(state){
   const n = parseInt(state.tv_count, 10) || 1;
@@ -7637,7 +7650,7 @@ function mergeIntoState(state, old, opt){
     const keys0 = Array.from(new Set(Object.keys(state).concat(Object.keys(old)))).filter(isBuildKey);
     const mineTouched = keys0.some(k => !mergeUntouchedVal(k, state[k]));
     const fileFinal = (old.survey_done === true)
-      || (!("survey_done" in old) && keys0.some(k => (k in old) && !mergeUntouchedVal(k, old[k])));
+      || (!("survey_done" in old) && keys0.some(k => (k in old) && !mergeFileUntouchedVal(k, old[k])));
     if(!fileFinal)          buildMine = true;
     else if(!mineTouched)   buildMine = false;
     else { buildMine = false; out.buildAsk = true; }
@@ -7725,12 +7738,17 @@ function mergeIntoState(state, old, opt){
     ? TV_GROUP.some(k => baseHas(base, k) ? !baseSame(base, k, state[k]) : true)
     : buildMine;                                         // 控えなし＝材料ひとかたまりに合わせる
   if(!tvMine && TV_GROUP.some(k => (k in old))){
+    /* 値が同じ欄は取るものが無い（入れ替えも知らせもしない）。1つでも違えば、違う欄をファイルの値にし、
+       知らせる（「ファイルに入っていた中身を残しました（TVの台数・部屋）」）。
+       ★同じ値でも知らせると、PCが何も直していないのに毎回出て、本当にPCが直した物と見分けがつかない★ */
+    let took = false;
     TV_GROUP.forEach(k => {
       if(!(k in old)) return;
+      if(JSON.stringify(state[k]) === JSON.stringify(old[k])) return;
       if(out.buildAsk && !mergeUntouchedVal(k, state[k])) out.buildSwap[k] = state[k];
-      state[k] = old[k]; out.changed.push(k);
+      state[k] = old[k]; out.changed.push(k); took = true;
     });
-    out.kept.push("TVの台数・部屋");
+    if(took) out.kept.push("TVの台数・部屋");
   }
 
   /* 3-c) 測定値 -------------------------------------------------------- */
