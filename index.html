@@ -551,6 +551,11 @@
   .sb-dest:active{ transform:scale(.94); background:#d8e8fa; }
   .sb-dest.none{ background:#fff3e0; color:#8a4b00; border-color:#ffcc80; }
   .sb-dest.none:active{ background:#ffe9c9; }
+  /* ★受付台帳の物件と、覚えている保存先（入れる場所）の名前が違う★（版175）
+     その１の工事の人に、前の物件（その２）の場所が出たままになっていた。色を変えて気づけるようにする。 */
+  .sb-dest.other{ background:#fff3e0; color:#8a4b00; border-color:#ffb74d; }
+  .sb-dest.other:active{ background:#ffe9c9; }
+  .sb-dest.other .sb-dest-x{ background:rgba(138,75,0,.16); }
   /* 戸別ファイルの中身を控えてあるか（＝守られているか）を小さく出す */
   .sb-base{ flex:0 1 auto; min-width:0; overflow:hidden; margin-left:6px; padding:0 6px; border-radius:7px; font-size:10px; line-height:17px;
     background:rgba(0,105,92,.12); color:#00695c; white-space:nowrap; }
@@ -1213,7 +1218,7 @@ const GENBA_SCHEMA_VER = 1;
 const APP_NAME_SHORT = "現場入力";
 /* 版は「増えていくだけの通し番号」。メイン（積算・図面）と同じ番号体系で、
    番号が小さいほうが古い。 */
-const APP_VERSION = "174";
+const APP_VERSION = "175";
 function photoContentId(dataUri){
   if(!dataUri || typeof dataUri !== "string") return "";
   let a = 5381, b = 0;
@@ -3810,11 +3815,11 @@ function openMapView(no){
   if(hit){
     mapFitAll(false);                  // まず全体。ここは動かさず、そのあと一息おいて寄る
     setTimeout(() => mapZoomTo(hit.mark), MAP_ANIM_OPEN_WAIT);
-    document.getElementById("map-sub").textContent = _mapPack.sheets[_mapSheetIdx].name || "";
+    document.getElementById("map-sub").textContent = mapSubText(_mapPack.sheets[_mapSheetIdx].name || "");
   } else {
     mapFitAll(true);
     document.getElementById("map-sub").textContent =
-      _mapTarget ? "この管理番号は地図にありません" : (_mapPack.sheets[_mapSheetIdx].name || "");
+      mapSubText(_mapTarget ? "この管理番号は地図にありません" : (_mapPack.sheets[_mapSheetIdx].name || ""));
   }
   document.getElementById("map-here").disabled = !hit;
   document.getElementById("map-here").style.opacity = hit ? "1" : ".45";
@@ -4290,7 +4295,11 @@ async function mapImportFile(file){
     }
     p = p.map || null;
     if(!p){
-      if(addedLedger){ toast("受付台帳を取り込みました（" + addedLedger + "件）"); return; }
+      if(addedLedger){
+        toast("受付台帳を取り込みました（" + addedLedger + "件）");
+        try{ await savePlaceCheckAfterImport(); }catch(_){}
+        return;
+      }
       await uiAlert("このファイルには地図が入っていません。"); return;
     }
   }
@@ -4301,6 +4310,7 @@ async function mapImportFile(file){
   toast(addedLedger
     ? ("受付台帳" + addedLedger + "件と地図を取り込みました")
     : ("地図を取り込みました（" + (p.markCount || 0) + "件）"));
+  if(addedLedger){ try{ await savePlaceCheckAfterImport(); }catch(_){} }
   openMapView(M.chosho_mgmt_no);
 }
 /* ============================================================================
@@ -5332,20 +5342,24 @@ function renderSaveBar(){
   /* ★名前は長くなりうる（物件名がそのまま入る）★ 名前のところだけを「…」で切れるように
      包んでおく。包まないと帯が画面より広くなり、画面ごと横に動いてしまう。
      押したときに出る説明（title）には、切らない全部の名前を入れておく。 */
+  const mm = savePlaceMismatch();          // 受付台帳の物件と違う保存先なら印を付ける（版175）
+  const mmCls = mm ? " other" : "";
+  const mmTip = mm ? ("受付台帳の物件「" + esc(mm.proj) + "」とは違う名前です。") : "";
+  const mmTag = mm ? "⚠ 物件が違う" : "変更";
   const destHtml = (dest && destPP.outer && destPP.inner)
-    ? '<button type="button" class="sb-dest" id="sb-dest" title="「保存」を押すと、「' + esc(destPP.outer)
+    ? '<button type="button" class="sb-dest' + mmCls + '" id="sb-dest" title="' + mmTip + '「保存」を押すと、「' + esc(destPP.outer)
       + '」フォルダの中の「' + esc(destPP.inner) + '」の 管理番号.json を上書きします。'
       + '「' + esc(destPP.outer) + '」のすぐ下には入れません。押すと保存先を選び直せます">📁\u00a0<span class="sb-dest-n">'
-      + esc(destPP.outer) + '</span><span class="sb-dest-in">＞ ' + esc(destPP.inner) + '</span> <span class="sb-dest-x">変更</span></button>'
+      + esc(destPP.outer) + '</span><span class="sb-dest-in">＞ ' + esc(destPP.inner) + '</span> <span class="sb-dest-x">' + mmTag + '</span></button>'
     : dest
     ? '<button type="button" class="sb-dest" id="sb-dest" title="「保存」を押すと、「' + esc(dest)
       + '」の中の 管理番号.json を上書きします。押すと保存先を選び直せます">📁\u00a0<span class="sb-dest-n">'
       + esc(dest) + '</span> <span class="sb-dest-x">変更</span></button>'
     : hintPP.outer
-    ? '<button type="button" class="sb-dest" id="sb-dest" title="入れる場所：「' + esc(hintPP.outer)
+    ? '<button type="button" class="sb-dest' + mmCls + '" id="sb-dest" title="' + mmTip + '入れる場所：「' + esc(hintPP.outer)
       + '」フォルダの中の「' + esc(hintPP.inner) + '」\u000aこの端末ではフォルダを掴めません。保存のたびに、このフォルダに入れるよう出します。'
       + '「' + esc(hintPP.outer) + '」のすぐ下には入れません。押すと変えられます">📁\u00a0<span class="sb-dest-n">'
-      + esc(hintPP.outer) + '</span><span class="sb-dest-in">＞ ' + esc(hintPP.inner) + '</span> に入れる <span class="sb-dest-x">変更</span></button>'
+      + esc(hintPP.outer) + '</span><span class="sb-dest-in">＞ ' + esc(hintPP.inner) + '</span> に入れる <span class="sb-dest-x">' + mmTag + '</span></button>'
     : (saveHintName()
       ? '<button type="button" class="sb-dest" id="sb-dest" title="入れる場所： 「' + esc(saveHintName())
         + '」\u000aこの端末ではフォルダを掴めません。保存のたびに、この名前のフォルダに入れるよう出します。押すと変えられます">📁\u00a0<span class="sb-dest-n">'
@@ -5386,8 +5400,12 @@ async function saveDirChange(mode){
        ★物件名だけの候補は出さない★ 押すだけで物件のすぐ下を覚えてしまうため。 */
     if(proj) add(proj + " ＞ リスト", proj + "/リスト", "受付台帳の物件名の中の「リスト」（決まりの置き場所）", "");
     const notBare = h => !proj || h !== proj;
-    if(now && notBare(now)) add(saveHintLabel(now), now, "いま覚えている名前", "");
-    saveHintHistory().filter(notBare).forEach(h => add(saveHintLabel(h), h, "前に使った名前", ""));
+    /* ★別の物件の名前は「前に使った名前」に出さない★（版175）押すだけで前の物件（その２）へ戻ってしまう。
+       覚え書きからは消さない（その物件の台帳をまた入れれば出てくる）。 */
+    const sameProj = h => !proj || !pjDiffers(saveHintParts(h).outer, proj);
+    const nowOther = !!(now && proj && saveHintParts(now).outer && pjDiffers(saveHintParts(now).outer, proj));
+    if(now && notBare(now)) add(saveHintLabel(now), now, nowOther ? "いま覚えている名前（⚠ 受付台帳の物件と違います）" : "いま覚えている名前", "");
+    saveHintHistory().filter(notBare).filter(sameProj).forEach(h => add(saveHintLabel(h), h, "前に使った名前", ""));
     add("自分で書く", "\u0000type", "候補に無いときはこちら", "type");
     if(now) add("覚えない", "", "保存のたびの案内を出しません", "off");
     const picked = await uiPickName("📁 入れる場所の名前",
@@ -5400,13 +5418,21 @@ async function saveDirChange(mode){
         "候補に無いときだけ、ここに書いてください。<br>例： 物件A/リスト（「/」で区切ると、中のフォルダまで出します）", now);
       if(v === null) return;                   // やめた（覚えている名前はそのまま）
     }
+    let prevAuto = null; try{ prevAuto = localStorage.getItem(LS_SAVEHINT_AUTO); }catch(_){}
     saveHintSet(v);
     saveHintRemember(v);
-    /* 自動の候補を選んだときは、物件が変わったら追いかける。ほかの名前は自分で選んだもの。 */
+    /* 自動の候補を選んだときは、物件が変わったら追いかける。ほかの名前は自分で選んだもの。
+       ★いまと同じ名前を選び直しただけなら、今までの扱いのまま★（版175）
+       「自分で選んだ」に変えてしまうと、次に別の物件の台帳を入れても追いかけなくなる。 */
     {
       const got = saveHintName();
-      try{ localStorage.setItem(LS_SAVEHINT_AUTO,
-        !got ? "\u0000off" : ((proj && got === proj + "/リスト") ? got : "")); }catch(_){}
+      const mark = !got ? "\u0000off"
+        : (proj && got === proj + "/リスト") ? got
+        : (got === now && prevAuto !== null && prevAuto !== "\u0000off") ? prevAuto
+        : "";
+      try{ localStorage.setItem(LS_SAVEHINT_AUTO, mark); }catch(_){}
+      /* 受付台帳の物件を見たうえで選んだ名前＝この物件ではこれでよい（帯の ⚠ を消す） */
+      if(got && proj) savePlaceOkSet(proj);
     }
     renderSaveBar();
     await uiAlert(saveHintName()
@@ -5443,6 +5469,16 @@ async function saveDirChange(mode){
     toast("保存先を「" + saveDirPlace() + "」にしました（「" + (picked.name || "選んだフォルダ") + "」のすぐ下には入れません）");
   } else if(!_saveDirAdoptMiss){
     toast("保存先を「" + (dir.name || "選んだフォルダ") + "」にしました");
+  }
+  /* ★選んだフォルダが、受付台帳の物件と名前が違う★（版175）
+     窓はいつも前のフォルダ（前の物件）から開くので、そのまま選び直してしまいやすい。1回だけ確かめる。 */
+  const mm = savePlaceMismatch();
+  if(mm && mm.held){
+    if(await uiConfirm("選んだ保存先「" + saveDirPlace() + "」は、\n受付台帳の物件「" + mm.proj + "」と名前が違います。\n\n"
+        + "このフォルダでよいですか？\n\n"
+        + "OK＝このフォルダにする（この物件では、もう聞きません）\n"
+        + "キャンセル＝あとで「📁」で選び直す（帯に ⚠ が出たままになります）")) savePlaceOkSet(mm.proj);
+    renderSaveBar();
   }
 }
 /* 中身の指紋。saveDraft を通さずにモデルが書き換わっても、次に控えるときに
@@ -5695,8 +5731,10 @@ function saveHintWhere(){
 function saveHintLine(){
   const pp = saveHintParts();
   if(!pp.inner) return "";
+  const mm = saveDirName() ? null : savePlaceMismatch();
   if(pp.outer) return "\n\n★入れる場所：「" + pp.outer + "」フォルダの中の「" + pp.inner + "」フォルダ★\n"
-    + "（「" + pp.outer + "」フォルダのすぐ下には入れません。管理番号.json が並んでいるフォルダです）";
+    + "（「" + pp.outer + "」フォルダのすぐ下には入れません。管理番号.json が並んでいるフォルダです）"
+    + (mm ? ("\n⚠ 受付台帳の物件「" + mm.proj + "」とは違う名前です。違っていたら「📁」で変えてください。") : "");
   return "\n\n★入れる場所：「" + pp.inner + "」フォルダ★\n（管理番号.json が並んでいるフォルダです）";
 }
 /* 共有で渡したあとの知らせの頭。入れる場所の名前を覚えていれば、下の★を指す */
@@ -5710,9 +5748,11 @@ function saveShareWhere(){
 const LS_SAVEHINT_AUTO = "field_savedir_hint_auto_v1";
 function saveHintAuto(newProj, oldProj){
   /* ★フォルダを掴める端末（PC）では決めない★ 決めると保存バーの「未設定 選ぶ」が消え、
-     「この端末ではフォルダを掴めません」と正しくない説明が出て、📁で選ばなくなる。 */
-  if(window.showDirectoryPicker) return "";
-  newProj = String(newProj || "").trim(); if(!newProj) return "";
+     「この端末ではフォルダを掴めません」と正しくない説明が出て、📁で選ばなくなる。
+     ★ただし、窓が開けずに名前だけ覚えた端末は別★（版175）名前がもう出ているので、物件が変わったら追いかける。
+     追いかけないと、その１の台帳を入れても前の物件（その２）の名前が出続ける。 */
+  if(window.showDirectoryPicker && !saveHintName()) return "";
+  newProj = String(newProj || "").trim();
   oldProj = String(oldProj || "").trim();
   let auto = null; try{ auto = localStorage.getItem(LS_SAVEHINT_AUTO); }catch(_){}
   /* ★前の版で「覚えない」を押した端末★ 印（LS_SAVEHINT_AUTO）はまだ無く、名前のキーが空で残っている。
@@ -5723,6 +5763,20 @@ function saveHintAuto(newProj, oldProj){
   }
   auto = auto || "";
   if(auto === "\u0000off") return "";                        // 「覚えない」を選んだ人には出さない
+  /* ★物件名の入っていない受付台帳★（版175）PCで物件を開かずに書き出すと、物件名が空で届く。
+     前は何もしなかったので、前の物件の「物件A/リスト」が出たままになり、
+     別の工事（その１）の人に前の物件（その２）の名前が出ていた。
+     自動で決めた名前のときだけ、ただの「リスト」に戻す（「リスト」はどの物件でも正しい）。
+     自分で選んだ名前には触らない（取り込みの知らせで、確かめるよう言う）。 */
+  if(!newProj){
+    const cur0 = saveHintName();
+    if(!cur0 || cur0 === "リスト") return "";
+    const was = (auto && cur0 === auto) || (oldProj && (cur0 === oldProj || cur0 === oldProj + "/リスト"));
+    if(!was) return "";
+    saveHintSet("リスト");
+    try{ localStorage.setItem(LS_SAVEHINT_AUTO, "リスト"); }catch(_){}
+    return "リスト";
+  }
   const cur = saveHintName(), target = newProj + "/リスト";
   if(cur === target) return "";
   const mine = cur && cur !== auto && cur !== oldProj && cur !== newProj && cur !== (oldProj + "/リスト");
@@ -5731,6 +5785,108 @@ function saveHintAuto(newProj, oldProj){
   try{ localStorage.setItem(LS_SAVEHINT_AUTO, target); }catch(_){}
   return target;
 }
+/* ============================================================================
+   ★受付台帳の物件と、覚えている保存先（入れる場所）が合っているか★（版175）
+   ----------------------------------------------------------------------------
+   その１の工事の人から「台帳を読み込んだら、その２になっている」と言われた。
+   アプリの中に「その２」と決め打ちした所は無く、前に取り込んだ物件（その２）の名前を
+   この端末が覚えたままにしていた（入れる場所・保存先フォルダ・地図）。
+   名前は人が打つので、かっこ・空白・全角半角の違いは見ない。
+   「その１」「その２」のように両方に番号があれば、番号で決める。
+   片方が空のときは「違う」と言わない（分からないときに脅さない）。
+   ============================================================================ */
+function pjNameKey(s){
+  return String(s == null ? "" : s).normalize("NFKC")
+    .replace(/[\s()\[\]{}「」『』【】〔〕<>・_\-]/g, "").toLowerCase();
+}
+/* 「その１」「その2」「その二」→ "1"／"2"／"2"。番号が無ければ "" */
+function pjSonoNo(k){
+  const m = /その([0-9]+|[一二三四五六七八九十])/.exec(String(k || ""));
+  if(!m) return "";
+  const v = m[1];
+  if(/^[0-9]+$/.test(v)) return String(+v);
+  return v === "十" ? "10" : String("一二三四五六七八九".indexOf(v) + 1);
+}
+/* 2つの物件名が、別の物件を指していそうか */
+function pjDiffers(a, b){
+  const x = pjNameKey(a), y = pjNameKey(b);
+  if(!x || !y || x === y) return false;
+  const sx = pjSonoNo(x), sy = pjSonoNo(y);
+  if(sx && sy) return sx !== sy;                     // その１ と その２ は別の物件
+  if(sx || sy) return false;                         // 片方にだけ番号がある＝分からない（脅さない）
+  return !(x.indexOf(y) >= 0 || y.indexOf(x) >= 0);  // 片方がもう片方の一部なら同じ物件とみる
+}
+/* いま取り込んである受付台帳の物件名（無ければ空） */
+function rcProjName(){
+  try{ return String(((getReceptionData() || {}).project) || "").trim(); }catch(_){ return ""; }
+}
+/* 「この物件では、いまの保存先のままでよい」と答えたときの覚え書き。
+   答えたときの物件名と保存先を一緒に持つ＝保存先か物件が変われば、また知らせる。 */
+const LS_SAVEPLACE_OK = "field_saveplace_ok_v1";
+function savePlaceNow(held){ return held ? ("d:" + saveDirPlace()) : ("h:" + saveHintName()); }
+function savePlaceOkSet(proj){
+  const held = !!saveDirName();
+  try{ localStorage.setItem(LS_SAVEPLACE_OK, JSON.stringify({ proj: String(proj || ""), place: savePlaceNow(held) })); }catch(_){}
+}
+function savePlaceOkFor(proj, held){
+  let o = null;
+  try{ o = JSON.parse(localStorage.getItem(LS_SAVEPLACE_OK) || "null"); }catch(_){ o = null; }
+  return !!(o && o.proj && pjNameKey(o.proj) === pjNameKey(proj) && o.place === savePlaceNow(held));
+}
+/* 覚えている保存先（PC＝フォルダ／スマホ＝入れる場所の名前）が、受付台帳の物件と違うか。
+   違えば { proj, outer, inner, held }、合っている・分からないときは null。 */
+function savePlaceMismatch(){
+  const proj = rcProjName();
+  if(!proj) return null;
+  /* ★窓があるかではなく、フォルダを覚えているかで分ける★
+     窓が開けずに名前だけ覚えた端末（PCの一部）も、名前の方で確かめる。 */
+  const held = !!saveDirName();
+  /* フォルダを選べる端末で、まだフォルダを覚えていないときは、名前だけの入れる場所は使わない
+     （保存のときにフォルダの窓が出るので。版172 の取り込みの知らせと同じ考え方） */
+  if(!held && window.showDirectoryPicker) return null;
+  const pp = held ? saveDirPlaceParts() : saveHintParts();
+  if(!pp.outer) return null;                          // 「リスト」だけ＝どの物件でも正しい
+  if(!pjDiffers(pp.outer, proj)) return null;
+  if(savePlaceOkFor(proj, held)) return null;         // 「このままでよい」と答えた物件
+  return { proj: proj, outer: pp.outer, inner: pp.inner, held: held };
+}
+/* 台帳を取り込んだあと、保存先が別の物件のままなら、その場で選んでもらう。
+   ★黙って書き替えない★ 自分で選んだ名前・フォルダかもしれないので、押して決めてもらう。 */
+async function savePlaceCheckAfterImport(){
+  const mm = savePlaceMismatch();
+  if(!mm) return;
+  const now = mm.outer + " ＞ " + mm.inner;
+  if(mm.held){
+    /* フォルダを掴める端末：ここからフォルダの窓は開けない（押した直後ではないため）。
+       選び直しは帯の「📁」から。 */
+    const v = await uiPickName("⚠ 保存先が、受付台帳の物件と違います",
+      "受付台帳の物件：<b>" + esc(mm.proj) + "</b><br>いま覚えている保存先：<b>" + esc(now) + "</b><br><br>"
+      + "別の工事のフォルダなら、上の帯の「📁」を押して、この物件のフォルダを選び直してください。", [
+        { label: "あとで「📁」で選び直す", value: "later", sub: "帯に「⚠ 物件が違う」が出たままになります", kind: "" },
+        { label: "このフォルダのままにする", value: "keep", sub: now + " に保存します（この物件では、もう聞きません）", kind: "" }
+      ]);
+    if(v === "keep") savePlaceOkSet(mm.proj);
+  } else {
+    const target = mm.proj + "/リスト";
+    const v = await uiPickName("⚠ 入れる場所が、受付台帳の物件と違います",
+      "受付台帳の物件：<b>" + esc(mm.proj) + "</b><br>いま覚えている入れる場所：<b>" + esc(now) + "</b>", [
+        { label: mm.proj + " ＞ リスト", value: "fix", sub: "受付台帳の物件の中の「リスト」（おすすめ）", kind: "" },
+        { label: "いまのまま（" + now + "）", value: "keep", sub: "この物件でも変えません（この物件では、もう聞きません）", kind: "" }
+      ]);
+    if(v === "fix"){
+      saveHintSet(target); saveHintRemember(target);
+      try{ localStorage.setItem(LS_SAVEHINT_AUTO, target); }catch(_){}   // 物件が変わったら、また追いかける
+    } else if(v === "keep") savePlaceOkSet(mm.proj);
+  }
+  renderSaveBar();
+}
+/* 端末に入っている地図が、受付台帳とは別の物件のものか */
+function mapPackOtherProj(){
+  const mp = (typeof _mapPack !== "undefined" && _mapPack) ? String(_mapPack.project || "").trim() : "";
+  return !!(mp && pjDiffers(mp, rcProjName()));
+}
+/* 地図の見出し。別の物件の地図なら頭に印を付ける（地図は消さない） */
+function mapSubText(t){ return (mapPackOtherProj() ? "⚠ 別の物件の地図／" : "") + (t || ""); }
 /* フォルダへ書く許可があるか。ask=true なら聞き直す（許可はブラウザを閉じると切れることがある） */
 /* そのフォルダの直下にある戸別ファイル（管理番号.json）の数をざっと数える
    （「中のフォルダの方に戸別が多いですよ」と勧めるかどうかを決めるために使う） */
@@ -6381,6 +6537,17 @@ async function saveAllDrafts(mode){
     ? ("\n\n※ このうち " + otherCnt + "件は、他の端末が保存したファイルです。\n"
        + "上書きすると、その端末で撮った写真などはファイルから消えます。")
     : "";
+  /* ★いまの受付台帳に無い戸別★（版175）前の物件の下書きが残っていると、新しい物件の保存先へ一緒に書き出される。
+     書き出しは止めない（写真を守る）が、件数と番号を先に言う。 */
+  const rcRowsNow = ((getReceptionData() || {}).rows) || [];
+  const rcNoSet = {};
+  rcRowsNow.forEach(r => { const k = draftNoKey(r && r.mgmt_no); if(k) rcNoSet[k] = 1; });
+  const outside = rcRowsNow.length ? files.filter(f => !rcNoSet[draftNoKey(f.no)]) : [];
+  const outsideTxt = outside.length
+    ? ("\n\n※ このうち " + outside.length + "件は、いまの受付台帳に無い戸別です（前の物件の戸別かもしれません）：\n"
+       + outside.slice(0, 6).map(f => "・" + (draftNoKey(f.no) || f.no)).join("\n")
+       + (outside.length > 6 ? ("\n・ほか " + (outside.length - 6) + " 件") : ""))
+    : "";
   // 書き出せなかった分は黙って落とさず、必ず知らせる（「保存したのにファイルが無い」を防ぐ）
   const missTxt = missing.length
     ? ("\n\n⚠ この端末に下書きが見つからず、書き出せない戸別が " + missing.length + " 件あります：\n"
@@ -6397,7 +6564,7 @@ async function saveAllDrafts(mode){
   const nothingTxt = skippedNothing.length
     ? ("\n\n※ この端末で何も入力していない戸別 " + skippedNothing.length + " 件は、PCのファイルを書き替えません（写真も工事日も残ります）")
     : "";
-  if(!(await uiConfirm(head + listTxt + otherTxt + missTxt + nothingTxt
+  if(!(await uiConfirm(head + listTxt + otherTxt + outsideTxt + missTxt + nothingTxt
       + (noNum && !isAll ? ("\n\n※ 管理番号の無い下書き " + noNum + " 件は対象外です") : "")
       + pickTxt))) return;
 
@@ -8594,7 +8761,9 @@ async function rcLoadFromIdb(){
   try{ rec = await idbMapGet(RC_KEY); }catch(_){ return; }
   const cur = getReceptionData();
   if(rec && rec.data && Array.isArray(rec.data.rows)){
-    const a = rec.data.importedAt | 0, b = (cur && cur.importedAt | 0) || 0;
+    /* ★「| 0」で比べない★（版175）ミリ秒の時刻は32ビットに入らず、日によって新旧が入れ替わる。
+       入れ替わると、起動のたびに前の物件（その２）の台帳が戻ってきてしまう。 */
+    const a = Number(rec.data.importedAt) || 0, b = (cur && Number(cur.importedAt)) || 0;
     if(!cur || a >= b){
       _rcData = rec.data;
       lsCopy(LS_RECEPTION, JSON.stringify(rec.data));
@@ -10012,6 +10181,10 @@ function receptionSaveRows(src){
     compdoc_waived_note:String(x.compdoc_waived_note||"")
   })).filter(x=>x.mgmt_no||x.name||x.addr);
   _calCtrShortMap = null;   // 会社の顔ぶれが変わるので、短い名前は作り直す
+  /* ★前の物件で選んだ会社が、新しい台帳に1件も無い★（版175）
+     絞り込みが残ると一覧が全部隠れ、会社の一列は2社以上のときしか出ないので戻し方も見えない。
+     「すべて」に戻す（台帳にその会社がいれば、選んだままにする）。 */
+  try{ if(norm.length && _rcCtr !== "all" && !norm.some(r => rcCtrOf(r) === _rcCtr)) rcCtrSet("all"); }catch(_){}
   /* 本体は IndexedDB（容量が大きい）。localStorage は起動直後に出すための写し。
      どちらに入ったかは rcPersist が面倒を見る。 */
   _rcLastKept = rcPersist({ type:"antenna_reception_ledger",
@@ -10050,6 +10223,7 @@ document.getElementById("reception-file").addEventListener("change",e=>{
         await uiAlert("受付台帳が入っていないファイルです。\n\nPCの受付台帳で「📦 現場用」を押してできる\n「現場用_物件名_日付.json」を選んでください。"); return;
       }
       const beforeRows = getReceptionRows();          // 取り込む前の中身（何が変わったか数えるため）
+      const beforeProj = rcProjName();                // 取り込む前の物件名（物件が替わったかを言うため）
       let n;
       try{ n = receptionSaveRows({ rows, project, exportedAt, appVersion:mainVersion }); }
       catch(err){ await uiAlert("取り込んだ台帳の保存に失敗しました（空き容量不足かも）："+err.message); return; }
@@ -10062,8 +10236,15 @@ document.getElementById("reception-file").addEventListener("change",e=>{
       const when = rcWhenText(exportedAt);
       await uiAlert((kept ? "✅ 受付台帳を取り込みました（" : "受付台帳を読み込みました（")+n+"件）"
         + (kept ? "" : "\n\n" + RC_KEEP_NG + "\n")
-        + (project ? ("\n物件："+project) : "")
-        + ((saveHintWhere() && !window.showDirectoryPicker && !saveDirName()) ? ("\n入れる場所："+saveHintWhere()) : "")
+        + (project
+            ? ("\n物件："+project + ((beforeProj && pjDiffers(beforeProj, project)) ? "\n（前に取り込んでいた物件から替わりました）" : ""))
+            : "\n物件：（この受付台帳には物件名が入っていません）")
+        /* ★保存先（入れる場所）を必ず出す★（版175）前の物件の名前のままだと気づけなかった。 */
+        + (saveDirName() ? ("\n保存先：「"+(saveDirPlace() || saveDirName())+"」")
+           : ((saveHintWhere() && !window.showDirectoryPicker) ? ("\n入れる場所："+saveHintWhere()) : ""))
+        + (savePlaceMismatch() ? ("\n⚠ " + (saveDirName() ? "保存先" : "入れる場所") + "が、この物件と違います（このあと選べます）") : "")
+        + ((!project && !saveDirName() && !window.showDirectoryPicker && saveHintParts().outer) ? "\n⚠ 物件名が無いので、入れる場所が合っているか確かめてください" : "")
+        + ((!gotMap && mapPackOtherProj()) ? "\n⚠ この端末の地図は、別の物件のものです（このファイルに地図は入っていませんでした）" : "")
         + (when ? ("\nPCで書き出した日時："+when) : "")
         + (gotMap ? ("\n地図も取り込みました（建物 "+gotMap+"件）") : "")
         + "\n\n"
@@ -10076,6 +10257,8 @@ document.getElementById("reception-file").addEventListener("change",e=>{
                    + (diff.removed ? ("\n・台帳から消えた："+diff.removed+"件") : ""))
                 : "前回の取り込みから変わったところはありませんでした。\n（PCで直したあと、書き出し直したファイルか確かめてください）"))
         + (applied ? ("\n\nこの端末の下書き "+applied+"件に、PCで直した内容を入れ直しました。\n（現場で入力したアンテナ・部材・測定・写真はそのままです）") : ""));
+      // 保存先が別の物件のままなら、ここで選んでもらう（版175）
+      try{ await savePlaceCheckAfterImport(); }catch(e){ console.warn("保存先の確かめに失敗", e); }
     }catch(err){ await uiAlert("取込みに失敗しました："+err.message); }
   };
   r.readAsText(f);
@@ -10131,7 +10314,7 @@ document.getElementById("map-sheet").addEventListener("change",function(){
   _mapSheetIdx=parseInt(this.value,10)||0;
   mapSelect(null);                    // 図面が変われば選んでいた建物も外す
   mapRenderSheet(); mapFitAll(true);
-  document.getElementById("map-sub").textContent=_mapPack.sheets[_mapSheetIdx].name||"";
+  document.getElementById("map-sub").textContent=mapSubText(_mapPack.sheets[_mapSheetIdx].name||"");
 });
 document.getElementById("map-file").addEventListener("change",function(){
   const f=this.files&&this.files[0]; this.value="";
