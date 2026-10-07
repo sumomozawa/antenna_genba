@@ -324,7 +324,7 @@
   header .flowtag.ph-done{background:#1b5e20;}
   @keyframes tagIn{ from{ opacity:0; transform:translateY(-4px) scale(.85);} to{ opacity:1; transform:none;} }
   .savedhint{position:fixed; bottom:132px; left:50%; background:#263238; color:#fff; font-size:14px;
-    padding:12px 22px; border-radius:24px; opacity:0; z-index:70; pointer-events:none;
+    padding:12px 22px; border-radius:24px; opacity:0; z-index:115; pointer-events:none;   /* 地図の画面（110）の上にも出す（版175） */
     transform:translate(-50%,34px) scale(.7);
     transition:opacity var(--t-med) var(--ease-out), transform .5s var(--ease-spring);
     box-shadow:0 8px 26px rgba(0,0,0,.34);}
@@ -483,9 +483,10 @@
   }
   /* ---- モーダル（下書き一覧）---- */
   .modal{position:fixed; inset:0; z-index:100; background:rgba(0,0,0,.5); display:none; align-items:flex-end;}
-  /* ★聞く窓・知らせの窓は、地図の画面（z-index:110）より上に出す★（版175）
-     地図の画面から現場用ファイルを取り込むと、保存先を聞く窓が地図の裏に隠れ、地図も出なくなっていた。 */
-  #pick-modal, #type-modal, #ui-dialog{ z-index:120; }
+  /* ★聞く窓・知らせの窓は、いちばん上に出す★（版175）
+     地図の画面（z-index:110）から現場用ファイルを取り込むと、保存先を聞く窓が地図の裏に隠れ、地図も出なくなっていた。
+     「保存中…」の暗幕（#save-ov 9999）の途中で聞くこともある（PCのファイルとの違いなど）ので、それより上にする。 */
+  #pick-modal, #type-modal, #ui-dialog{ z-index:10000; }
   .modal.open{display:flex;}
   .modal .sheet{background:#fff; width:100%; max-height:85vh; border-radius:16px 16px 0 0; overflow:auto; padding:16px;}
   .modal h3{margin:4px 0 12px;}
@@ -5486,7 +5487,7 @@ async function savePlaceConfirmAfterPick(mode){
       + "このフォルダでよいですか？\n\n"
       + "OK＝このフォルダにする（この物件では、もう聞きません）\n"
       + (mode === "stop"
-          ? "キャンセル＝保存しない（もう一度押して、この物件のフォルダを選んでください）"
+          ? "キャンセル＝保存しない（保存先は前のままにします。もう一度押して、この物件のフォルダを選んでください）"
           : "キャンセル＝あとで「📁」で選び直す（帯に ⚠ が出たままになります）"));
   if(ok) savePlaceOkSet(mm.proj);
   renderSaveBar();
@@ -5683,6 +5684,29 @@ async function saveDirSet(h, parent){
   try{ localStorage.setItem(LS_SAVEDIR, kept ? ((h && h.name) || "") : ""); }catch(_){}
   try{ localStorage.setItem(LS_SAVEDIR_PAR, kept ? ((h && parent && parent.name) || "") : ""); }catch(_){}
 }
+/* ★いま覚えている保存先を控える／戻す★（版175）まとめて保存で選んだフォルダを断ったとき、前の保存先へそのまま戻す。
+   saveDirSet で戻すと印（ep）が新しくなり、控えが使えなくなるので、印もそのまま戻す。 */
+async function saveDirKeep(){
+  let rec = null;
+  try{ rec = await idbMapGet(SAVEDIR_KEY); }catch(_){ rec = null; }
+  let ls = null;
+  try{ ls = [localStorage.getItem(LS_SAVEDIR), localStorage.getItem(LS_SAVEDIR_PAR)]; }catch(_){ ls = null; }
+  return { dir:_saveDir, par:_saveDirPar, ep:_saveDirEp, rec:rec, ls:ls };
+}
+async function saveDirRestore(k){
+  if(!k) return;
+  _saveDir = k.dir; _saveDirPar = k.par; _saveDirEp = k.ep;
+  _caseDirHit = _caseDirHitRoot = _cfIdx = null;      // 前の保存先で当たった所・名前の一覧は捨てる
+  _saveDirRootOk = new WeakMap();
+  try{ await idbMapPut(k.rec || { key:SAVEDIR_KEY, handle:null, parent:null, parentName:"", ep:"", savedAt:Date.now() }); }catch(_){}
+  if(k.ls){
+    try{
+      if(k.ls[0] == null) localStorage.removeItem(LS_SAVEDIR); else localStorage.setItem(LS_SAVEDIR, k.ls[0]);
+      if(k.ls[1] == null) localStorage.removeItem(LS_SAVEDIR_PAR); else localStorage.setItem(LS_SAVEDIR_PAR, k.ls[1]);
+    }catch(_){}
+  }
+  renderSaveBar();
+}
 /* 覚えているフォルダの上のフォルダ（物件）。分からなければ null */
 function saveDirParentOf(dir){
   return (_saveDirPar && dir && _saveDirPar.dir === dir) ? _saveDirPar.parent : null;
@@ -5813,11 +5837,15 @@ function pjNameKey(s){
 }
 /* 「その１」「その2」「その二」→ "1"／"2"／"2"。番号が無ければ "" */
 function pjSonoNo(k){
-  const m = /その([0-9]+|[一二三四五六七八九十])/.exec(String(k || ""));
+  /* 漢数字は 九十九 まで読む（「その十一」「その二十」を「その十」「その二」と読み違えない） */
+  const m = /その([0-9]+|[一二三四五六七八九]?十[一二三四五六七八九]?|[一二三四五六七八九])/.exec(String(k || ""));
   if(!m) return "";
   const v = m[1];
   if(/^[0-9]+$/.test(v)) return String(+v);
-  return v === "十" ? "10" : String("一二三四五六七八九".indexOf(v) + 1);
+  const d = c => "一二三四五六七八九".indexOf(c) + 1;
+  const t = v.indexOf("十");
+  if(t < 0) return String(d(v));
+  return String((t > 0 ? d(v[0]) : 1) * 10 + (v.length > t + 1 ? d(v[t + 1]) : 0));
 }
 /* 「その１」「その２」のように、両方に番号があって番号が違うときだけ true（はっきり別の物件） */
 function pjSonoDiffers(a, b){
@@ -6624,11 +6652,13 @@ async function saveAllDrafts(mode){
       }
       /* 「保存」1件ぶんの行き先も、ここで選んだ所にそろえる。
          物件のフォルダを選んだときは、中の「リスト」へ（手がかりが弱いときは聞かずに選んだ所のまま） */
+      const keepDir = await saveDirKeep();       // やめたときに、前に覚えていたフォルダへ戻すため
       dir = await saveDirAdopt(dir, { ask:false });
       renderSaveBar();
       /* ★選んだフォルダが、受付台帳の物件と名前が違う★（版175）別の物件（その２）のリストへ
-         その１の戸別を書き込まないよう、書く前に1回だけ確かめる。やめたら何も書かない（下書きはそのまま）。 */
-      if(!(await savePlaceConfirmAfterPick("stop"))){ setBusy(false); return; }
+         その１の戸別を書き込まないよう、書く前に1回だけ確かめる。やめたら何も書かない（下書きはそのまま）。
+         ★やめたら、前に覚えていた保存先へ戻す★ 断ったフォルダを覚えたままだと、次の1件の「保存」が黙ってそこへ書く。 */
+      if(!(await savePlaceConfirmAfterPick("stop"))){ await saveDirRestore(keepDir); setBusy(false); return; }
     }
   } else {
     // フォルダを選べない端末（Android等）。覚えているものがあれば使い、無ければ共有／ダウンロードへ。
