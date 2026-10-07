@@ -483,6 +483,9 @@
   }
   /* ---- モーダル（下書き一覧）---- */
   .modal{position:fixed; inset:0; z-index:100; background:rgba(0,0,0,.5); display:none; align-items:flex-end;}
+  /* ★聞く窓・知らせの窓は、地図の画面（z-index:110）より上に出す★（版175）
+     地図の画面から現場用ファイルを取り込むと、保存先を聞く窓が地図の裏に隠れ、地図も出なくなっていた。 */
+  #pick-modal, #type-modal, #ui-dialog{ z-index:120; }
   .modal.open{display:flex;}
   .modal .sheet{background:#fff; width:100%; max-height:85vh; border-radius:16px 16px 0 0; overflow:auto; padding:16px;}
   .modal h3{margin:4px 0 12px;}
@@ -4310,8 +4313,8 @@ async function mapImportFile(file){
   toast(addedLedger
     ? ("受付台帳" + addedLedger + "件と地図を取り込みました")
     : ("地図を取り込みました（" + (p.markCount || 0) + "件）"));
-  if(addedLedger){ try{ await savePlaceCheckAfterImport(); }catch(_){} }
   openMapView(M.chosho_mgmt_no);
+  if(addedLedger){ try{ await savePlaceCheckAfterImport(); }catch(_){} }   // 窓は地図の上に出る
 }
 /* ============================================================================
    8) 保存・読込
@@ -5352,18 +5355,18 @@ function renderSaveBar(){
       + '「' + esc(destPP.outer) + '」のすぐ下には入れません。押すと保存先を選び直せます">📁\u00a0<span class="sb-dest-n">'
       + esc(destPP.outer) + '</span><span class="sb-dest-in">＞ ' + esc(destPP.inner) + '</span> <span class="sb-dest-x">' + mmTag + '</span></button>'
     : dest
-    ? '<button type="button" class="sb-dest" id="sb-dest" title="「保存」を押すと、「' + esc(dest)
+    ? '<button type="button" class="sb-dest' + mmCls + '" id="sb-dest" title="' + mmTip + '「保存」を押すと、「' + esc(dest)
       + '」の中の 管理番号.json を上書きします。押すと保存先を選び直せます">📁\u00a0<span class="sb-dest-n">'
-      + esc(dest) + '</span> <span class="sb-dest-x">変更</span></button>'
+      + esc(dest) + '</span> <span class="sb-dest-x">' + mmTag + '</span></button>'
     : hintPP.outer
     ? '<button type="button" class="sb-dest' + mmCls + '" id="sb-dest" title="' + mmTip + '入れる場所：「' + esc(hintPP.outer)
       + '」フォルダの中の「' + esc(hintPP.inner) + '」\u000aこの端末ではフォルダを掴めません。保存のたびに、このフォルダに入れるよう出します。'
       + '「' + esc(hintPP.outer) + '」のすぐ下には入れません。押すと変えられます">📁\u00a0<span class="sb-dest-n">'
       + esc(hintPP.outer) + '</span><span class="sb-dest-in">＞ ' + esc(hintPP.inner) + '</span> に入れる <span class="sb-dest-x">' + mmTag + '</span></button>'
     : (saveHintName()
-      ? '<button type="button" class="sb-dest" id="sb-dest" title="入れる場所： 「' + esc(saveHintName())
+      ? '<button type="button" class="sb-dest' + mmCls + '" id="sb-dest" title="' + mmTip + '入れる場所： 「' + esc(saveHintName())
         + '」\u000aこの端末ではフォルダを掴めません。保存のたびに、この名前のフォルダに入れるよう出します。押すと変えられます">📁\u00a0<span class="sb-dest-n">'
-        + esc(saveHintName()) + '</span> に入れる <span class="sb-dest-x">変更</span></button>'
+        + esc(saveHintName()) + '</span> に入れる <span class="sb-dest-x">' + mmTag + '</span></button>'
       : '<button type="button" class="sb-dest none" id="sb-dest" title="保存先のフォルダを覚えていません。押すとここで選べます">📁 保存先 未設定 <span class="sb-dest-x">選ぶ</span></button>');
   el.innerHTML='<span class="sb-dot"></span><span class="sb-main">'+esc(main)+'</span>'
     + destHtml
@@ -5402,8 +5405,8 @@ async function saveDirChange(mode){
     const notBare = h => !proj || h !== proj;
     /* ★別の物件の名前は「前に使った名前」に出さない★（版175）押すだけで前の物件（その２）へ戻ってしまう。
        覚え書きからは消さない（その物件の台帳をまた入れれば出てくる）。 */
-    const sameProj = h => !proj || !pjDiffers(saveHintParts(h).outer, proj);
-    const nowOther = !!(now && proj && saveHintParts(now).outer && pjDiffers(saveHintParts(now).outer, proj));
+    const sameProj = h => !proj || !savePlaceDiffers(saveHintParts(h), proj);
+    const nowOther = !!(now && proj && savePlaceDiffers(saveHintParts(now), proj));
     if(now && notBare(now)) add(saveHintLabel(now), now, nowOther ? "いま覚えている名前（⚠ 受付台帳の物件と違います）" : "いま覚えている名前", "");
     saveHintHistory().filter(notBare).filter(sameProj).forEach(h => add(saveHintLabel(h), h, "前に使った名前", ""));
     add("自分で書く", "\u0000type", "候補に無いときはこちら", "type");
@@ -5432,7 +5435,7 @@ async function saveDirChange(mode){
         : "";
       try{ localStorage.setItem(LS_SAVEHINT_AUTO, mark); }catch(_){}
       /* 受付台帳の物件を見たうえで選んだ名前＝この物件ではこれでよい（帯の ⚠ を消す） */
-      if(got && proj) savePlaceOkSet(proj);
+      if(got && proj && !saveDirName()) savePlaceOkSet(proj);
     }
     renderSaveBar();
     await uiAlert(saveHintName()
@@ -5470,16 +5473,24 @@ async function saveDirChange(mode){
   } else if(!_saveDirAdoptMiss){
     toast("保存先を「" + (dir.name || "選んだフォルダ") + "」にしました");
   }
-  /* ★選んだフォルダが、受付台帳の物件と名前が違う★（版175）
-     窓はいつも前のフォルダ（前の物件）から開くので、そのまま選び直してしまいやすい。1回だけ確かめる。 */
+  await savePlaceConfirmAfterPick("later");
+}
+/* ★フォルダの窓で選んだフォルダが、受付台帳の物件と名前が違う★（版175）
+   窓はいつも前のフォルダ（前の物件）から開くので、そのまま選び直してしまいやすい。1回だけ確かめる。
+   OK＝このフォルダにする（この物件では、もう聞かない）。戻り値：true＝続けてよい／false＝やめた。
+   mode "later"＝やめても保存先はそのまま（帯に ⚠ が残る）／"stop"＝やめたら、このあと何も書かない。 */
+async function savePlaceConfirmAfterPick(mode){
   const mm = savePlaceMismatch();
-  if(mm && mm.held){
-    if(await uiConfirm("選んだ保存先「" + saveDirPlace() + "」は、\n受付台帳の物件「" + mm.proj + "」と名前が違います。\n\n"
-        + "このフォルダでよいですか？\n\n"
-        + "OK＝このフォルダにする（この物件では、もう聞きません）\n"
-        + "キャンセル＝あとで「📁」で選び直す（帯に ⚠ が出たままになります）")) savePlaceOkSet(mm.proj);
-    renderSaveBar();
-  }
+  if(!(mm && mm.held)) return true;
+  const ok = await uiConfirm("選んだ保存先「" + saveDirPlace() + "」は、\n受付台帳の物件「" + mm.proj + "」と名前が違います。\n\n"
+      + "このフォルダでよいですか？\n\n"
+      + "OK＝このフォルダにする（この物件では、もう聞きません）\n"
+      + (mode === "stop"
+          ? "キャンセル＝保存しない（もう一度押して、この物件のフォルダを選んでください）"
+          : "キャンセル＝あとで「📁」で選び直す（帯に ⚠ が出たままになります）"));
+  if(ok) savePlaceOkSet(mm.proj);
+  renderSaveBar();
+  return ok;
 }
 /* 中身の指紋。saveDraft を通さずにモデルが書き換わっても、次に控えるときに
    「変わった」と気づけるようにする。写真は中身ではなくID・名前だけを見る（重いため）。 */
@@ -5735,7 +5746,8 @@ function saveHintLine(){
   if(pp.outer) return "\n\n★入れる場所：「" + pp.outer + "」フォルダの中の「" + pp.inner + "」フォルダ★\n"
     + "（「" + pp.outer + "」フォルダのすぐ下には入れません。管理番号.json が並んでいるフォルダです）"
     + (mm ? ("\n⚠ 受付台帳の物件「" + mm.proj + "」とは違う名前です。違っていたら「📁」で変えてください。") : "");
-  return "\n\n★入れる場所：「" + pp.inner + "」フォルダ★\n（管理番号.json が並んでいるフォルダです）";
+  return "\n\n★入れる場所：「" + pp.inner + "」フォルダ★\n（管理番号.json が並んでいるフォルダです）"
+    + (mm ? ("\n⚠ 受付台帳の物件「" + mm.proj + "」とは違う名前です。違っていたら「📁」で変えてください。") : "");
 }
 /* 共有で渡したあとの知らせの頭。入れる場所の名前を覚えていれば、下の★を指す */
 function saveShareWhere(){
@@ -5807,6 +5819,21 @@ function pjSonoNo(k){
   if(/^[0-9]+$/.test(v)) return String(+v);
   return v === "十" ? "10" : String("一二三四五六七八九".indexOf(v) + 1);
 }
+/* 「その１」「その２」のように、両方に番号があって番号が違うときだけ true（はっきり別の物件） */
+function pjSonoDiffers(a, b){
+  const sx = pjSonoNo(pjNameKey(a)), sy = pjSonoNo(pjNameKey(b));
+  return !!(sx && sy && sx !== sy);
+}
+/* 保存先（入れる場所）が、受付台帳の物件と別の物件を指していそうか。
+   「物件A ＞ リスト」なら物件A で比べる。名前1つ（「その２」や、物件のフォルダそのもの）のときは、
+   その名前に その番号 があって違うときだけ「違う」とする（「data」など、物件名でない名前で脅さない）。 */
+function savePlaceDiffers(pp, proj){
+  if(!pp || !proj) return false;
+  if(pp.outer) return pjDiffers(pp.outer, proj);
+  const nm = String(pp.inner || "");
+  if(!nm || pjNameKey(nm) === pjNameKey("リスト")) return false;
+  return pjSonoDiffers(nm, proj);
+}
 /* 2つの物件名が、別の物件を指していそうか */
 function pjDiffers(a, b){
   const x = pjNameKey(a), y = pjNameKey(b);
@@ -5845,8 +5872,7 @@ function savePlaceMismatch(){
      （保存のときにフォルダの窓が出るので。版172 の取り込みの知らせと同じ考え方） */
   if(!held && window.showDirectoryPicker) return null;
   const pp = held ? saveDirPlaceParts() : saveHintParts();
-  if(!pp.outer) return null;                          // 「リスト」だけ＝どの物件でも正しい
-  if(!pjDiffers(pp.outer, proj)) return null;
+  if(!savePlaceDiffers(pp, proj)) return null;        // 「リスト」だけ＝どの物件でも正しい
   if(savePlaceOkFor(proj, held)) return null;         // 「このままでよい」と答えた物件
   return { proj: proj, outer: pp.outer, inner: pp.inner, held: held };
 }
@@ -5855,7 +5881,7 @@ function savePlaceMismatch(){
 async function savePlaceCheckAfterImport(){
   const mm = savePlaceMismatch();
   if(!mm) return;
-  const now = mm.outer + " ＞ " + mm.inner;
+  const now = mm.outer ? (mm.outer + " ＞ " + mm.inner) : mm.inner;
   if(mm.held){
     /* フォルダを掴める端末：ここからフォルダの窓は開けない（押した直後ではないため）。
        選び直しは帯の「📁」から。 */
@@ -6559,7 +6585,9 @@ async function saveAllDrafts(mode){
   const pickTxt = window.showDirectoryPicker
     ? ("\n\nこのあと【保存先のフォルダを選ぶ画面】が出ます。\n"
        + "PCが読み込むフォルダを選んでください。"
-       + (saveDirName() ? ("\n（前回は「" + (saveDirPlace() || saveDirName()) + "」でした。違う所にしたい時はここで選び直せます）") : ""))
+       + (saveDirName() ? ("\n（前回は「" + (saveDirPlace() || saveDirName()) + "」でした。違う所にしたい時はここで選び直せます）") : "")
+       + (() => { const m0 = savePlaceMismatch();
+           return (m0 && m0.held) ? ("\n⚠ 前回のフォルダは、受付台帳の物件「" + m0.proj + "」と名前が違います。この物件のフォルダを選んでください。") : ""; })())
     : "";
   const nothingTxt = skippedNothing.length
     ? ("\n\n※ この端末で何も入力していない戸別 " + skippedNothing.length + " 件は、PCのファイルを書き替えません（写真も工事日も残ります）")
@@ -6598,6 +6626,9 @@ async function saveAllDrafts(mode){
          物件のフォルダを選んだときは、中の「リスト」へ（手がかりが弱いときは聞かずに選んだ所のまま） */
       dir = await saveDirAdopt(dir, { ask:false });
       renderSaveBar();
+      /* ★選んだフォルダが、受付台帳の物件と名前が違う★（版175）別の物件（その２）のリストへ
+         その１の戸別を書き込まないよう、書く前に1回だけ確かめる。やめたら何も書かない（下書きはそのまま）。 */
+      if(!(await savePlaceConfirmAfterPick("stop"))){ setBusy(false); return; }
     }
   } else {
     // フォルダを選べない端末（Android等）。覚えているものがあれば使い、無ければ共有／ダウンロードへ。
@@ -10191,7 +10222,8 @@ function receptionSaveRows(src){
     importedAt:Date.now(), exportedAt:(src&&src.exportedAt)||"", project:(src&&src.project)||"",
     mainVersion:(src&&src.appVersion)||"", rows:norm });
   // 入れる場所を「物件/リスト」に決める（押す回数0回。自分で選んだ名前には触らない）
-  try{ if(saveHintAuto(src && src.project, oldProj)) renderSaveBar(); }catch(_){}
+  try{ saveHintAuto(src && src.project, oldProj); }catch(_){}
+  try{ renderSaveBar(); }catch(_){}   // 物件が替わると ⚠ の有無も変わるので、いつも描き直す（版175）
   try{ renderReceptionSort(); }catch(_){}
   try{ renderReceptionList(document.getElementById("reception-search").value||""); }catch(_){}
   try{ renderAppVer(); }catch(_){}
