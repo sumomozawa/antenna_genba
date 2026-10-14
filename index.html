@@ -520,6 +520,8 @@
   /* ★預けのファイル名（管理番号_現場預け_日時.json）は長い★ スマホで横にはみ出さないよう、どこででも折り返す（版176） */
   #pick-note{ overflow-wrap:anywhere; }
   .pick-main{ overflow-wrap:anywhere; }
+  /* 窓の題にもフォルダの名前が入る（「「その2…」に保存しました」）。長い名前でも横にはみ出さない（版176） */
+  #pick-title{ overflow-wrap:anywhere; }
   .pick-row.pick-side{ border-color:#90caf9; background:#f3f8fe; }
   .pick-row.pick-side .pick-main{ color:#0d47a1; }
   .pick-row.pick-off{ background:#f5f7f8; }
@@ -4566,7 +4568,9 @@ function sideTouched(model, state, why){
    書いたあとの控えは、書いた先が端末の中だけのフォルダ（「その2」など）なら、PCはその中身を受け取っていない。
    それを土台に「直した欄」を決めると、書いた前に入れた欄が預けから抜け、事務所でまとめるときに採られない。
    当てにできない控えのときは、控えと違う欄に加えて、作りたて・空と違う欄も「直した欄」に入れる。
-   「渡し直す」（履歴の 📮）と「別の物件のフォルダ」（place）は、届いていないかもしれない保存なので、いつも当てにしない。 */
+   「渡し直す」（履歴の 📮）と「別の物件のフォルダ」（place）は、届いていないかもしれない保存なので、いつも当てにしない。
+   ★読んだあとに書いた控え（pc）も、ここでは当てにしない★ 書いた先が端末の中だけのフォルダなら、
+   書いた前に入れた欄は PC に届いていない。フォルダを覚えるのをやめたあとも、その控えは残るので、印では決めない。 */
 function sideBaseTrusted(b, why){
   if(!b) return false;
   if(why === "resend" || why === "place") return false;
@@ -4596,6 +4600,7 @@ function sideStamp(model, why, lacks, state, when){
 /* 預けを1件作る（中身は窓を出す前に作っておく＝共有を「押した直後」に呼べるように） */
 async function sideBuild(model, why, when){
   when = when || new Date();
+  const sig = stateSig(model);                                  // 渡す中身の指紋（渡すあいだに中身が変わったら「渡した」にしない）
   const st = buildStateOf(model);
   delete st._side; delete st._sideMerged;                       // 事務所でまとめた覚えは預けに入れない
   let lacks = 0;
@@ -4603,7 +4608,7 @@ async function sideBuild(model, why, when){
   st._side = sideStamp(model, why, lacks, st, when);
   const text = JSON.stringify(st);
   let bytes = text.length; try{ bytes = new Blob([text]).size; }catch(_){}
-  return { model: model, no: draftNoKey(model && model.chosho_mgmt_no), name: sideFileName(model && model.chosho_mgmt_no, when),
+  return { model: model, sig: sig, no: draftNoKey(model && model.chosho_mgmt_no), name: sideFileName(model && model.chosho_mgmt_no, when),
            state: st, text: text, lacks: lacks, bytes: bytes,
            photos: (st.chosho_photos || []).filter(p => p && p.dataUri).length };
 }
@@ -4722,16 +4727,29 @@ async function sideShareChunks(items){
 /* ★預けた印★ 💾（PCへ渡した）ではなく 📮 を出すための印。下書きの中（モデル）に持つ（_sideAt・_sideHow）。
    いつもの保存と同じく「渡した」扱いにして、まとめて保存の対象からは外す（同じ預けを何度も作らない）。
    ★控え・写真IDの副本は取らない／_fromCaseFile を立てない／他の端末のファイルの印（_otherFile）を消さない★ */
-async function markDraftSidedFor(model, how){
+async function markDraftSidedFor(model, how, sentSig){
   if(!model) return;
   const t = Date.now();
   model._sideAt = t; model._sideHow = String(how || "");
+  /* ★渡したあとに中身が変わっていたら（写真の取り込みが終わった等）、「渡した」扱いにしない★（版176）
+     sentSig＝預けを作ったときの中身の指紋。今の中身と違えば印だけ付けて、まとめて保存の対象に残す（新しい写真を渡し忘れない）。 */
+  const nowSig = stateSig(model);
+  const sentOk = !sentSig || sentSig === nowSig;
   try{
     const key = model._lastDraftKey || (model.chosho_mgmt_no ? ("no:" + model.chosho_mgmt_no) : (model._draftId || ""));
     const rec = key ? await idbGet(key) : null;
     if(rec){
-      if(rec.model !== model){ rec.model = model; rec.sig = stateSig(model); }
-      rec.fileSavedAt = t; rec.fileRev = (rec.rev | 0);
+      let fresh = sentOk;
+      if(model === M){ rec.model = model; rec.sig = nowSig; }        // 画面の中身＝いちばん新しい
+      else {
+        /* ★下書き（この端末の控え）を、渡した写しで書き戻さない★（版176）
+           写しは渡す前に読み出したもの。渡しているあいだ（共有の画面など）に写真の取り込みが終わって、
+           新しい写真が下書きに入っていることがある。写しで書き戻すと、その写真が下書きから消える。印だけ付ける。
+           「渡した」にするのは、下書きの中身が渡したものと同じときだけ。 */
+        if(rec.model){ rec.model._sideAt = t; rec.model._sideHow = model._sideHow; }
+        fresh = fresh && draftRecSame(rec, nowSig);
+      }
+      if(fresh){ rec.fileSavedAt = t; rec.fileRev = (rec.rev | 0); }
       const wasStale = _draftInfoStale;
       await idbPut(rec);
       draftInfoNote(rec, true);
@@ -4739,10 +4757,18 @@ async function markDraftSidedFor(model, how){
     }
     if(M && (model === M || (key && M._lastDraftKey === key))){
       if(M !== model){ M._sideAt = t; M._sideHow = model._sideHow; }
-      _save.fileAt = t; _save.fileRev = M._rev | 0; _save.rev = M._rev | 0;
+      if(sentOk && (M === model || stateSig(M) === nowSig)){ _save.fileAt = t; _save.fileRev = M._rev | 0; _save.rev = M._rev | 0; }
       renderSaveBar();
     }
   }catch(e){ console.warn("預けた印を付けられませんでした", e); }
+}
+/* 下書き（IndexedDB）の中身が、渡した中身（指紋 sig）と同じか。
+   古い下書き（あとから足した欄が無い）は、開いたときと同じように形を整えてから見比べる（中身は書き替えない） */
+function draftRecSame(rec, sig){
+  if(!rec || !sig) return false;
+  if(rec.sig === sig) return true;
+  if(!rec.model) return false;
+  try{ const c = Object.assign({}, rec.model); ensureModelShape(c); return stateSig(c) === sig; }catch(_){ return false; }
 }
 /* 知らせに出す名前・PCのファイル・足りない写真 */
 function sideNamesText(items){
@@ -4757,8 +4783,12 @@ function sideLacksNote(items){
   const n = (items || []).reduce((a, it) => a + (it.lacks | 0), 0);
   return n ? ("\n（PCには、この端末に無い写真が " + n + "枚 あります。事務所でまとめるときに、その写真も残ります）") : "";
 }
+/* Dropbox で入れてほしい場所。Dropbox のフォルダは「その１」「その２」なので、物件名に その番号 があればそれで言う
+   （「令和８年度…（その１） ＞ リスト」と言われても、Dropbox ではその名前のフォルダが見つからない）（版176） */
 function sideListPlace(){
   const proj = rcProjName();
+  const n = pjSonoNo(proj);
+  if(n) return "その" + String(n).replace(/[0-9]/g, c => String.fromCharCode(c.charCodeAt(0) + 0xFEE0)) + " ＞ リスト";
   return (proj || "物件のフォルダ") + " ＞ リスト";
 }
 function sideRestNote(items, done){
@@ -4823,7 +4853,7 @@ async function sideAskDeliver(why, items, skipped){
     if(v === "share"){
       const r = await sideShareChunks(items);                               // ★押した直後に呼ぶ★
       if(r.done.length){
-        for(const it of r.done) await markDraftSidedFor(it.model, "share");
+        for(const it of r.done) await markDraftSidedFor(it.model, "share", it.sig);
         return sideInfoShare(why, items, r);
       }
       shareNg = !r.aborted;
@@ -4834,7 +4864,7 @@ async function sideAskDeliver(why, items, skipped){
     if(v === "dir"){
       const r = await sideToDir(items);
       if(r.done.length){
-        for(const it of r.done) await markDraftSidedFor(it.model, "dir");
+        for(const it of r.done) await markDraftSidedFor(it.model, "dir", it.sig);
         return sideInfoDir(why, items, r);
       }
       warn = "⚠ 「" + dirName + "」に置けませんでした（" + (r.err || "書けませんでした") + "）。下から選び直してください。";
@@ -4843,7 +4873,7 @@ async function sideAskDeliver(why, items, skipped){
     if(v === "dl"){
       const done = await sideDownload(items);
       if(done.length){
-        for(const it of done) await markDraftSidedFor(it.model, "dl");
+        for(const it of done) await markDraftSidedFor(it.model, "dl", it.sig);
         return sideInfoDl(why, items, done);
       }
       warn = "⚠ ダウンロードできませんでした。下から選び直してください。";
@@ -4893,7 +4923,7 @@ async function sideEscapeRun(info){
     if(info && info.escape === "share-also" && info._sideItems && info._sideItems.length){
       const r = await sideShareChunks(info._sideItems);                      // ★押した直後に呼ぶ★
       if(r.done.length){
-        for(const it of r.done) await markDraftSidedFor(it.model, "share");
+        for(const it of r.done) await markDraftSidedFor(it.model, "share", it.sig);
         res = sideInfoShare("share", info._sideItems, r);
       } else if(r.failed){
         res = { title: "⚠ 共有できませんでした", warn: true,
@@ -4916,10 +4946,23 @@ function saveCancelInfo(fname){
     msg: (fname || "") + "\n\n画面を閉じたので、何も書いていません。\n（この端末の入力と写真は、そのまま残っています）\n\n"
        + "もう一度「保存」を押すか、下の「📮 別の名前で事務所に預ける」で渡せます。" };
 }
-/* ★控え（読んだPCのファイル）を当てにしてよいか★ 共有で渡す道で、いつもの名前にしてよいかを決める */
+/* 「PCのファイルの中身を、この端末の内容に置き換えますか」に「いいえ」と答えたとき（版176）。
+   黙って閉じない。何も書いていないことと、📮（別の名前で預ける＝PCのファイルは書き替えない）を出す */
+function saveKeepPcInfo(fname){
+  return Object.assign(saveCancelInfo(fname), { escape: "merge",
+    msg: (fname || "") + "\n\nPCのファイルの中身を残すため、保存をやめました（何も書いていません）。\n"
+       + "（この端末の入力と写真は、そのまま残っています）\n\n"
+       + "先に「📂 戸別ファイルを読み込んで編集する」で読み込むと、PCの中身を残したまま続きを入力できます。\n"
+       + "読み込めないときは、下の「📮 別の名前で事務所に預ける」で渡せます（PCのファイルは書き替えません）。" });
+}
+/* ★控え（読んだPCのファイル）を当てにしてよいか★ 共有で渡す道で、いつもの名前にしてよいかを決める
+   ★PCのファイルを読んで取った控え（rd）か、読んだあと この端末が書いた控え（pc＝読んだ中身を受け継いでいる）だけ★（版176）
+   ★書いただけの控えは、書いた先の名前が「リスト」でも当てにしない★ Android のフォルダを選ぶ画面には Dropbox が出ない＝
+   書いた先は端末の中のフォルダ（「リスト」という名前でも）かもしれない。PCのファイルを読んでいないのに いつもの名前で渡すと、
+   事務所が Dropbox で「置き換え」たとき、PCの写真・図面が消える。預けの名前で渡す。 */
 function sideBaseOk(model){
   const b = fileBaseGet(model);
-  return !!(b && !b.stale);
+  return !!(b && !b.stale && (b.rd || b.pc));
 }
 /* ★共有で渡す道で、PCのファイル（控え）を読んでいない戸別★（版176）
    いつもの名前（管理番号.json）で渡すと、事務所が Dropbox で「置き換え」たとき、PCの写真が消える。
@@ -4928,7 +4971,7 @@ async function saveShareAsSide(fname){
   const it = await sideBuild(M, "share");
   const r = await sideShareChunks([it]);
   if(r.done.length){
-    await markDraftSidedFor(M, "share");
+    await markDraftSidedFor(M, "share", it.sig);
     _lastSaveInfo = sideInfoShare("share", [it], r);
     toast("📮 共有で渡しました：" + (it.sentName || it.name));
     return true;
@@ -4937,7 +4980,7 @@ async function saveShareAsSide(fname){
   /* 共有できない端末・共有に失敗 → ダウンロード（黙って終わらない） */
   const done = await sideDownload([it]);
   if(done.length){
-    await markDraftSidedFor(M, "dl");
+    await markDraftSidedFor(M, "dl", it.sig);
     _lastSaveInfo = sideInfoDl("share", [it], done);
     toast("📮 ダウンロードに入れました：" + it.name);
     return true;
@@ -5007,7 +5050,7 @@ async function saveJsonRun(){
         const r = await sideWriteDir(dir, it);
         if(r.ok){
           it.wrote = r.name;
-          await markDraftSidedFor(M, "dir");
+          await markDraftSidedFor(M, "dir", it.sig);
           const place = saveDirPlace(dir) || dir.name || "選んだフォルダ";
           _lastSaveInfo = { title: "📮 別の名前で置きました", icon: "📮", stay: true, side: true, warn: false,
             msg: "「" + place + "」は受付台帳の物件と違うので、別の名前（" + r.name + "）で置きました。事務所で振り分けます。\n"
@@ -5072,7 +5115,7 @@ async function saveJsonRun(){
               + "このまま保存すると、上のものはこの端末の内容に置き換わります。\n"
               + "（📷 写真は消えません。両方まとめて残ります）\n\n"
               + "先に「📂 戸別ファイルを読み込んで編集する」で読み込むと、\nPCの中身を残したまま続きを入力できます。\n\n"
-              + "それでも、このまま保存しますか？"))) return false;
+              + "それでも、このまま保存しますか？"))){ _lastSaveInfo = saveKeepPcInfo(fname); return true; }   // ★黙らない★（版176）
         }
         mgKeys = mg.changed;
         if(mg.kept.length) mergedNote += "\n（ファイルに入っていた " + mg.kept.join("・") + " を残しました）";
@@ -5135,10 +5178,20 @@ async function saveJsonRun(){
       if(mgKeys.length) mergedNote += "\n（ファイルに入っていた "
         + Array.from(new Set(mgKeys.map(mergeLabelOf))).join("・") + " を画面にも入れました）";
       render();
+      /* ★書いた先が、端末の中だけかもしれないフォルダ（親が分からず、名前もリストでない）★（版176）
+         9/23 から「保存しました」と出たまま、端末の「その2」にしか入っていなかった。緑の知らせを勝手に閉じず、
+         ⚠ と「📮 事務所にも届ける（共有など）」を出す（同じ戸別を別の名前で渡す。PCのファイルは書き替えない）。 */
+      const devOnly = saveDirMaybeDevice(dir);
+      const placeW = saveDirPlace(dir) || (dir && dir.name) || "選んだフォルダ";
       _lastSaveInfo = { title: "保存しました", msg: "「" + (saveDirPlace(dir) || "選んだフォルダ") + "」の中\n" + fname
         + "\n" + saveSizeText(JSON.stringify(state), state)
         + "\n（書いたあと読み返して、中身が入っていることを確かめました）"
-        + mergedNote, warn: false };
+        + mergedNote
+        + (devOnly ? ("\n\n⚠ 「" + placeW + "」がこの端末の中だけのフォルダなら、事務所には届きません。"
+                      + "そのときは下の「📮 事務所にも届ける（共有など）」で、別の名前で渡してください（PCのファイルは書き替えません）。") : ""),
+        warn: false, stay: devOnly, escape: devOnly ? "resend" : "",
+        escLabel: devOnly ? "📮 事務所にも届ける（共有など）" : "",
+        escText: devOnly ? ("「" + placeW + "」が Dropbox と同期していないときは、下の「📮 事務所にも届ける（共有など）」を押してください。") : "" };
       toast("保存しました：" + (dir.name ? (dir.name + "／") : "") + fname);
       return true;
     }catch(e){ console.warn("覚えている保存先フォルダへ書けませんでした", e); dirErr = e; }
@@ -5222,7 +5275,7 @@ async function saveJsonRun(){
                   + "このまま保存すると、上のものはこの端末の内容に置き換わります。\n"
                   + "（📷 写真は消えません。両方まとめて残ります）\n\n"
                   + "先に「📂 戸別ファイルを読み込んで編集する」で読み込むと、\nPCの中身を残したまま続きを入力できます。\n\n"
-                  + "それでも、このまま保存しますか？"))) return false;
+                  + "それでも、このまま保存しますか？"))){ _lastSaveInfo = saveKeepPcInfo(handle.name || fname); return true; }   // ★黙らない★（版176）
             }
             pickedKeys = mgp.changed;
             if(mgp.kept.length) pickedNote += "\n（ファイルに入っていた " + mgp.kept.join("・") + " を残しました）";
@@ -5362,10 +5415,13 @@ function modelFromCaseState(s, skipPhotos){
   m._passthrough={};
   /* 持ち越してはいけないキー。受付台帳のJSONを間違えて読んだときの type/rows/sheets と、
      端末の中だけの控え（_fileBase）を、戸別ファイルへ書き出さないため。 */
-  /* ★_side（預けの印）・_sideMerged（事務所でまとめた覚え）も持ち越さない★（版176）
+  /* ★_side（預けの印）も持ち越さない★（版176）
      持ち越すと、預けを 📂 で開いたあとの いつもの保存で、PCのファイルに _side が入り、
-     PCがそのファイルを「預け」と読んで一覧から消してしまう。 */
-  const PASS_NG = { type:1, rows:1, sheets:1, _fileBase:1, _side:1, _sideMerged:1 };
+     PCがそのファイルを「預け」と読んで一覧から消してしまう。
+     ★_sideMerged（事務所でまとめた覚え）は持ち越す★ 共有・ダウンロードで渡した いつもの名前のファイルから落ちると、
+     事務所の振り分けが、もうまとめた預けをもう一度まとめて、あとで直した値を戻してしまう。
+     （預けのファイルを開いたときの _sideMerged は loadStateInto で外す。預けを作るときは sideBuild で外す） */
+  const PASS_NG = { type:1, rows:1, sheets:1, _fileBase:1, _side:1 };
   for(const k in s){ if(!GENBA_KNOWN_KEYS.has(k) && !PASS_NG[k]) m._passthrough[k]=s[k]; }
   syncTvArrays(m);
   m.meas_show="yes"; // 電波測定表は常に掲載扱い（UIトグル廃止・取込JSONの"no"を上書き）
@@ -5399,6 +5455,13 @@ async function loadStateInto(s, fname){
     }
   }catch(e){ console.warn("読み込みの融合に失敗（そのまま読み込みます）", e); }
   const m = modelFromCaseState(s, false);
+  /* ★預けのファイルにある「まとめた覚え」は、その戸別のファイルのものではない★（版176）
+     同じ戸別を開いていれば、そちらの覚え（PCのファイルから来たもの）を残す。 */
+  if(sideLoad && m._passthrough){
+    const own = (M && draftNoKey(M.chosho_mgmt_no) && draftNoKey(M.chosho_mgmt_no) === draftNoKey(m.chosho_mgmt_no)
+                 && M._passthrough) ? M._passthrough._sideMerged : undefined;
+    if(own !== undefined) m._passthrough._sideMerged = own; else delete m._passthrough._sideMerged;
+  }
   /* 戸別ファイルから開いた＝PCの中身を手元に持っている。ここから保存しても消えない。
      ★預けを開いたときは立てない★（PCの中身を持っていない） */
   m._fromCaseFile = !sideLoad;
@@ -5845,10 +5908,10 @@ function saveOverlayDone(info){
     const icon = (info && info.icon) || (warn ? "⚠" : "✓");
     const also = (escWhy === "share-also");
     const sideBtn = escWhy
-      ? ('<div class="save-ov-esc">' + (also
+      ? ('<div class="save-ov-esc">' + ((info && info.escText) ? esc(info.escText) : (also
             ? "Dropbox などへも渡すときは、下の「📤 共有でも渡す」を押してください。"
-            : "保存できないときは、下の「📮 事務所に預ける」で、別の名前のまま渡せます。PCのファイルは書き替えません。") + '</div>'
-         + '<button type="button" id="save-ov-side">' + (also ? "📤 共有でも渡す" : "📮 別の名前で事務所に預ける") + '</button>')
+            : "保存できないときは、下の「📮 事務所に預ける」で、別の名前のまま渡せます。PCのファイルは書き替えません。")) + '</div>'
+         + '<button type="button" id="save-ov-side">' + ((info && info.escLabel) ? esc(info.escLabel) : (also ? "📤 共有でも渡す" : "📮 別の名前で事務所に預ける")) + '</button>')
       : "";
     c.innerHTML = '<div class="save-ov-check">' + esc(icon) + '</div>'
       + '<div class="save-ov-t">' + esc((info && info.title) || "保存しました") + '</div>'
@@ -6346,6 +6409,14 @@ function saveForgetDoneText(){
     + "下書きと写真は、そのまま残っています。もう一度フォルダを選ぶと、フォルダへ書く道に戻ります。";
 }
 /* 覚えているフォルダの上のフォルダ（物件）。分からなければ null */
+/* ★書いた先が、端末の中だけかもしれないフォルダか★（版176）
+   Android は、フォルダを選ぶ画面に Dropbox が出ない（Dropbox アプリは端末の中に同期フォルダを持たない）＝
+   どのフォルダを選んでも端末の中。名前が「リスト」でも、親が分かっていても同じ。
+   ほかの端末は、親が分からず名前も「リスト」でないときだけ。 */
+function saveDirMaybeDevice(dir){
+  if(/Android/i.test(String((navigator && navigator.userAgent) || ""))) return true;
+  return !(saveDirParentOf(dir) || saveDirIsListName(dir && dir.name));
+}
 function saveDirParentOf(dir){
   return (_saveDirPar && dir && _saveDirPar.dir === dir) ? _saveDirPar.parent : null;
 }
@@ -7064,12 +7135,17 @@ function unsavedTargets(){
   add(M.chosho_mgmt_no);                     // いま開いている戸別（下書きに書く前でも拾う）
   return out.sort();
 }
-async function markDraftSavedFor(key, model){
+async function markDraftSavedFor(key, model, opt){
   try{
     const rec = await idbGet(key);
+    /* ★控えを取り直していない道（共有・ダウンロード）では、写しで下書きを書き戻さない★（版176）
+       写しはまとめて保存の初めに読んだもの。渡しているあいだに入った写真を、下書きから消さないため。
+       「渡した」にするのも、下書きの中身が渡したものと同じときだけ。 */
+    const keep = !!(opt && opt.keep) && !!model && model !== M;
     /* 控えを取り直したモデルを、下書きへも入れ直す（控えとモデルがずれないように） */
-    if(rec && model && rec.model !== model){ rec.model = model; rec.sig = stateSig(model); }
-    if(rec){ rec.fileSavedAt = Date.now(); rec.fileRev = (rec.rev|0); rec.other = "";
+    if(rec && model && rec.model !== model && !keep){ rec.model = model; rec.sig = stateSig(model); }
+    if(rec){ if(!keep || draftRecSame(rec, stateSig(model))){ rec.fileSavedAt = Date.now(); rec.fileRev = (rec.rev|0); }
+             rec.other = "";
              if(rec.model) delete rec.model._otherFile;      // 保存できた＝この端末の内容になった
              const wasStale = _draftInfoStale;
              await idbPut(rec);
@@ -7099,28 +7175,40 @@ function draftNoKey(v){ return toHalfWidthAn(String(v == null ? "" : v)).trim();
 /* ★まとめて保存で書けなかった戸別を、1つの知らせでまとめて言い、📮 で渡せるようにする★（版176）
    groups … [{ label, fs:[まとめて保存の1件…], why }]。出したら true。
    ★待たない★ まとめて保存は、ここまでで終わっている（書けた分の印・一覧は付け終えている）。押したら預けを始める。 */
-function bulkSideOffer(groups, title, lead, btnLabel){
-  const seen = new Set(), models = [], lines = [], whyOf = new Map();
+function bulkSideOffer(groups, title, lead, btnLabel, opt){
+  /* opt（版176）… extra：ほかのボタン [{ label, value, kind, sub, run }]（押したら run）／later・laterSub：「あとで」の字／
+     optTitle・optLead：書けた戸別（g.opt＝任意）しか無いときの題と前置き */
+  opt = opt || {};
+  const seen = new Set(), models = [], optModels = [], lines = [], whyOf = new Map();
   (groups || []).forEach(g => {
     const fs = (g.fs || []).filter(f => f && f.model && !seen.has(f.model));
     if(!fs.length) return;
     lines.push("・" + esc(g.label) + "： " + fs.slice(0, 5).map(f => esc(draftNoKey(f.no) || f.no)).join("・")
       + (fs.length > 5 ? (" ほか " + (fs.length - 5) + "件") : ""));
-    fs.forEach(f => { seen.add(f.model); models.push(f.model); if(g.why) whyOf.set(f.model, g.why); });
+    fs.forEach(f => { seen.add(f.model); (g.opt ? optModels : models).push(f.model); if(g.why) whyOf.set(f.model, g.why); });
   });
-  if(!models.length) return false;
-  const n = models.length;
-  const note = (lead ? (lead + "<br><br>") : "")
+  if(!models.length && !optModels.length) return false;
+  const n = models.length, k = optModels.length;
+  const lead2 = n ? lead : (opt.optLead || lead);
+  const note = (lead2 ? (lead2 + "<br><br>") : "")
     + lines.join("<br>")
     + "<br><br>下の「📮」で、別の名前のまま事務所に渡せます（PCのファイルは書き替えません。事務所で振り分けて、1つにまとめます）。"
     + "<br>この端末の入力と写真は、そのまま残っています。";
-  Promise.resolve(uiPickName(title || ("書けなかった戸別が " + n + "件 あります"), note, [
-    { label: btnLabel || ("📮 書けなかった " + n + "件を事務所に預ける"), value: "side", kind: "side",
-      sub: "共有（Dropbox など）・フォルダ・ダウンロードから選べます" },
-    { label: "あとで", value: "later", kind: "off", sub: "下書きはそのまま残ります。あとでもう一度「まとめて保存」からできます" }
-  ])).then(async v => {
-    if(v !== "side") return;
-    const info = await sideSaveFlow("bulk", models, { whyOf: whyOf });
+  const items = [];
+  if(n) items.push({ label: (typeof btnLabel === "function" ? btnLabel(n) : btnLabel) || ("📮 書けなかった " + n + "件を事務所に預ける"), value: "side", kind: "side",
+      sub: "共有（Dropbox など）・フォルダ・ダウンロードから選べます" });
+  /* 書けた戸別も、事務所に届いていないかもしれないとき（端末の中だけかもしれないフォルダ）は、別の名前で届けられる */
+  if(k) items.push({ label: n ? ("📮 書いた " + k + "件も合わせて事務所に届ける（共有など）") : ("📮 書いた " + k + "件を事務所にも届ける（共有など）"),
+      value: "all", kind: "side", sub: "別の名前で渡します（PCのファイルは書き替えません）。フォルダが Dropbox と同期しているなら要りません" });
+  (opt.extra || []).forEach(x => items.push({ label: x.label, value: x.value, kind: x.kind || "", sub: x.sub || "" }));
+  items.push({ label: opt.later || "あとで", value: "later", kind: "off",
+               sub: opt.laterSub || "下書きはそのまま残ります。あとでもう一度「まとめて保存」からできます" });
+  const ttl = n ? (title || ("書けなかった戸別が " + n + "件 あります")) : (opt.optTitle || title || "書いた戸別を、事務所にも届けますか");
+  Promise.resolve(uiPickName(ttl, note, items)).then(async v => {
+    const ex = (opt.extra || []).find(x => x.value === v);
+    if(ex){ if(typeof ex.run === "function") await ex.run(); return; }
+    if(v !== "side" && v !== "all") return;
+    const info = await sideSaveFlow("bulk", (v === "all") ? models.concat(optModels) : models, { whyOf: whyOf });
     if(info) sideShowResult(info);
   }).catch(e => console.warn("預けの申し出に失敗", e));
   return true;
@@ -7254,7 +7342,7 @@ async function saveAllDrafts(mode){
     : "";
   /* 書けなかった戸別（最後の知らせで 📮 を出す） */
   const offSide = [], offPlace = [], offPhoto = [], offMerge = [], offVerify = [], offErr = [], offUnread = [], offHold = [];
-  const bulkOfferAll = () => bulkSideOffer([
+  const offGroups = () => [
     { label: "【見るだけ】（PCのファイルが無い）", fs: offSide.filter(f => f.guard !== "mode"), why: "viewonly" },
     { label: "📮 預けモード", fs: offSide.filter(f => f.guard === "mode"), why: "mode" },
     { label: "保存先が受付台帳の物件と違う", fs: offPlace, why: "place" },
@@ -7264,7 +7352,9 @@ async function saveAllDrafts(mode){
     { label: "書けなかった", fs: offErr, why: "write" },
     { label: "ファイルを読めない", fs: offUnread, why: "unread" },
     { label: "どちらにするか聞く必要がある（1件ずつの保存で聞きます）", fs: offHold, why: "bulk" }
-  ]);
+  ];
+  /* o（版176）… pre・post：前と後ろに足す組／title・lead・btn：知らせの題・前置き・📮 の字（そのほかは bulkSideOffer の opt） */
+  const bulkOfferAll = o => { o = o || {}; return bulkSideOffer((o.pre || []).concat(offGroups(), o.post || []), o.title, o.lead, o.btn, o); };
   const listTxt = files.slice(0, 8).map(f => "・" + f.name).join("\n")
     + (files.length > 8 ? ("\n・ほか " + (files.length - 8) + " 件") : "");
   const head = isAll
@@ -7332,8 +7422,8 @@ async function saveAllDrafts(mode){
      直すところが無く、その後ずっと違う場所へ書き込まれ続ける。
      ここを必ず通せば、いつでも選び直せる。（選ぶ窓を閉じたら保存はしない） */
   let dir = null;
-  const stopOffer = (title, lead) => bulkSideOffer([{ label: "まとめて保存する戸別", fs: files, why: "bulk" }], title, lead,
-    "📮 まとめて事務所に預ける（" + files.length + "件）");
+  const stopOffer = (title, lead, opt) => bulkSideOffer([{ label: "まとめて保存する戸別", fs: files, why: "bulk" }], title, lead,
+    "📮 まとめて事務所に預ける（" + files.length + "件）", opt);
   if(usePicker){
     try{ dir = await window.showDirectoryPicker({ id:"genba-save", mode:"readwrite" }); }
     catch(e){ setBusy(false);
@@ -7342,7 +7432,24 @@ async function saveAllDrafts(mode){
          「フォルダを選ぶ画面が出ます」と言ったのに出ないまま、別の場所へ配られてしまう。
          ★ただし黙って終わらない★（版176）📮 で、別の名前のまま事務所に渡せる。
          （前は「1件ずつ開いて保存すると、共有やダウンロードで渡せます」と言っていたが、本当ではなかった） */
-      if(!(e && e.name === "AbortError")){
+      if(e && e.name === "AbortError"){
+        /* ★自分で閉じたときも、黙って終わらない★（版176）Android のタブレットは、フォルダを選ぶ画面に Dropbox が出ないので、
+           閉じるのがふつう。何も書かず・何も渡さずに、「📮 まとめて事務所に預ける」と「📤 フォルダを覚えるのをやめる」を出す
+           （押すまで何もしない）。 */
+        const now0 = saveDirPlace() || saveDirName();
+        stopOffer("保存先のフォルダを選びませんでした",
+          "フォルダを選ぶ画面を閉じたので、何も書いていません（下書きと写真は、そのまま残っています）。<br><br>"
+          + "Dropbox のフォルダは、タブレット・スマホの「フォルダを選ぶ画面」には出ません。<br>"
+          + "「📮 まとめて事務所に預ける」は、別の名前のまま渡します（PCのファイルは書き替えません）。<br>"
+          + "「📤」を選ぶと、次からは保存のたびに共有の画面が出ます（Dropbox を選べます）。",
+          { extra: [{ label: now0 ? "📤 フォルダを覚えるのをやめる（共有で渡す）" : "📤 フォルダを選ばずに、共有で渡す", value: "forget", kind: "side",
+                      sub: "Dropbox はフォルダを選ぶ画面に出ません。共有なら Dropbox を選べます",
+                      run: async () => { await saveDirForget();
+                        /* フォルダを覚えていなかった：押したとおり、そのまま共有で渡す（「覚えるのをやめました」とは言わない）（版176） */
+                        if(!now0) return await saveAllDrafts(mode);
+                        await uiAlert(saveForgetDoneText() + "\n\nまとめて渡すときは、もう一度「まとめて保存」を押してください。"); } }],
+            later: "やめる", laterSub: "何も書いていません。下書きはそのまま残ります" });
+      } else {
         console.warn("まとめて保存：フォルダを選ぶ画面を開けませんでした", e);
         stopOffer("保存先のフォルダを選べませんでした",
           "保存先のフォルダを選べませんでした。<br><br>もう一度「まとめて保存」を押してください。<br>"
@@ -7383,7 +7490,9 @@ async function saveAllDrafts(mode){
     if(dir) dir = await saveDirSettle(dir);
   }
   const okNos = [], ngNos = [];
+  const sideDone = [];                      // 共有で渡す道で、預けの名前で渡せた分（版176）
   let where = "", heldN = 0;
+  let devDir = false, devPlace = "";        // 書いた先が、端末の中だけかもしれないフォルダ（版176）
   if(dir){
     const keptAll = [], conflictNos = [], photoNg = [], buildNos = [], unsureNos = [], unreadNos = [];
     try{ await caseFileIndex(dir); }catch(_){}     // フォルダの名前一覧は1回だけ読む
@@ -7399,7 +7508,7 @@ async function saveAllDrafts(mode){
         if((cf0.unreadable || []).indexOf(f.name) >= 0){ unreadNos.push(f.no); ngNos.push(f.no); offUnread.push(f); continue; }   // あるのに読めない＝書かない
         /* ★【見るだけ】・預けモード★（版176）フォルダに PCのファイル（らしいもの）が無ければ、いつもの名前では書かない。
            （1件ずつの保存の pcGuardAutoLoad と同じ決め方。写真が台帳より少ない・完了の印が無いファイルは、この端末の写しかもしれない） */
-        if(f.guard === "mode" || (f.guard && !(cf0.primary && pcHitLooksPc(cf0.primary, rcRowOf(draftNoKey(f.no)))))){
+        if(f.guard === "mode" || (f.guard && !(cf0.primary && pcHitLooksPc(cf0.primary, rcRowOf(draftNoKey(f.no)), cf0.others)))){
           offSide.push(f); continue;
         }
         if(placeMm && rcRowOf(draftNoKey(f.no))){ offPlace.push(f); continue; }
@@ -7460,6 +7569,10 @@ async function saveAllDrafts(mode){
       }catch(e){ console.warn("まとめて保存 失敗", f.name, e); ngNos.push(f.no); offErr.push(f); }
     }
     where = "「" + (saveDirPlace(dir) || "選んだフォルダ") + "」";
+    /* ★書いた先が、端末の中だけかもしれないフォルダ（親が分からず、名前もリストでない）★（版176）
+       書けた戸別も、最後の知らせで「📮 事務所にも届ける」を選べるようにする（9/23 から端末の「その2」にしか入っていなかった） */
+    devDir = saveDirMaybeDevice(dir);
+    devPlace = saveDirPlace(dir) || (dir && dir.name) || "選んだフォルダ";
     heldN = unsureNos.length + buildNos.length + conflictNos.length;
     if(keptAll.length){
       await uiAlert("ファイルに入っていた中身を残しました（" + keptAll.length + "件）。\n\n"
@@ -7508,6 +7621,15 @@ async function saveAllDrafts(mode){
     for(let i = files.length - 1; i >= 0; i--){
       if(files[i].guard){ offSide.unshift(files[i]); files.splice(i, 1); }
     }
+    /* ★共有で渡す道（フォルダを覚えるのをやめた端末）で、PCのファイルを読んでいない戸別は、預けの名前で渡す★（版176）
+       1件ずつの保存（saveShareAsSide）と同じ決まり。いつもの名前（管理番号.json）で渡すと、事務所が Dropbox で
+       「置き換え」たとき、PCの写真・図面が消える。預けは何も上書きしないので、写真の歯止めは通さない。 */
+    const sideFs = [];
+    if(saveRoute() === "share"){
+      for(let i = files.length - 1; i >= 0; i--){
+        if(!sideBaseOk(files[i].model)){ sideFs.unshift(files[i]); files.splice(i, 1); }
+      }
+    }
     const photoNg2 = [];
     for(let i = files.length - 1; i >= 0; i--){
       let miss = 0;
@@ -7521,29 +7643,45 @@ async function saveAllDrafts(mode){
         + "\n\nこの端末ではフォルダを読めないため、PCのファイルにある写真を足せません。\n"
         + "その戸別を開いて「📂 戸別ファイルを読み込んで編集する」から読み込んでから、もう一度お試しください。");
     }
-    if(!files.length){ setBusy(false); if(!bulkOfferAll()) await uiAlert("渡せる戸別がありませんでした。"); return; }
+    const sideIts = [];
+    for(const f of sideFs){
+      try{ const it = await sideBuild(f.model, "share"); it.f = f; sideIts.push(it); }
+      catch(e){ console.warn("預けを作れませんでした", f.no, e); ngNos.push(f.no); offErr.push(f); }
+    }
+    const items = files.concat(sideIts);      // いつもの名前の分と、預けの名前の分を、1回の共有でまとめて渡す
+    if(!items.length){ setBusy(false); if(!bulkOfferAll()) await uiAlert("渡せる戸別がありませんでした。"); return; }
     // まず共有（1回の操作でまとめて渡せる。★1回で渡せるのは10件・45MBまで★ 超えたら続きを押してもらう＝版176）
     let shared = false, sharedAs = "", restNote = "";
     {
       files.forEach(f => { if(f.bytes == null){ try{ f.bytes = new Blob([f.text]).size; }catch(_){ f.bytes = f.text.length; } } });
-      const sr = await sideShareChunks(files);
-      if(sr.aborted && !sr.done.length){ setBusy(false); bulkOfferAll(); return; }
+      const sr = await sideShareChunks(items);
+      if(sr.aborted && !sr.done.length){
+        setBusy(false);
+        /* ★共有の画面を閉じたときも、黙って終わらない★（版176）何も渡していない。📮 で別の名前のまま渡せる（押すまで何もしない） */
+        bulkOfferAll({ pre: [{ label: "共有をやめた戸別", fs: items.map(x => x.f || x), why: "cancel" }],
+          title: "保存をやめました（何も書いていません）",
+          lead: "共有の画面を閉じたので、何も渡していません（下書きと写真は、そのまま残っています）。<br>"
+              + "もう一度「まとめて保存」を押すか、下の「📮」で、別の名前のまま渡せます（PCのファイルは書き替えません）。",
+          btn: n => "📮 まとめて事務所に預ける（" + n + "件）" });
+        return;
+      }
       if(sr.done.length){
-        shared = true; sharedAs = sr.as; okNos.push.apply(okNos, sr.done);
+        shared = true; sharedAs = sr.as;
+        sr.done.forEach(x => { if(x.f) sideDone.push(x); else okNos.push(x); });
         where = "共有先" + (sr.as === "txt" ? "（名前の最後に .txt が付きます）" : "");
-        const rest = files.length - sr.done.length;
+        const rest = items.length - sr.done.length;
         if(rest > 0) restNote = "\n\n⚠ あと " + rest + "件は、まだ渡していません（下書きはそのまま残っています）。もう一度「まとめて保存」を押してください。";
       }
     }
     if(!shared){
       // 最後の手段：ダウンロード（端末の「ダウンロード」フォルダに全部並ぶ）
-      for(const f of files){
+      for(const f of items){
         try{
           const url = URL.createObjectURL(new Blob([f.text], { type:"application/json" }));
           const a = document.createElement("a"); a.href = url; a.download = f.name;
           document.body.appendChild(a); a.click();
           setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 4000);
-          okNos.push(f);
+          if(f.f) sideDone.push(f); else okNos.push(f);
         }catch(e){ console.warn("ダウンロード失敗", f.name, e); ngNos.push(f.no); }
         await new Promise(r => setTimeout(r, 260));   // 連続ダウンロードで弾かれないよう少し間を空ける
       }
@@ -7552,6 +7690,20 @@ async function saveAllDrafts(mode){
     /* ★1件ずつの「保存」と同じ強さで知らせる★
        ここは相手のフォルダへ直接書けない道。知らせがトースト（1.9秒で消える）だけだと、
        どこへ入れたのか・何に気をつけるのかが残らない。 */
+    /* 預けの名前で渡した分：📮 の印（控えは取らない・PCのファイルを読んだことにしない） */
+    for(const it of sideDone) await markDraftSidedFor(it.model, shared ? "share" : "dl", it.sig);
+    const sideTxt = sideDone.length
+      ? ("\n\n📮 ほかに " + sideDone.length + "件は、PCのファイルを読んでいないので、別の名前で渡しました：\n"
+         + sideNamesText(sideDone) + "\n" + sidePcNote(sideDone) + "事務所で振り分けて、1つにまとめます。")
+      : "";
+    if(!okNos.length && sideDone.length){
+      await uiAlert((shared ? "📮 共有で事務所に預けました： " : "📮 ダウンロードに入れました： ") + sideDone.length + " 件\n\n"
+        + sideNamesText(sideDone) + "\n\n"
+        + "PCのファイルを読んでいないので、別の名前で渡しました。\n"
+        + (shared ? ("Dropbox の「" + sideListPlace() + "」に入れたなら、それで終わりです。別の場所に入れても、事務所で振り分けます。")
+                  : ("あとで Dropbox のアプリで「" + sideListPlace() + "」に入れてください。"))
+        + "\n\n" + sidePcNote(sideDone) + restNote);
+    }
     if(okNos.length){
       await uiAlert((shared ? "共有で渡しました： " : "ダウンロードに入れました： ") + okNos.length + " 件\n\n"
         + "中身はきちんと入っています（消えていません）。\n\n"
@@ -7564,11 +7716,12 @@ async function saveAllDrafts(mode){
                + "※ 何件も続けてダウンロードすると、ブラウザが途中で止めることがあります。\n"
                + "「許可しますか」と聞かれたら許可してください。\n"
                + "入っていない戸別は、受付台帳の「全部保存し直す」でもう一度渡せます。"))
-        + restNote
+        + restNote + sideTxt
         + saveHintLine());
     }
   }
-  for(const f of okNos) await markDraftSavedFor(f.key, f.model);
+  /* 共有・ダウンロードの道は控えを取り直していない＝写しで下書きを書き戻さない（版176） */
+  for(const f of okNos) await markDraftSavedFor(f.key, f.model, dir ? null : { keep: true });
   if(okNos.some(f => f.model === M)){ try{ render(); }catch(_){} }   // 取り込んだ分を画面にも出す
   await refreshDraftInfo();
   const sv = document.getElementById("reception-search");
@@ -7577,12 +7730,23 @@ async function saveAllDrafts(mode){
   const verb = isAll ? "に保存し直しました" : "に保存しました";
   const sideN = offSide.length + offPlace.length;          // 見るだけ・預けモード・物件が違う（版176）
   const tail = [ngNos.length ? (ngNos.length + "件は失敗") : "", heldN ? (heldN + "件は書かずに残しました") : "",
-                sideN ? (sideN + "件はいつもの名前では書いていません") : ""]
+                sideN ? (sideN + "件はいつもの名前では書いていません") : "",
+                sideDone.length ? (sideDone.length + "件は別の名前（📮）で渡しました") : ""]
     .filter(Boolean).join("・");
-  toast(okNos.length + "件を" + where + verb + (tail ? ("（" + tail + "）") : ""));
+  /* 預けの名前で渡した分だけのとき（共有で渡す道）は「0件を…保存しました」と言わない（版176） */
+  toast((!okNos.length && sideDone.length)
+    ? ("📮 " + sideDone.length + "件を、別の名前で" + where + "へ渡しました")
+    : (okNos.length + "件を" + where + verb + (tail ? ("（" + tail + "）") : "")));
   /* ★書けなかった分を1つの知らせでまとめて言い、📮 で預けられるようにする★（版176）
-     前は、別の戸別のファイル・読み返しの不一致・書けなかったものは「（N件は失敗）」の一言だけだった。 */
-  bulkOfferAll();
+     前は、別の戸別のファイル・読み返しの不一致・書けなかったものは「（N件は失敗）」の一言だけだった。
+     ★端末の中だけかもしれないフォルダに書いた分も、ここで「📮 事務所にも届ける」を選べる（任意）★ */
+  bulkOfferAll((devDir && okNos.length) ? {
+    post: [{ label: "「" + devPlace + "」に書いた戸別（この端末の中だけのフォルダなら、事務所に届きません）", fs: okNos, why: "resend", opt: true }],
+    optTitle: "「" + devPlace + "」に保存しました",
+    optLead: "⚠ 「" + esc(devPlace) + "」がこの端末の中だけのフォルダなら、事務所には届きません。<br>"
+           + "Dropbox と同期していないときは、下の「📮」で、別の名前のまま事務所に届けてください。",
+    /* 書いた戸別は保存済み（💾）になり、次の「まとめて保存」には出ない。あとで渡す道は 履歴 の 📮 */
+    later: "あとで", laterSub: "あとで渡すときは、「履歴」の「📮 選んで事務所に預ける（保存済みも）」から選べます" } : null);
 }
 
 /* ============================================================================
@@ -7785,7 +7949,7 @@ async function caseFileFromDir(dir, no){
     let cf = null;
     try{ cf = await readExistingCaseFiles(d, fname, no); }catch(_){ return null; }
     if(!cf || !cf.primary) return null;
-    return { data: cf.primary, name: cf.pick || fname, dir: d, count: (cf.names || []).length };
+    return { data: cf.primary, others: cf.others || [], name: cf.pick || fname, dir: d, count: (cf.names || []).length };
   };
   /* 探す根元＝物件のフォルダ。リストを覚えているときはその上、そうでなければ覚えているフォルダ */
   const root = saveDirParentOf(dir) || dir;
@@ -7835,18 +7999,30 @@ async function caseFileFromDir(dir, no){
 /* ★見つけたファイルが、PCのファイルらしいか★（版176）
    台帳が「PCに写真6枚・工事完了」と言っているのに、写真1枚・未完了のファイルは、この端末が前に「その2」へ書いた写しかもしれない。
    それを PCのファイルとして読むと【見るだけ】が外れ、PCの写真が無いまま保存できてしまう。預けも PCのファイルではない。 */
-function pcHitLooksPc(data, row){
+function pcHitLooksPc(data, row, others){
   if(!data || typeof data !== "object") return false;
   if(isSideData(data)) return false;
   const h = rcPcHas(row);
   if(!row || !h.any) return true;                           // 台帳に手がかりが無い＝今までどおり
-  const n = (data.chosho_photos || []).filter(p => p && p.dataUri).length;
-  if(h.photos > 0 && n < h.photos) return false;
+  /* ★同じ戸別の別名ファイル（「2612MKM013 2.json」など）も合わせて見る★（版176）
+     保存では、その全部を読み合わせて写真を和集合にする。1つだけで見ると、写真の多い方・完了の印のある方が
+     別名にあるとき、本物のPCのファイルなのに【見るだけ】が外れず、いつもの保存ができなくなる。 */
+  const u = pcHitUnion(data, others);
+  if(h.photos > 0 && u.photos < h.photos) return false;
   /* 完了は、台帳の work_done（PCのファイルの工事完了の印がそのまま来る）があるときだけ見る。
      状態（completed）だけのときは見ない：台帳を入れ直すと状態が先に進んでいることがあり（版171 の場面）、
      そのときの本物のPCのファイルまで断ってしまうため。 */
-  if(row.work_done === true && !(data.work_done === true || String(data.chosho_status || "") === "completed")) return false;
+  if(row.work_done === true && !u.done) return false;
   return true;
+}
+/* 見つけたファイル（と同じ戸別の別名ファイル）の写真の枚数（同じ写真は1枚）と、工事完了の印。預けは数えない */
+function pcHitUnion(data, others){
+  const all = [data].concat((others || []).filter(o => o && typeof o === "object" && !Array.isArray(o) && !isSideData(o)));
+  const ids = new Set();
+  all.forEach(o => ((o && o.chosho_photos) || []).forEach(p => { if(p && p.dataUri) ids.add(String(p.id || photoContentId(p.dataUri))); }));
+  const n0 = ((data && data.chosho_photos) || []).filter(p => p && p.dataUri).length;
+  const done = all.some(o => !!o && (o.work_done === true || String(o.chosho_status || "") === "completed"));
+  return { photos: Math.max(n0, ids.size), done: done };
 }
 let _pcAutoLoadMiss = null;      // 見つけたが PCのファイルらしくなかった（知らせに使う）
 async function pcGuardAutoLoad(dir){
@@ -7862,9 +8038,9 @@ async function pcGuardAutoLoad(dir){
   catch(e){ console.warn("PCのフォルダを見られませんでした", e); }
   if(!hit) return false;
   { const row0 = pcGuardRow();
-    if(!pcHitLooksPc(hit.data, row0)){
+    if(!pcHitLooksPc(hit.data, row0, hit.others)){
       const h0 = rcPcHas(row0);
-      _pcAutoLoadMiss = { name: hit.name, have: ((hit.data && hit.data.chosho_photos) || []).filter(p => p && p.dataUri).length,
+      _pcAutoLoadMiss = { name: hit.name, have: pcHitUnion(hit.data, hit.others).photos,
                           want: h0.photos, done: h0.done, side: isSideData(hit.data) };
       return false;
     } }
@@ -8031,9 +8207,11 @@ function renderPcGuard(){
       '<div class="pcg-ttl">' + (h.done ? "✅ 工事が終わっている戸別です" : "⚠ この戸別はPCに中身があります") + '</div>'
     + '<div class="pcg-what">' + esc(what) + '</div>'
     + '<div class="pcg-msg">'
+    /* ★「ここで保存すると、上の中身はPCのファイルから消えます」は、もう本当ではない★（版176）
+       見るだけの戸別は「保存」を押しても いつもの名前では書かない（📮 で預けるか選ぶ窓が出る） */
     +   (h.done
-          ? "直すときは、PCでお願いします。ここで保存すると、上の中身はPCのファイルから消えます。"
-          : "このまま保存すると、上の中身はPCのファイルから消えます。")
+          ? "直すときは、PCでお願いします。ここで「保存」を押しても、PCのファイルは書き替えません（📮 で事務所に預けられます）。"
+          : "ここで「保存」を押しても、PCのファイルは書き替えません（📮 で事務所に預けられます）。")
     +   "<br>先に <b>戸別ファイル（" + esc((String((M && M.chosho_mgmt_no) || "").trim() || "管理番号")) + ".json）</b> を読み込むと、"
     +   "写真も工事日も残したまま続きを入力できます。"
     +   "<br>読み込めないときは <b>📮 入力して事務所に預ける</b> で、PCのファイルを書き替えずに渡せます。"
@@ -8469,6 +8647,9 @@ function adoptStateIntoModel(model, st, keys){
   model._touched = own;
 }
 function fileBaseAfterWrite(model, st, fname, fileObj, keys, from){
+  /* 書く前の控えが「PCのファイルを読んで取ったもの」（またはそれを受け継いだもの）か。書いたあとの控えに受け継ぐ（版176） */
+  const pb0 = fileBaseGet(model);
+  const prevPc = !!(pb0 && !pb0.stale && (pb0.rd || pb0.pc));
   adoptStateIntoModel(model, st, keys);
   /* ★同じ写真の名前と「工事調書に載せる」印は、書いた中身に合わせる★（写真の中身は写さない＝容量は増えない・枚数は変えない）
      合わせないと、控えは PC の名前・印、画面は前の名前・印のまま残り、次の保存で「現場が直した」と読まれて戻る。 */
@@ -8489,6 +8670,10 @@ function fileBaseAfterWrite(model, st, fname, fileObj, keys, from){
      写真の歯止めが写真IDの副本だけに細る（副本は容量で古い順に捨てる）。 */
   mine.chosho_photos = (st && st.chosho_photos) || [];
   fileBaseSet(model, mine, fname, fileObj, from);
+  /* ★当てにできる控えの印は、書いた先からは作らない★（版176）
+     書いた先の名前が「リスト」でも、物件の中でも、端末の中に作ったフォルダかもしれない（PCの中身を知らない）。
+     PCのファイルを読んで取った控えのあとに書いたときだけ、その印（pc）を受け継ぐ（読んだ中身は書いたファイルに入っている）。 */
+  if(model._fileBase && prevPc) model._fileBase.pc = true;
   try{ pbaseSet(String(model.chosho_mgmt_no || ""), (st.chosho_photos || []).filter(p => p && p.dataUri)
         .map(p => String(p.id || photoContentId(p.dataUri)))); }catch(_){}
   model._fromCaseFile = true;
