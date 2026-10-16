@@ -3659,6 +3659,7 @@ async function handleMeasCsv(file, cat){
   else { await persistModel(model); }           // 別戸別へ切替済み→読込元を直接確定保存（混入/喪失防止）
   toast(labelMap[cat]+"に "+applyList.length+"CH取込（未対応CH: "
     +(unmatched.length?unmatched.join(","):"なし")+"）");
+  await persistMovedNotice();                   // 別の下書きに入れたときは窓で知らせる（版178）
   /* 「>32」のように測り切れなかった行は、その数字で入れている。黙って入れない。 */
   if(parsed.over){
     await uiAlert("取り込みました。\n\n"
@@ -3766,6 +3767,21 @@ async function handlePhotoFiles(files){
   try{ refreshPhotos(); }catch(_){}
   if(shrunk) toast(shrunk+"枚は大きかったので軽くして入れました");
   if(fail) toast(fail+"枚は読み込めませんでした（別の写真でお試しください）");   // 大事な知らせを最後に
+  await persistMovedNotice();
+}
+/* ★届け先の下書きが別のものに替わっていたことを、取り込みの最後に窓で知らせる★（版178）
+   小さな知らせ（toast）は、すぐあとの「写真を読んでいます…」などで消えて読めなかった。 */
+async function persistMovedNotice(){
+  const mv = persistModel._moved || [];
+  if(!mv.length) return;
+  persistModel._moved = [];
+  const nos = Array.from(new Set(mv.map(x => x.no).filter(Boolean)));
+  const what = mv.some(x => x.photo) ? "写真" : "測定値";
+  try{
+    await uiAlert("⚠ 取り込んだ" + what + "を、別の下書きに入れました。\n\n"
+      + "管理番号 " + (nos.join("・") || "（番号なし）") + " の下書きが、取り込んでいるあいだに別のもの（消して作り直した等）に替わっていたためです。\n\n"
+      + "「下書き一覧」に同じ管理番号の下書きが2つ出ています。" + what + "が入っているほうを開いて確かめ、保存してください。");
+  }catch(_){}
 }
 function suggestLabel(n){
   const seq=["施工前","施工前②","施工前③","施工中","施工完了","施工完了②","現地","表札","その他"];
@@ -6418,7 +6434,7 @@ async function persistModel(m, added){
     if(prev && prev.model && !draftSameUid(prev.model, m)){
       key = m._lastDraftKey = "tmp:" + Date.now();
       prev = null;
-      toast("⚠ 管理番号 " + (m.chosho_mgmt_no || "") + " の下書きが別のものに替わっていたので、届いた写真は別の下書き（一覧に出ます）に入れました");
+      (persistModel._moved = persistModel._moved || []).push({ no: m.chosho_mgmt_no || "", photo: Array.isArray(added) });   // 取り込みの最後に知らせる（版178）
     }
     if(!m._uid) m._uid = draftNewUid();
     /* ★写真の取り込み：いちばん新しい下書きに、新しく読んだ写真だけを足す★（版178）
