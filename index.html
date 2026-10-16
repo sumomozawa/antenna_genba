@@ -3637,6 +3637,7 @@ function parseLcv4aCsv(text){
 async function handleMeasCsv(file, cat){
   const labelMap={antenna:"① アンテナ出力",amplifier:"② 増幅器出力",terminal:"③ 宅内末端"};
   const model=M; // 読込開始時の戸別を固定（読込中に別戸別へ切替わっても混入/喪失させない）
+  const tag={};  // この取り込みの印（版178）
   let parsed;
   try{ const buf=await readFileAsArrayBuffer(file); parsed=parseLcv4aCsv(decodeCsvBytes(buf)); }
   catch(err){ await uiAlert("CSVを読み込めませんでした：\n"+err.message); return; }
@@ -3656,10 +3657,10 @@ async function handleMeasCsv(file, cat){
   for(const {i,r} of applyList){ const cur=target[i]||{};
     target[i]={ db:r.db, mer: parsed.hasMer?r.mer:(cur.mer??""), ber: parsed.hasBer?r.ber:(cur.ber??"") }; }
   if(M===model){ saveDraft(); refreshMeas(); } // まだ同じ戸別を編集中
-  else { await persistModel(model); }           // 別戸別へ切替済み→読込元を直接確定保存（混入/喪失防止）
+  else { await persistModel(model, undefined, tag); }   // 別戸別へ切替済み→読込元を直接確定保存（混入/喪失防止）
   toast(labelMap[cat]+"に "+applyList.length+"CH取込（未対応CH: "
     +(unmatched.length?unmatched.join(","):"なし")+"）");
-  await persistMovedNotice();                   // 別の下書きに入れたときは窓で知らせる（版178）
+  await persistMovedNotice(tag);                // 別の下書きに入れたときは窓で知らせる（版178）
   /* 「>32」のように測り切れなかった行は、その数字で入れている。黙って入れない。 */
   if(parsed.over){
     await uiAlert("取り込みました。\n\n"
@@ -3708,7 +3709,7 @@ function mergePhotosInto(dst, src){
   });
   return added;
 }
-async function photoKeepInto(model, added){
+async function photoKeepInto(model, added, tag){
   if(M === model){ await saveDraft(); return true; }
   /* ★どの下書きに入れるかは、下書きのキーで見る★（版178）
      管理番号だけで見ると、番号を打ち直した写し（下書きのキーが移っている）や、番号が重なって一時のキーに置いた
@@ -3725,7 +3726,7 @@ async function photoKeepInto(model, added){
     return true;
   }
   /* 別の戸別へ移った＝その戸別の下書きに足す。取り込みが2つ重なっても、読んで足して書くのを1つずつ行う（片方の写真を消さない） */
-  return await photoKeepQueue(() => persistModel(model, Array.isArray(added) ? added : undefined));
+  return await photoKeepQueue(() => persistModel(model, Array.isArray(added) ? added : undefined, tag));
 }
 /* 同じ下書きか（印のどちらかが無い＝前の版の下書きのときは、見分けられないので同じとみなす）（版178） */
 function draftSameUid(a, b){ return !(a && b && a._uid && b._uid && a._uid !== b._uid); }
@@ -3736,6 +3737,7 @@ function photoKeepQueue(fn){
 }
 async function handlePhotoFiles(files){
   const model=M; // 読込開始時の戸別を固定（読込中に別戸別へ切替わっても混入/喪失させない）
+  const tag={};  // この取り込みの印（別の下書きに入れた知らせを、この取り込みの最後に出す・版178）
   const all=Array.from(files||[]);
   // MIMEが空でもファイル名の拡張子で画像判定（Android/SAF等でtypeが空になる端末対策）
   const arr=all.filter(f=>f && (/^image\//i.test(f.type||"") || /\.(jpe?g|png|heic|heif|webp|gif|bmp|tiff?)$/i.test(f.name||"")));
@@ -3758,27 +3760,28 @@ async function handlePhotoFiles(files){
       model.chosho_photos.push(ph); pending.push(ph);
       /* 1枚ごとに控える。何枚も選ぶと時間がかかるので、途中で画面を閉じられても
          そこまでの写真が残るようにする（まとめて最後に控えると全部消える）。 */
-      try{ if(await photoKeepInto(model, pending)) pending=[]; }catch(_){}
+      try{ if(await photoKeepInto(model, pending, tag)) pending=[]; }catch(_){}
       if(arr.length>1) toast("写真を読んでいます… "+(i+1)+" / "+arr.length);
       await new Promise(r=>setTimeout(r,0));   // 1枚ごとに画面へ息継ぎさせる（固まらせない）
     }catch(e){ console.error("photo read failed",e); fail++; }
   }
-  await photoKeepInto(model, pending);   // 同じ戸別なら画面へ足して保存、別の戸別ならその戸別の下書きに足す
+  await photoKeepInto(model, pending, tag);   // 同じ戸別なら画面へ足して保存、別の戸別ならその戸別の下書きに足す
   try{ refreshPhotos(); }catch(_){}
   if(shrunk) toast(shrunk+"枚は大きかったので軽くして入れました");
   if(fail) toast(fail+"枚は読み込めませんでした（別の写真でお試しください）");   // 大事な知らせを最後に
-  await persistMovedNotice();
+  await persistMovedNotice(tag);
 }
 /* ★届け先の下書きが別のものに替わっていたことを、取り込みの最後に窓で知らせる★（版178）
    小さな知らせ（toast）は、すぐあとの「写真を読んでいます…」などで消えて読めなかった。 */
-async function persistMovedNotice(){
-  const mv = persistModel._moved || [];
+async function persistMovedNotice(tag){
+  const all = persistModel._moved || [];
+  const mv = all.filter(x => x.tag === (tag || null));     // この取り込みの分だけ（ほかの取り込みの分は、その取り込みの最後に）
   if(!mv.length) return;
-  persistModel._moved = [];
+  persistModel._moved = all.filter(x => mv.indexOf(x) < 0);
   const nos = Array.from(new Set(mv.map(x => x.no).filter(Boolean)));
   const what = mv.some(x => x.photo) ? "写真" : "測定値";
   try{
-    await uiAlert("⚠ 取り込んだ" + what + "を、別の下書きに入れました。\n\n"
+    await uiNoticeWhenIdle("⚠ 取り込んだ" + what + "を、別の下書きに入れました。\n\n"
       + "管理番号 " + (nos.join("・") || "（番号なし）") + " の下書きが、取り込んでいるあいだに別のもの（消して作り直した等）に替わっていたためです。\n\n"
       + "「下書き一覧」に同じ管理番号の下書きが2つ出ています。" + what + "が入っているほうを開いて確かめ、保存してください。");
   }catch(_){}
@@ -6420,7 +6423,7 @@ async function askPersistentStorage(){
     return !!(await st.persist());
   }catch(_){ return false; }
 }
-async function persistModel(m, added){
+async function persistModel(m, added, tag){
   try{
     if(!m) return false;
     /* ★この下書きが置いてあるキーに書く★（版178）管理番号が別の下書きと重なって、一時のキー（tmp:）に置いてある下書きを、
@@ -6434,7 +6437,7 @@ async function persistModel(m, added){
     if(prev && prev.model && !draftSameUid(prev.model, m)){
       key = m._lastDraftKey = "tmp:" + Date.now();
       prev = null;
-      (persistModel._moved = persistModel._moved || []).push({ no: m.chosho_mgmt_no || "", photo: Array.isArray(added) });   // 取り込みの最後に知らせる（版178）
+      (persistModel._moved = persistModel._moved || []).push({ no: m.chosho_mgmt_no || "", photo: Array.isArray(added), tag: tag || null });   // その取り込みの最後に知らせる（版178）
     }
     if(!m._uid) m._uid = draftNewUid();
     /* ★写真の取り込み：いちばん新しい下書きに、新しく読んだ写真だけを足す★（版178）
@@ -10148,6 +10151,8 @@ function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;"
 function toast(msg){ const t=document.getElementById("savedhint"); t.textContent=msg; t.classList.add("show"); clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove("show"),1900); }
 // アプリ内ダイアログ（iOSのホーム画面アプリでは native confirm/alert が無効化されるため自前で実装）
 function uiDialog(msg, isConfirm, okLabel){
+  /* ★取り込みの知らせが出ているあいだは、次の窓をそのあとに出す★（版178）窓は1つしか無く、上書きすると知らせが消える */
+  if(uiDialog._notice) return uiDialog._notice.then(() => uiDialog(msg, isConfirm, okLabel));
   return new Promise(resolve=>{
     const modal=document.getElementById("ui-dialog");
     const okBtn=document.getElementById("ui-dialog-ok");
@@ -10161,6 +10166,20 @@ function uiDialog(msg, isConfirm, okLabel){
     cancelBtn.onclick=()=>done(false);
     modal.onclick=(e)=>{ if(e.target===modal) done(false); }; // 背景タップ=キャンセル
   });
+}
+/* 取り込みの最後の知らせ（版178）。取り込みは裏で動くので、ほかの窓（保存の「このまま保存しますか？」・CSVの「上書きしますか？」など）が
+   出ているあいだ・保存しているあいだは待つ。窓は1つしか無く、上書きすると前の窓の答えが返らず、保存が「保存中…」のまま止まっていた。 */
+async function uiNoticeWhenIdle(msg){
+  for(;;){
+    const modal = document.getElementById("ui-dialog");
+    if(!(modal && modal.classList.contains("open")) && !_saving && !uiDialog._notice){
+      const p = uiDialog(msg, false);          // 確かめてすぐ出す（あいだに別の窓が入らない）
+      uiDialog._notice = p.then(() => {}, () => {});
+      try { await p; } finally { uiDialog._notice = null; }
+      return;
+    }
+    await new Promise(r => setTimeout(r, 300));
+  }
 }
 function uiConfirm(msg){ return uiDialog(msg, true); }
 function uiAlert(msg){ return uiDialog(msg, false); }
