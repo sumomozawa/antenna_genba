@@ -3713,10 +3713,10 @@ async function photoKeepInto(model, added){
      管理番号だけで見ると、番号を打ち直した写し（下書きのキーが移っている）や、番号が重なって一時のキーに置いた
      別の下書きを見分けられない。開いている戸別に届けられず、誰にも見えない下書きを作ったり、別の戸別の下書きに入れたりしていた。
      キーをまだ持たない（一度も控えていない）ときだけ、管理番号で見る。 */
-  const mk = model._lastDraftKey ? draftKeyNow(model._lastDraftKey) : "";
+  const mk = model._lastDraftKey ? draftKeyNow(model._lastDraftKey, model._uid) : "";
   if(mk) model._lastDraftKey = mk;
   const a = photoMgmtKeyOf(M), b = photoMgmtKeyOf(model);
-  if(mk ? !!(M && M._lastDraftKey === mk) : !!(a && a === b)){   // 同じ戸別を開き直した
+  if(mk ? !!(M && M._lastDraftKey === mk && draftSameUid(M, model)) : !!(a && a === b)){   // 同じ戸別を開き直した
     /* 新しく読んだ写真だけを足す（版178。開き直した画面で消した写真を戻さない） */
     mergePhotosInto(M.chosho_photos, Array.isArray(added) ? added : model.chosho_photos);
     await saveDraft();
@@ -3726,6 +3726,8 @@ async function photoKeepInto(model, added){
   /* 別の戸別へ移った＝その戸別の下書きに足す。取り込みが2つ重なっても、読んで足して書くのを1つずつ行う（片方の写真を消さない） */
   return await photoKeepQueue(() => persistModel(model, Array.isArray(added) ? added : undefined));
 }
+/* 同じ下書きか（印のどちらかが無い＝前の版の下書きのときは、見分けられないので同じとみなす）（版178） */
+function draftSameUid(a, b){ return !(a && b && a._uid && b._uid && a._uid !== b._uid); }
 function photoKeepQueue(fn){
   const p = (photoKeepQueue.q || Promise.resolve()).then(fn, fn);
   photoKeepQueue.q = p.then(() => {}, () => {});
@@ -6314,13 +6316,21 @@ function _recHasContent(rec){
 /* ★下書きを別のキーへ移したときの行き先★（版178）
    管理番号を打ち直した・番号が重なって一時のキーに置き直した、などで下書きのキーが変わると、前のキーは消える。
    写真の取り込みは始めたときのキーを覚えているので、行き先を引けないと、消えたキーに新しい下書きを作っていた
-   （画面にも まとめて保存 にも出ない下書きに、写真が取り残される）。 */
+   （画面にも まとめて保存 にも出ない下書きに、写真が取り残される）。
+   ★移った先は、同じ下書き（_uid が同じ）のときだけ引く★ 番号を打ち直して移った前のキーに、あとで別のお宅の下書きが
+   できることがある。印を見ないで引くと、そのお宅の写真を、移った先の別の下書き（別のお宅）へ入れてしまう。 */
 function draftMoves(){ return draftMoves.m || (draftMoves.m = new Map()); }
-function draftKeyNow(k){
+function draftKeyNow(k, uid){
   const mv = draftMoves();
-  for(let i = 0; k && mv.has(k) && i < 50; i++) k = mv.get(k);
+  for(let i = 0; k && mv.has(k) && i < 50; i++){
+    const e = mv.get(k);
+    if(uid && e.uid && e.uid !== uid) break;           // 別の下書きの引っ越し＝引かない
+    k = e.to;
+  }
   return k;
 }
+/* 下書きを見分ける印（版178）。開き直した写し・取り込みが覚えている戸別は、同じ印を持つ（下書きの中に入る） */
+function draftNewUid(){ return "d" + Date.now().toString(36) + Math.floor(Math.random() * 1e9).toString(36); }
 async function persistDraft(){
   /* 管理番号を変えたら、前の戸別の控えは使えない。捨てたら【見るだけ】の関門も掛け直す。 */
   try{ if(M && M._fileBase && !fileBaseGet(M)) M._fromCaseFile = false; }catch(_){}
@@ -6329,6 +6339,7 @@ async function persistDraft(){
     // ※ draftKey() より前に返すこと。draftKey() は一時IDを採番してしまうため。
     if(!String(M.chosho_mgmt_no||"").trim() && M._touched !== true
        && !(M.chosho_photos||[]).length && !flowAny(flowOf(M))) return;
+    if(!M._uid) M._uid = draftNewUid();           // 下書きを見分ける印（版178）
     const wantKey=draftKey();
     const prev=await idbGet(wantKey);
     // 管理番号衝突ガード：このキーの下書きを今まさに編集しているのでなく（別番号から移動 or 新規で既存番号入力）、
@@ -6346,8 +6357,9 @@ async function persistDraft(){
     }
     // 前回このモデルを保存したキーから変わっていたら旧レコードを削除（tmp:/no:旧番号 の孤児化を防ぐ）
     if(M._lastDraftKey && M._lastDraftKey !== key){ try{ await idbDel(M._lastDraftKey); }catch(_){} draftInfoForget(M._lastDraftKey);
-      draftMoves().set(M._lastDraftKey, key); draftMoves().delete(key); }   // 取り込み中の写真の行き先（版178）
+      draftMoves().set(M._lastDraftKey, { to: key, uid: M._uid }); }   // 取り込み中の写真の行き先（版178）
     M._lastDraftKey = key;
+    draftMoves().delete(key);                     // このキーは、いまこの下書きのもの（前の引っ越しの覚えを捨てる・版178）
     const cur = (key===wantKey) ? prev : await idbGet(key);
     /* 画面を通さずに中身が変わっていた場合（台帳から引き継いだ等）も「変更あり」に数える。
        どの道から変わっても、PCへ渡し忘れないようにするための保険。
@@ -6395,10 +6407,17 @@ async function persistModel(m, added){
     if(!m) return false;
     /* ★この下書きが置いてあるキーに書く★（版178）管理番号が別の下書きと重なって、一時のキー（tmp:）に置いてある下書きを、
        管理番号のキーへ書くと、別の戸別の下書き（写真ごと）を置き換えてしまう。キーを移していれば、移った先に書く。 */
-    const key = m._lastDraftKey ? draftKeyNow(m._lastDraftKey)
+    let key = m._lastDraftKey ? draftKeyNow(m._lastDraftKey, m._uid)
       : (m.chosho_mgmt_no ? ("no:"+m.chosho_mgmt_no) : (m._draftId || (m._draftId="tmp:"+Date.now())));
     if(m._lastDraftKey) m._lastDraftKey = key;
-    const prev=await idbGet(key);
+    let prev=await idbGet(key);
+    /* ★そのキーの下書きが、別の下書き（印が違う）になっていたら、触らない★（版178）
+       この戸別の下書きは、もうそこには無い。別のお宅の下書きを置き換えず、新しい一時のキーにこの戸別を置く（写真を失わない・一覧に出る）。 */
+    if(prev && prev.model && !draftSameUid(prev.model, m)){
+      key = m._lastDraftKey = "tmp:" + Date.now();
+      prev = null;
+    }
+    if(!m._uid) m._uid = draftNewUid();
     /* ★写真の取り込み：いちばん新しい下書きに、新しく読んだ写真だけを足す★（版178）
        取り込みが覚えている戸別（m）は、取り込みを始めたときのもの。そのあと開き直した写しで直した中身（備考・写真を消した・
        ファイルへ保存した印）や、受付台帳から入った名前を、m で書くと元に戻していた。版も戻るので、ファイルに入っていない写真が
@@ -6413,6 +6432,13 @@ async function persistModel(m, added){
       await idbPut(Object.assign({}, prev, { model:pm, savedAt:Date.now(), photos:pm.chosho_photos.length,
         touched:true, sig:stateSig(pm), rev:pm._rev }));
       persistModel._warned=false;
+      /* ★書いているあいだに、その戸別が開き直されていたら、画面の写しにも足す★（版178）
+         写しは書く前の下書きを読んだもの。足さないと、写しを控えたときに、いま書いた写真が下書きから消える。 */
+      if(M && M !== m && M._lastDraftKey === key && draftSameUid(M, pm) && Array.isArray(M.chosho_photos)
+         && mergePhotosInto(M.chosho_photos, added)){
+        try{ await saveDraft(); }catch(_){}
+        try{ refreshPhotos(); }catch(_){}
+      }
       return true;
     }
     /* ★下書きにある写真は減らさない★（版178）取り込みの途中でその戸別を開き直すと、下書きは開き直した写し（別の物）になり、
