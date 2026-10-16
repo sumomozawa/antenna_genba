@@ -11389,9 +11389,35 @@ function spPhotoKeep(rec, ph){
     if(cur){ cur.rev = prev.rev; cur.savedAt = prev.savedAt; }
   });
 }
+/* ★ファイルへ書き出したあとの「保存済」の印は、端末の記録を読み直して付ける★（版178）
+   書き出しているあいだ（フォルダ・保存先を選ぶ画面・共有・読み返し）に、写真の取り込みが終わって写真が入ったり、
+   「戻る」→ 開き直した記録で写真を足したりしていることがある。
+   ・書き出した記録（rec）を丸ごと書かない（途中で入った写真が端末の記録から消える）。印（ファイル名・保存した時刻・回数）だけ付ける。
+   ・「保存済」になるのは、直した回数（rev）が書き出す中身を作ったとき（rev0）のままのときだけ（fileRev = rev0）。
+     進んでいれば「未保存」のまま＝ファイルに入っていない写真を「保存済」に見せない。戻り値 true＝途中で中身が変わった。
+   ok=false（書けていないかもしれない）のときは、ファイル名だけ控える（次の保存で別の名前のファイルを作らない）。 */
+function spMarkSaved(rec, rev0, ok){
+  return spQueue(async () => {
+    const at = Date.now();
+    const put = o => { o.fileName = rec.fileName; if(ok){ o.fileSavedAt = at; o.fileRev = rev0; } };
+    put(rec);
+    const cur = spCurOf(rec);
+    if(cur && cur !== rec) put(cur);
+    const prev = await idbGet(rec.key);
+    const o = prev || spRow(rec);                  // 端末にまだ無い（消した）ときだけ、書き出した記録を書く
+    put(o); o.savedAt = at;
+    await idbPut(o);
+    return !!ok && (o.rev | 0) > rev0;
+  });
+}
+function spLateLine(late){
+  return late ? ("\n\n⚠ 保存の途中で、この記録の中身が変わりました（写真など）。\n"
+    + "変わった分は、まだファイルに入っていません（この端末には残っています）。\nもう一度「保存」を押してください。") : "";
+}
 /* 特別記録をファイルへ書き出す。行き先の探し方は戸別の「保存」と同じ順。 */
 async function spSaveFile(rec){
   const state = spBuildState(rec);
+  const rev0 = rec.rev | 0;                // 書き出す中身を作ったときの「直した回数」（版178）
   const json = JSON.stringify(state);
   const fname = spFileName(rec);
   rec.fileName = fname;
@@ -11420,16 +11446,15 @@ async function spSaveFile(rec){
       if(bad){
         /* ✏️ は残す（fileSavedAt は進めない）が、ファイル名だけは控える。
            控えないと、次に保存したときに別の名前のファイルがもう1つできてしまう。 */
-        try{ await spPersist(rec, false); }catch(_){}
+        try{ await spMarkSaved(rec, rev0, false); }catch(_){}
         return { ok:false, warn:true, title:"⚠ 保存できていないかもしれません",
           msg: "「" + (saveDirPlace(dir) || "選んだフォルダ") + "」の中\n" + fname + "\n" + sizeTxt + "\n\n"
              + saveVerifyHead(bad) + bad
              + "\n\nもう一度「保存」を押してください。" };
       }
-      rec.fileSavedAt = Date.now(); rec.fileRev = rec.rev | 0;
-      await spPersist(rec, false);
-      return { ok:true, title:"保存しました",
-        msg: "「" + (saveDirPlace(dir) || "選んだフォルダ") + "」の中\n" + fname + "\n" + sizeTxt, warn:false };
+      const late = await spMarkSaved(rec, rev0, true);
+      return { ok:true, late, title:"保存しました",
+        msg: "「" + (saveDirPlace(dir) || "選んだフォルダ") + "」の中\n" + fname + "\n" + sizeTxt + spLateLine(late), warn:late };
     }catch(e){ console.warn("特別記録：覚えているフォルダへ書けませんでした", e); }
   }
   // ② 保存先を選ぶ
@@ -11439,10 +11464,9 @@ async function spSaveFile(rec){
         types:[{ description:"特別記録JSON", accept:{ "application/json":[".json"] } }] }, _saveDir ? { startIn:_saveDir } : {}));
       const w = await h.createWritable();
       await w.write(new Blob([json], { type:"application/json" })); await w.close();
-      rec.fileSavedAt = Date.now(); rec.fileRev = rec.rev | 0;
-      await spPersist(rec, false);
-      return { ok:true, title:"保存しました", msg:(h.name || fname) + "\n" + sizeTxt
-        + "\n（保存先を選んで保存しました）" + lapsedLine(), warn:false };
+      const late = await spMarkSaved(rec, rev0, true);
+      return { ok:true, late, title:"保存しました", msg:(h.name || fname) + "\n" + sizeTxt
+        + "\n（保存先を選んで保存しました）" + lapsedLine() + spLateLine(late), warn:late };
     }catch(e){ if(e && e.name === "AbortError") return { ok:false, aborted:true }; }
   }
   // ③ 共有（Androidはここ）
@@ -11450,13 +11474,12 @@ async function spSaveFile(rec){
     const sr = await shareFilesSmart([{ name: fname, text: json }]);
     if(sr.aborted) return { ok:false, aborted:true };
     if(sr.ok){
-      rec.fileSavedAt = Date.now(); rec.fileRev = rec.rev | 0;
-      await spPersist(rec, false);
-      return { ok:true, title:"共有で渡しました", msg:(sr.name[0] || fname) + "\n" + sizeTxt
+      const late = await spMarkSaved(rec, rev0, true);
+      return { ok:true, late, title:"共有で渡しました", msg:(sr.name[0] || fname) + "\n" + sizeTxt
         + "\n\n中身はきちんと入っています（消えていません）。\n\n"
         + saveShareWhere() + "\nそのままPCで読めます。"
         + saveHintLine()
-        + shareRenameNote(sr.as) + lapsedLine(), warn:true };
+        + shareRenameNote(sr.as) + lapsedLine() + spLateLine(late), warn:true };
     }
   }
   // ④ ダウンロード
@@ -11464,13 +11487,12 @@ async function spSaveFile(rec){
   const a = document.createElement("a"); a.href = url; a.download = fname;
   document.body.appendChild(a); a.click();
   setTimeout(() => { URL.revokeObjectURL(url); a.remove(); }, 4000);
-  rec.fileSavedAt = Date.now(); rec.fileRev = rec.rev | 0;
-  await spPersist(rec, false);
-  return { ok:true, title:"ダウンロードに入れました", msg: fname + "\n" + sizeTxt
+  const late = await spMarkSaved(rec, rev0, true);
+  return { ok:true, late, title:"ダウンロードに入れました", msg: fname + "\n" + sizeTxt
     + "\n\n中身はきちんと入っています（消えていません）。\n\n"
     + "この端末の「ダウンロード」に入りました。\n"
     + "PCで読み込むフォルダとちがう場合は、\nそのフォルダへ移してください。"
-    + saveHintLine() + lapsedLine(), warn:true };
+    + saveHintLine() + lapsedLine() + spLateLine(late), warn:true };
 }
 function spStale(rec){ return !rec.fileSavedAt || (rec.rev | 0) > (rec.fileRev | 0); }
 /* ---- 画面 ---- */
@@ -11638,12 +11660,14 @@ function renderSpecialEdit(host){
     try{ res = await spSaveFile(r); }
     finally{ btn.disabled = false; btn.textContent = "保存"; }
     if(res && res.aborted) return;
-    if(res && res.ok){
+    if(res && res.ok && !res.late){
       saveOverlayShow(spFileName(r)); saveOverlayDone(res);
       _spCur = null; await renderSpecial();
-    } else if(res && res.warn){
-      // 書けていないかもしれないときは、黙って閉じない（✏️ も消さない）
+    } else if(res && (res.warn || res.late)){
+      // 書けていないかもしれない・保存の途中で中身が変わったときは、黙って閉じない（✏️ も消さない）
       saveOverlayShow(spFileName(r)); saveOverlayDone(res);
+      /* 保存の途中で入った写真を画面に出し、開いたままにする（もう一度「保存」を押せるように）（版178） */
+      if(res.late && spCurOf(r)) renderSpecialEdit(host);
     }
   });
   const dl = document.getElementById("sp-delrec");
