@@ -5593,6 +5593,7 @@ async function loadStateInto(s, fname, opt){
     && toHalfWidthAn(String(M.chosho_mgmt_no).trim()) === toHalfWidthAn(String(m.chosho_mgmt_no || "").trim()));
   if(_sameNo && M){
     if(M._lastDraftKey) m._lastDraftKey = M._lastDraftKey;
+    if(M._uid) m._uid = M._uid;   // 同じ下書きの印（版178。替わると、取り込み中の残りの写真が別の下書きへ行き、保存済に見えてしまう）
     if(M._pcGuardAck) m._pcGuardAck = M._pcGuardAck;
     /* 📮 預けた印は残す（事務所でまとめ終わるまで、下書きを消さないように知らせるため）（版176） */
     if(M._sideAt){ m._sideAt = M._sideAt; m._sideHow = M._sideHow; }
@@ -6359,7 +6360,8 @@ async function persistDraft(){
     if(M._lastDraftKey && M._lastDraftKey !== key){ try{ await idbDel(M._lastDraftKey); }catch(_){} draftInfoForget(M._lastDraftKey);
       draftMoves().set(M._lastDraftKey, { to: key, uid: M._uid }); }   // 取り込み中の写真の行き先（版178）
     M._lastDraftKey = key;
-    draftMoves().delete(key);                     // このキーは、いまこの下書きのもの（前の引っ越しの覚えを捨てる・版178）
+    { const e = draftMoves().get(key);           // このキーは、いまこの下書きのもの（前の引っ越しの覚えを捨てる・版178）
+      if(!e || !e.uid || e.uid === M._uid) draftMoves().delete(key); }   // ★別の下書きの引っ越しの覚えは残す（捨てると、その下書きの写真が迷子になる）
     const cur = (key===wantKey) ? prev : await idbGet(key);
     /* 画面を通さずに中身が変わっていた場合（台帳から引き継いだ等）も「変更あり」に数える。
        どの道から変わっても、PCへ渡し忘れないようにするための保険。
@@ -6416,6 +6418,7 @@ async function persistModel(m, added){
     if(prev && prev.model && !draftSameUid(prev.model, m)){
       key = m._lastDraftKey = "tmp:" + Date.now();
       prev = null;
+      toast("⚠ 管理番号 " + (m.chosho_mgmt_no || "") + " の下書きが別のものに替わっていたので、届いた写真は別の下書き（一覧に出ます）に入れました");
     }
     if(!m._uid) m._uid = draftNewUid();
     /* ★写真の取り込み：いちばん新しい下書きに、新しく読んだ写真だけを足す★（版178）
