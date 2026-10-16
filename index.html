@@ -11366,23 +11366,24 @@ function spCurOf(rec){
    取り込み（take）が覚えている記録（rec）は、取り込みを始めたときのもの。途中で「戻る」を押して一覧から同じ記録を開くと、
    開いている記録は端末から読み直した別の物になり、そちらでカメラの写真を足したり備考を直したりしている。
    rec を丸ごと書くと、その写真が消えていた（そのあと開き直した記録で書くと、今度は取り込んだ写真が消えていた）。
-   同じ記録を開いていれば、そちらにも写真を足す（画面に出す・次に控えるときに消さない）。 */
-function spPhotoKeep(rec, ph){
+   同じ記録を開いていれば、そちらにも写真を足す（画面に出す・次に控えるときに消さない）。
+   phs＝足す写真（新しく読んだ1枚と、前に控えられなかった写真）。 */
+function spPhotoKeep(rec, phs){
   return spQueue(async () => {
     const cur = spCurOf(rec);
-    if(cur){ if(!Array.isArray(cur.photos)) cur.photos = []; mergePhotosInto(cur.photos, [ph]); }
+    if(cur){ if(!Array.isArray(cur.photos)) cur.photos = []; mergePhotosInto(cur.photos, phs); }
     const prev = await idbGet(rec.key);
     if(!prev){
       /* 端末にまだ無い（一度も控えていない新しい記録・この端末から消した記録）＝丸ごと書く。開いていれば開いている記録を書く */
       const o = cur || rec;
       if(!Array.isArray(o.photos)) o.photos = [];
-      mergePhotosInto(o.photos, [ph]);
+      mergePhotosInto(o.photos, phs);
       o.savedAt = Date.now(); o.rev = (o.rev | 0) + 1;
       await idbPut(spRow(o));
       return;
     }
     if(!Array.isArray(prev.photos)) prev.photos = [];
-    if(!mergePhotosInto(prev.photos, [ph])) return;                          // もう入っている
+    if(!mergePhotosInto(prev.photos, phs)) return;                          // もう入っている
     prev.rev = Math.max(prev.rev | 0, (cur && cur.rev) | 0, rec.rev | 0) + 1;   // 版は戻さない（ファイルに入っていない＝未保存）
     prev.savedAt = Date.now();
     await idbPut(prev);
@@ -11630,22 +11631,32 @@ function renderSpecialEdit(host){
     const arr = Array.from(files || []).filter(f => f && (/^image\//i.test(f.type || "")
       || /\.(jpe?g|png|heic|heif|webp|gif|bmp|tiff?)$/i.test(f.name || "")));
     if(!arr.length){ if((files || []).length) toast("画像として認識できませんでした"); return; }
-    let fail = 0, shrunk = 0;
+    let fail = 0, shrunk = 0, pending = [];   // pending＝まだ端末に控えられていない写真（版178）
     for(const f of arr){
       try{
         const raw = await readImageAsDataURI(f);
         const id = photoContentId(raw);                  // 写真IDは縮める前の中身から
         const dataUri = await photoFitForStorage(raw);   // 大きすぎるものだけ軽くする
         if(photoBytesOf(dataUri) < photoBytesOf(raw)) shrunk++;
-        /* 1枚ごとに控える。取り込みを始めた記録（r）を丸ごと書かない（版178。途中で開き直した記録の写真・直しを消さない） */
-        try{ await spPhotoKeep(r, { label:"", dataUri, id }); }catch(_){}
+        pending.push({ label:"", dataUri, id });
+        /* 1枚ごとに控える。取り込みを始めた記録（r）を丸ごと書かない（版178。途中で開き直した記録の写真・直しを消さない）。
+           控えられなかった写真（端末の空きが無い等）は、次の1枚と一緒にもう一度控える（黙って落とさない） */
+        try{ await spPhotoKeep(r, pending); pending = []; }catch(_){}
         if(arr.length > 1) toast("写真を読んでいます… " + (arr.indexOf(f) + 1) + " / " + arr.length);
         await new Promise(r => setTimeout(r, 0));        // 画面へ息継ぎさせる
       }catch(e){ console.error("特別記録：写真を読めませんでした", e); fail++; }
     }
+    if(pending.length){ try{ await spPhotoKeep(r, pending); pending = []; }catch(_){} }
+    /* ★描き直す前に、開いている記録を控える★（版178）取り込みのあいだに打った文字（備考・件名・品名）は、
+       欄を離れるまで控えていない。描き直すと欄が置き換わり、iPhone では離れた合図が出ないまま、控えずに終わっていた。
+       開いている記録（cur）は画面の物＝写真も直しもいちばん新しい（始めの記録 r ではない）。 */
+    const cur = spCurOf(r);
+    if(cur){ try{ await spPersist(cur); }catch(_){} }
     if(shrunk) toast(shrunk + "枚は大きかったので軽くして入れました");
     if(fail) toast(fail + "枚は読み込めませんでした");   // 大事な知らせを最後に
-    if(spCurOf(r)) renderSpecialEdit(host);           // 描き直すのは、取り込んだ記録を開いているときだけ（写真は1枚ごとに控えてある）
+    if(pending.length) toast("⚠ " + pending.length + "枚の写真を、この端末に控えられませんでした（空き容量不足かも）。"
+      + (cur ? "この画面のまま「保存」でファイルに残してください" : "もう一度選んでください"));
+    if(cur) renderSpecialEdit(host);                    // 描き直すのは、取り込んだ記録を開いているときだけ（写真は1枚ごとに控えてある）
   };
   document.getElementById("sp-cam").addEventListener("change", e => { take(e.target.files); e.target.value = ""; });
   document.getElementById("sp-pick").addEventListener("change", e => { take(e.target.files); e.target.value = ""; });
@@ -11662,7 +11673,8 @@ function renderSpecialEdit(host){
     if(res && res.aborted) return;
     if(res && res.ok && !res.late){
       saveOverlayShow(spFileName(r)); saveOverlayDone(res);
-      _spCur = null; await renderSpecial();
+      /* 閉じるのは、保存した記録をそのまま開いているときだけ（保存のあいだに開いたほかの記録は閉じない）（版178） */
+      if(!_spCur || _spCur === r){ _spCur = null; await renderSpecial(); }
     } else if(res && (res.warn || res.late)){
       // 書けていないかもしれない・保存の途中で中身が変わったときは、黙って閉じない（✏️ も消さない）
       saveOverlayShow(spFileName(r)); saveOverlayDone(res);
