@@ -11781,12 +11781,10 @@ function renderSpecialEdit(host){
     if(fail) toast(fail + "枚は読み込めませんでした");   // 大事な知らせを最後に
     if(spCurOf(r)) renderSpecialEdit(host);             // 描き直すのは、取り込んだ記録を開いているときだけ（写真は1枚ごとに控えてある）
     else if(!_spCur) await renderSpecial();             // 一覧なら、枚数・保存済の印を出し直す（版178）
-    /* 控えられなかった写真は、窓で知らせる（消える知らせだけでは気づけない）。ほかの窓が出ていれば、その窓を壊さない */
+    /* 控えられなかった写真は、窓で知らせる（消える知らせだけでは気づけない）。ほかの窓・保存を待ってから出す（窓を横取りしない） */
     if(pending.length){
-      const msg = "⚠ " + pending.length + "枚の写真を、この端末に控えられませんでした（空き容量不足かも）。\n"
-        + (cur ? "この画面のまま「保存」を押して、ファイルに残してください。" : "もう一度、写真を選んでください。");
-      const dlg = document.getElementById("ui-dialog");
-      if(dlg && dlg.classList.contains("open")) toast(msg); else uiAlert(msg);
+      uiNoticeWhenIdle("⚠ " + pending.length + "枚の写真を、この端末に控えられませんでした（空き容量不足かも）。\n"
+        + (cur ? "この画面のまま「保存」を押して、ファイルに残してください。" : "もう一度、写真を選んでください。"));
     }
   };
   document.getElementById("sp-cam").addEventListener("change", e => { take(e.target.files); e.target.value = ""; });
