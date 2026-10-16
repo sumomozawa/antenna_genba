@@ -11313,11 +11313,55 @@ function spBuildState(rec){
 /* bump=false … 中身を変えていない書き直し（ファイルへ書き出した直後など）。
    ここで「直した回数」を進めると、書き出した直後なのに「未保存」に見える。 */
 async function spPersist(rec, bump){
-  rec.savedAt = Date.now();
-  if(bump !== false) rec.rev = (rec.rev | 0) + 1;
-  await idbPut({ key: rec.key, sp: true, id: rec.id, kind: rec.kind, title: rec.title,
+  /* 写真の取り込み（spPhotoKeep）と同じ列に並べて、1つずつ書く（版178）。取り込みが端末の記録を読み直してから
+     書くまでのあいだに画面の直し（備考など）を書くと、取り込みの書き込みで元に戻っていた。 */
+  await spQueue(async () => {
+    rec.savedAt = Date.now();
+    if(bump !== false) rec.rev = (rec.rev | 0) + 1;
+    await idbPut(spRow(rec));
+  });
+}
+function spRow(rec){
+  return { key: rec.key, sp: true, id: rec.id, kind: rec.kind, title: rec.title,
     date: rec.date, note: rec.note, photos: rec.photos, fileName: rec.fileName,
-    savedAt: rec.savedAt, fileSavedAt: rec.fileSavedAt || 0, rev: rec.rev, fileRev: rec.fileRev | 0 });
+    savedAt: rec.savedAt, fileSavedAt: rec.fileSavedAt || 0, rev: rec.rev, fileRev: rec.fileRev | 0 };
+}
+/* 特別記録を端末へ書く・端末から開くのを、1つずつ行う（版178） */
+function spQueue(fn){
+  const p = (spQueue.q || Promise.resolve()).then(fn, fn);
+  spQueue.q = p.then(() => {}, () => {});
+  return p;
+}
+/* いま開いている記録が rec と同じ記録なら、それを返す（一覧から開き直すと、同じ記録でも別の物になる） */
+function spCurOf(rec){
+  return (_spCur && rec && (_spCur === rec || (rec.key && _spCur.key === rec.key))) ? _spCur : null;
+}
+/* ★特別記録の写真の取り込み：端末の記録を読み直し、新しく読んだ写真だけを写真IDで足して書く★（版178）
+   取り込み（take）が覚えている記録（rec）は、取り込みを始めたときのもの。途中で「戻る」を押して一覧から同じ記録を開くと、
+   開いている記録は端末から読み直した別の物になり、そちらでカメラの写真を足したり備考を直したりしている。
+   rec を丸ごと書くと、その写真が消えていた（そのあと開き直した記録で書くと、今度は取り込んだ写真が消えていた）。
+   同じ記録を開いていれば、そちらにも写真を足す（画面に出す・次に控えるときに消さない）。 */
+function spPhotoKeep(rec, ph){
+  return spQueue(async () => {
+    const cur = spCurOf(rec);
+    if(cur){ if(!Array.isArray(cur.photos)) cur.photos = []; mergePhotosInto(cur.photos, [ph]); }
+    const prev = await idbGet(rec.key);
+    if(!prev){
+      /* 端末にまだ無い（一度も控えていない新しい記録・この端末から消した記録）＝丸ごと書く。開いていれば開いている記録を書く */
+      const o = cur || rec;
+      if(!Array.isArray(o.photos)) o.photos = [];
+      mergePhotosInto(o.photos, [ph]);
+      o.savedAt = Date.now(); o.rev = (o.rev | 0) + 1;
+      await idbPut(spRow(o));
+      return;
+    }
+    if(!Array.isArray(prev.photos)) prev.photos = [];
+    if(!mergePhotosInto(prev.photos, [ph])) return;                          // もう入っている
+    prev.rev = Math.max(prev.rev | 0, (cur && cur.rev) | 0, rec.rev | 0) + 1;   // 版は戻さない（ファイルに入っていない＝未保存）
+    prev.savedAt = Date.now();
+    await idbPut(prev);
+    if(cur){ cur.rev = prev.rev; cur.savedAt = prev.savedAt; }
+  });
 }
 /* 特別記録をファイルへ書き出す。行き先の探し方は戸別の「保存」と同じ順。 */
 async function spSaveFile(rec){
@@ -11446,9 +11490,14 @@ async function renderSpecial(){
     _spCur = r; await renderSpecial();
   });
   host.querySelectorAll("[data-sp-open]").forEach(b => b.addEventListener("click", async () => {
-    const rec = (await spList()).filter(x => x.id === b.getAttribute("data-sp-open"))[0];
+    /* 読んで開くのも、写真の取り込みの書き込みと同じ列に並べる（版178）。読んでいるあいだに取り込みの写真が
+       端末に入ると、開いた記録にその写真が無く、次に控えたときに消していた。 */
+    const rec = await spQueue(async () => {
+      const x = (await spList()).filter(x => x.id === b.getAttribute("data-sp-open"))[0];
+      if(x) _spCur = Object.assign(spBlank(), x);
+      return x;
+    });
     if(!rec) return;
-    _spCur = Object.assign(spBlank(), rec);
     await renderSpecial();
   }));
 }
@@ -11540,15 +11589,15 @@ function renderSpecialEdit(host){
         const id = photoContentId(raw);                  // 写真IDは縮める前の中身から
         const dataUri = await photoFitForStorage(raw);   // 大きすぎるものだけ軽くする
         if(photoBytesOf(dataUri) < photoBytesOf(raw)) shrunk++;
-        r.photos.push({ label:"", dataUri, id });
-        try{ await keep(); }catch(_){}                   // 1枚ごとに控える
+        /* 1枚ごとに控える。取り込みを始めた記録（r）を丸ごと書かない（版178。途中で開き直した記録の写真・直しを消さない） */
+        try{ await spPhotoKeep(r, { label:"", dataUri, id }); }catch(_){}
         if(arr.length > 1) toast("写真を読んでいます… " + (arr.indexOf(f) + 1) + " / " + arr.length);
         await new Promise(r => setTimeout(r, 0));        // 画面へ息継ぎさせる
       }catch(e){ console.error("特別記録：写真を読めませんでした", e); fail++; }
     }
     if(shrunk) toast(shrunk + "枚は大きかったので軽くして入れました");
     if(fail) toast(fail + "枚は読み込めませんでした");   // 大事な知らせを最後に
-    await keep(); renderSpecialEdit(host);
+    if(spCurOf(r)) renderSpecialEdit(host);           // 描き直すのは、取り込んだ記録を開いているときだけ（写真は1枚ごとに控えてある）
   };
   document.getElementById("sp-cam").addEventListener("change", e => { take(e.target.files); e.target.value = ""; });
   document.getElementById("sp-pick").addEventListener("change", e => { take(e.target.files); e.target.value = ""; });
