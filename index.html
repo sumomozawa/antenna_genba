@@ -3637,6 +3637,7 @@ function parseLcv4aCsv(text){
 async function handleMeasCsv(file, cat){
   const labelMap={antenna:"① アンテナ出力",amplifier:"② 増幅器出力",terminal:"③ 宅内末端"};
   const model=M; // 読込開始時の戸別を固定（読込中に別戸別へ切替わっても混入/喪失させない）
+  const tag={};  // この取り込みの印（版178）
   let parsed;
   try{ const buf=await readFileAsArrayBuffer(file); parsed=parseLcv4aCsv(decodeCsvBytes(buf)); }
   catch(err){ await uiAlert("CSVを読み込めませんでした：\n"+err.message); return; }
@@ -3656,9 +3657,10 @@ async function handleMeasCsv(file, cat){
   for(const {i,r} of applyList){ const cur=target[i]||{};
     target[i]={ db:r.db, mer: parsed.hasMer?r.mer:(cur.mer??""), ber: parsed.hasBer?r.ber:(cur.ber??"") }; }
   if(M===model){ saveDraft(); refreshMeas(); } // まだ同じ戸別を編集中
-  else { await persistModel(model); }           // 別戸別へ切替済み→読込元を直接確定保存（混入/喪失防止）
+  else { await persistModel(model, undefined, tag); }   // 別戸別へ切替済み→読込元を直接確定保存（混入/喪失防止）
   toast(labelMap[cat]+"に "+applyList.length+"CH取込（未対応CH: "
     +(unmatched.length?unmatched.join(","):"なし")+"）");
+  await persistMovedNotice(tag);                // 別の下書きに入れたときは窓で知らせる（版178）
   /* 「>32」のように測り切れなかった行は、その数字で入れている。黙って入れない。 */
   if(parsed.over){
     await uiAlert("取り込みました。\n\n"
@@ -3707,20 +3709,35 @@ function mergePhotosInto(dst, src){
   });
   return added;
 }
-async function photoKeepInto(model){
+async function photoKeepInto(model, added, tag){
   if(M === model){ await saveDraft(); return true; }
+  /* ★どの下書きに入れるかは、下書きのキーで見る★（版178）
+     管理番号だけで見ると、番号を打ち直した写し（下書きのキーが移っている）や、番号が重なって一時のキーに置いた
+     別の下書きを見分けられない。開いている戸別に届けられず、誰にも見えない下書きを作ったり、別の戸別の下書きに入れたりしていた。
+     キーをまだ持たない（一度も控えていない）ときだけ、管理番号で見る。 */
+  const mk = model._lastDraftKey ? draftKeyNow(model._lastDraftKey, model._uid) : "";
+  if(mk) model._lastDraftKey = mk;
   const a = photoMgmtKeyOf(M), b = photoMgmtKeyOf(model);
-  if(a && a === b){                       // 同じ戸別を開き直した
-    mergePhotosInto(M.chosho_photos, model.chosho_photos);
+  if(mk ? !!(M && M._lastDraftKey === mk && draftSameUid(M, model)) : !!(a && a === b)){   // 同じ戸別を開き直した
+    /* 新しく読んだ写真だけを足す（版178。開き直した画面で消した写真を戻さない） */
+    mergePhotosInto(M.chosho_photos, Array.isArray(added) ? added : model.chosho_photos);
     await saveDraft();
     try{ refreshPhotos(); }catch(_){}
     return true;
   }
-  await persistModel(model);              // 別の戸別へ移った＝読込元を直接確定保存
-  return false;
+  /* 別の戸別へ移った＝その戸別の下書きに足す。取り込みが2つ重なっても、読んで足して書くのを1つずつ行う（片方の写真を消さない） */
+  return await photoKeepQueue(() => persistModel(model, Array.isArray(added) ? added : undefined, tag));
+}
+/* 同じ下書きか（印のどちらかが無い＝前の版の下書きのときは、見分けられないので同じとみなす）（版178） */
+function draftSameUid(a, b){ return !(a && b && a._uid && b._uid && a._uid !== b._uid); }
+function photoKeepQueue(fn){
+  const p = (photoKeepQueue.q || Promise.resolve()).then(fn, fn);
+  photoKeepQueue.q = p.then(() => {}, () => {});
+  return p;
 }
 async function handlePhotoFiles(files){
   const model=M; // 読込開始時の戸別を固定（読込中に別戸別へ切替わっても混入/喪失させない）
+  const tag={};  // この取り込みの印（別の下書きに入れた知らせを、この取り込みの最後に出す・版178）
   const all=Array.from(files||[]);
   // MIMEが空でもファイル名の拡張子で画像判定（Android/SAF等でtypeが空になる端末対策）
   const arr=all.filter(f=>f && (/^image\//i.test(f.type||"") || /\.(jpe?g|png|heic|heif|webp|gif|bmp|tiff?)$/i.test(f.name||"")));
@@ -3728,7 +3745,7 @@ async function handlePhotoFiles(files){
     if(all.length) toast("画像として認識できませんでした（別の写真でお試しください）");
     return;
   }
-  let fail=0, shrunk=0;
+  let fail=0, shrunk=0, pending=[];   // pending＝まだ下書きに入れていない写真（版178）
   for(let i=0;i<arr.length;i++){
     try{
       const raw=await readImageAsDataURI(arr[i]);
@@ -3739,18 +3756,35 @@ async function handlePhotoFiles(files){
       const dataUri=await photoFitForStorage(raw);
       if(photoBytesOf(dataUri) < photoBytesOf(raw)) shrunk++;
       // ラベルは実際の格納枚数で採番（失敗があっても連番がズレない）。push先は固定した model。
-      model.chosho_photos.push({label:suggestLabel(model.chosho_photos.length), dataUri, id});
+      const ph={label:suggestLabel(model.chosho_photos.length), dataUri, id};
+      model.chosho_photos.push(ph); pending.push(ph);
       /* 1枚ごとに控える。何枚も選ぶと時間がかかるので、途中で画面を閉じられても
          そこまでの写真が残るようにする（まとめて最後に控えると全部消える）。 */
-      try{ await photoKeepInto(model); }catch(_){}
+      try{ if(await photoKeepInto(model, pending, tag)) pending=[]; }catch(_){}
       if(arr.length>1) toast("写真を読んでいます… "+(i+1)+" / "+arr.length);
       await new Promise(r=>setTimeout(r,0));   // 1枚ごとに画面へ息継ぎさせる（固まらせない）
     }catch(e){ console.error("photo read failed",e); fail++; }
   }
-  await photoKeepInto(model);   // 同じ戸別なら画面へ足して保存、別の戸別なら読込元を確定保存
+  await photoKeepInto(model, pending, tag);   // 同じ戸別なら画面へ足して保存、別の戸別ならその戸別の下書きに足す
   try{ refreshPhotos(); }catch(_){}
   if(shrunk) toast(shrunk+"枚は大きかったので軽くして入れました");
   if(fail) toast(fail+"枚は読み込めませんでした（別の写真でお試しください）");   // 大事な知らせを最後に
+  await persistMovedNotice(tag);
+}
+/* ★届け先の下書きが別のものに替わっていたことを、取り込みの最後に窓で知らせる★（版178）
+   小さな知らせ（toast）は、すぐあとの「写真を読んでいます…」などで消えて読めなかった。 */
+async function persistMovedNotice(tag){
+  const all = persistModel._moved || [];
+  const mv = all.filter(x => x.tag === (tag || null));     // この取り込みの分だけ（ほかの取り込みの分は、その取り込みの最後に）
+  if(!mv.length) return;
+  persistModel._moved = all.filter(x => mv.indexOf(x) < 0);
+  const nos = Array.from(new Set(mv.map(x => x.no).filter(Boolean)));
+  const what = mv.some(x => x.photo) ? "写真" : "測定値";
+  try{
+    await uiNoticeWhenIdle("⚠ 取り込んだ" + what + "を、別の下書きに入れました。\n\n"
+      + "管理番号 " + (nos.join("・") || "（番号なし）") + " の下書きが、取り込んでいるあいだに別のもの（消して作り直した等）に替わっていたためです。\n\n"
+      + "「下書き一覧」に同じ管理番号の下書きが2つ出ています。" + what + "が入っているほうを開いて確かめ、保存してください。");
+  }catch(_){}
 }
 function suggestLabel(n){
   const seq=["施工前","施工前②","施工前③","施工中","施工完了","施工完了②","現地","表札","その他"];
@@ -5578,6 +5612,7 @@ async function loadStateInto(s, fname, opt){
     && toHalfWidthAn(String(M.chosho_mgmt_no).trim()) === toHalfWidthAn(String(m.chosho_mgmt_no || "").trim()));
   if(_sameNo && M){
     if(M._lastDraftKey) m._lastDraftKey = M._lastDraftKey;
+    if(M._uid) m._uid = M._uid;   // 同じ下書きの印（版178。替わると、取り込み中の残りの写真が別の下書きへ行き、保存済に見えてしまう）
     if(M._pcGuardAck) m._pcGuardAck = M._pcGuardAck;
     /* 📮 預けた印は残す（事務所でまとめ終わるまで、下書きを消さないように知らせるため）（版176） */
     if(M._sideAt){ m._sideAt = M._sideAt; m._sideHow = M._sideHow; }
@@ -6298,6 +6333,24 @@ function _recHasContent(rec){
   return !!(rec && rec.model && (rec.model.chosho_cust_name || rec.fileSavedAt
     || (rec.model.chosho_photos && rec.model.chosho_photos.length)));
 }
+/* ★下書きを別のキーへ移したときの行き先★（版178）
+   管理番号を打ち直した・番号が重なって一時のキーに置き直した、などで下書きのキーが変わると、前のキーは消える。
+   写真の取り込みは始めたときのキーを覚えているので、行き先を引けないと、消えたキーに新しい下書きを作っていた
+   （画面にも まとめて保存 にも出ない下書きに、写真が取り残される）。
+   ★移った先は、同じ下書き（_uid が同じ）のときだけ引く★ 番号を打ち直して移った前のキーに、あとで別のお宅の下書きが
+   できることがある。印を見ないで引くと、そのお宅の写真を、移った先の別の下書き（別のお宅）へ入れてしまう。 */
+function draftMoves(){ return draftMoves.m || (draftMoves.m = new Map()); }
+function draftKeyNow(k, uid){
+  const mv = draftMoves();
+  for(let i = 0; k && mv.has(k) && i < 50; i++){
+    const e = mv.get(k);
+    if(uid && e.uid && e.uid !== uid) break;           // 別の下書きの引っ越し＝引かない
+    k = e.to;
+  }
+  return k;
+}
+/* 下書きを見分ける印（版178）。開き直した写し・取り込みが覚えている戸別は、同じ印を持つ（下書きの中に入る） */
+function draftNewUid(){ return "d" + Date.now().toString(36) + Math.floor(Math.random() * 1e9).toString(36); }
 async function persistDraft(){
   /* 管理番号を変えたら、前の戸別の控えは使えない。捨てたら【見るだけ】の関門も掛け直す。 */
   try{ if(M && M._fileBase && !fileBaseGet(M)) M._fromCaseFile = false; }catch(_){}
@@ -6306,6 +6359,7 @@ async function persistDraft(){
     // ※ draftKey() より前に返すこと。draftKey() は一時IDを採番してしまうため。
     if(!String(M.chosho_mgmt_no||"").trim() && M._touched !== true
        && !(M.chosho_photos||[]).length && !flowAny(flowOf(M))) return;
+    if(!M._uid) M._uid = draftNewUid();           // 下書きを見分ける印（版178）
     const wantKey=draftKey();
     const prev=await idbGet(wantKey);
     // 管理番号衝突ガード：このキーの下書きを今まさに編集しているのでなく（別番号から移動 or 新規で既存番号入力）、
@@ -6322,8 +6376,11 @@ async function persistDraft(){
       persistDraft._collisionKey = null;
     }
     // 前回このモデルを保存したキーから変わっていたら旧レコードを削除（tmp:/no:旧番号 の孤児化を防ぐ）
-    if(M._lastDraftKey && M._lastDraftKey !== key){ try{ await idbDel(M._lastDraftKey); }catch(_){} draftInfoForget(M._lastDraftKey); }
+    if(M._lastDraftKey && M._lastDraftKey !== key){ try{ await idbDel(M._lastDraftKey); }catch(_){} draftInfoForget(M._lastDraftKey);
+      draftMoves().set(M._lastDraftKey, { to: key, uid: M._uid }); }   // 取り込み中の写真の行き先（版178）
     M._lastDraftKey = key;
+    { const e = draftMoves().get(key);           // このキーは、いまこの下書きのもの（前の引っ越しの覚えを捨てる・版178）
+      if(!e || !e.uid || e.uid === M._uid) draftMoves().delete(key); }   // ★別の下書きの引っ越しの覚えは残す（捨てると、その下書きの写真が迷子になる）
     const cur = (key===wantKey) ? prev : await idbGet(key);
     /* 画面を通さずに中身が変わっていた場合（台帳から引き継いだ等）も「変更あり」に数える。
        どの道から変わっても、PCへ渡し忘れないようにするための保険。
@@ -6366,12 +6423,53 @@ async function askPersistentStorage(){
     return !!(await st.persist());
   }catch(_){ return false; }
 }
-async function persistModel(m){
+async function persistModel(m, added, tag){
   try{
-    if(!m) return;
-    const key = m.chosho_mgmt_no ? ("no:"+m.chosho_mgmt_no) : (m._draftId || (m._draftId="tmp:"+Date.now()));
-    const prev=await idbGet(key);
-    m._touched=true; m._rev=(m._rev|0)+1;          // 写真やCSVが入った＝中身が変わった
+    if(!m) return false;
+    /* ★この下書きが置いてあるキーに書く★（版178）管理番号が別の下書きと重なって、一時のキー（tmp:）に置いてある下書きを、
+       管理番号のキーへ書くと、別の戸別の下書き（写真ごと）を置き換えてしまう。キーを移していれば、移った先に書く。 */
+    let key = m._lastDraftKey ? draftKeyNow(m._lastDraftKey, m._uid)
+      : (m.chosho_mgmt_no ? ("no:"+m.chosho_mgmt_no) : (m._draftId || (m._draftId="tmp:"+Date.now())));
+    if(m._lastDraftKey) m._lastDraftKey = key;
+    let prev=await idbGet(key);
+    /* ★そのキーの下書きが、別の下書き（印が違う）になっていたら、触らない★（版178）
+       この戸別の下書きは、もうそこには無い。別のお宅の下書きを置き換えず、新しい一時のキーにこの戸別を置く（写真を失わない・一覧に出る）。 */
+    if(prev && prev.model && !draftSameUid(prev.model, m)){
+      key = m._lastDraftKey = "tmp:" + Date.now();
+      prev = null;
+      (persistModel._moved = persistModel._moved || []).push({ no: m.chosho_mgmt_no || "", photo: Array.isArray(added), tag: tag || null });   // その取り込みの最後に知らせる（版178）
+    }
+    if(!m._uid) m._uid = draftNewUid();
+    /* ★写真の取り込み：いちばん新しい下書きに、新しく読んだ写真だけを足す★（版178）
+       取り込みが覚えている戸別（m）は、取り込みを始めたときのもの。そのあと開き直した写しで直した中身（備考・写真を消した・
+       ファイルへ保存した印）や、受付台帳から入った名前を、m で書くと元に戻していた。版も戻るので、ファイルに入っていない写真が
+       「保存済み」に見え、まとめて保存から漏れていた。 */
+    if(Array.isArray(added) && prev && prev.model){
+      const pm = prev.model;
+      if(!Array.isArray(pm.chosho_photos)) pm.chosho_photos = [];
+      if(!mergePhotosInto(pm.chosho_photos, added)) return true;     // もう入っている
+      pm._touched = true;
+      pm._rev = Math.max(pm._rev|0, prev.rev|0, m._rev|0) + 1;       // 版は戻さない（ファイルに入っていない＝まとめて保存の対象）
+      m._rev = pm._rev;
+      await idbPut(Object.assign({}, prev, { model:pm, savedAt:Date.now(), photos:pm.chosho_photos.length,
+        touched:true, sig:stateSig(pm), rev:pm._rev }));
+      persistModel._warned=false;
+      /* ★書いているあいだに、その戸別が開き直されていたら、画面の写しにも足す★（版178）
+         写しは書く前の下書きを読んだもの。足さないと、写しを控えたときに、いま書いた写真が下書きから消える。 */
+      if(M && M !== m && M._lastDraftKey === key && draftSameUid(M, pm) && Array.isArray(M.chosho_photos)
+         && mergePhotosInto(M.chosho_photos, added)){
+        try{ await saveDraft(); }catch(_){}
+        try{ refreshPhotos(); }catch(_){}
+      }
+      return true;
+    }
+    /* ★下書きにある写真は減らさない★（版178）取り込みの途中でその戸別を開き直すと、下書きは開き直した写し（別の物）になり、
+       そちらでカメラの写真を足していることがある。読込元（m）だけで書くと、その写真が消える。下書きにしか無い写真を m に足してから書く。 */
+    if(prev && prev.model && prev.model !== m && Array.isArray(prev.model.chosho_photos)){
+      if(!Array.isArray(m.chosho_photos)) m.chosho_photos = [];
+      mergePhotosInto(m.chosho_photos, prev.model.chosho_photos);
+    }
+    m._touched=true; m._rev=Math.max(m._rev|0, (prev&&prev.rev)|0)+1;   // 写真やCSVが入った＝中身が変わった（版は戻さない・版178）
     await idbPut({ key, model:m, savedAt:Date.now(), fileSavedAt:(prev&&prev.fileSavedAt)||0,
       mgmt:m.chosho_mgmt_no||"", cust:m.chosho_cust_name||"", photos:(m.chosho_photos||[]).length,
       surveyDone:!!m.survey_done, flow:flowOf(m), touched:true, sig:stateSig(m),
@@ -6388,7 +6486,9 @@ async function persistModel(m){
       toast(no && m !== M
         ? ("⚠ 管理番号 " + no + " の写真の控えに失敗（空き容量不足かも）。その戸別を開いて「保存」でファイルに残してください")
         : "⚠ 写真の控えに失敗（空き容量不足かも）。「保存」でファイルに残してください"); }
+    return false;
   }
+  return true;
 }
 async function markDraftSaved(){
   try{
@@ -7288,6 +7388,12 @@ async function markDraftSavedFor(key, model, opt){
        写しはまとめて保存の初めに読んだもの。渡しているあいだに入った写真を、下書きから消さないため。
        「渡した」にするのも、下書きの中身が渡したものと同じときだけ。 */
     const keep = !!(opt && opt.keep) && !!model && model !== M;
+    /* ★フォルダに書いた道でも、下書きの中身が写しを作ったときのままのときだけ、写しで書き直す・「保存済」にする★（版178）
+       写し（model）はまとめて保存の初めに読んだもの。保存しているあいだ（確かめの窓・フォルダを選ぶ画面・書き込み）に
+       ほかの戸別の写真の取り込みが終わると（persistModel）、新しい写真が下書きに入る。写しで書き直すと、その写真が
+       下書きから消え、「保存済」になってまとめて保存からも外れる（写真がどこにも残らない）。opt.was＝写しを作ったときの中身の指紋。
+       変わっていたら、下書きはそのまま残し（写真も残る）、「保存済」にしない（もう一度押せば渡る）。 */
+    const lateOther = !keep && !!model && model !== M && !!(opt && opt.wrote) && !draftRecSame(rec, (opt && opt.was) || "");
     /* ★いま開いている戸別（M）も、渡した中身と今の中身が同じときだけ「保存済」にする★（版176）
        共有の画面が出ているあいだに写真の取り込みが終わると、M にはその写真が入るが、渡したファイルには入っていない。
        保存済にすると、まとめて保存からも外れて、その写真が渡らない。opt.sig＝渡すファイルを作ったときの中身の指紋。 */
@@ -7296,15 +7402,16 @@ async function markDraftSavedFor(key, model, opt){
     const lateM = !!(opt && opt.wrote) && model === M && photosLateVs(opt.wrote, M);
     const sentOkM = (!sentSig || stateSig(M) === sentSig) && !lateM;
     /* 控えを取り直したモデルを、下書きへも入れ直す（控えとモデルがずれないように） */
-    if(rec && model && rec.model !== model && !keep){ rec.model = model; rec.sig = stateSig(model); }
-    if(rec){ if(keep ? draftRecSame(rec, sentSig || stateSig(model)) : (model !== M || sentOkM)){ rec.fileSavedAt = Date.now(); rec.fileRev = (rec.rev|0); }
+    if(rec && model && rec.model !== model && !keep && !lateOther){ rec.model = model; rec.sig = stateSig(model); }
+    if(rec){ if(keep ? draftRecSame(rec, sentSig || stateSig(model)) : (model !== M ? !lateOther : sentOkM)){ rec.fileSavedAt = Date.now(); rec.fileRev = (rec.rev|0); }
              rec.other = "";
              if(rec.model) delete rec.model._otherFile;      // 保存できた＝この端末の内容になった
              const wasStale = _draftInfoStale;
              await idbPut(rec);
              draftInfoNote(rec, true);     // 控えもその場で「保存済」にする（読み直しを待たない）
              _draftInfoStale = wasStale; }
-    if(M._lastDraftKey === key || draftKey() === key){ delete M._otherFile; if(sentOkM) saveStateFile(); }
+    if(M._lastDraftKey === key || draftKey() === key){ delete M._otherFile; if(sentOkM && !lateOther) saveStateFile(); }
+    if(lateOther) return "late";                          // 下書きの中身が変わっていた＝「保存済」にしなかった（版178）
     return (model === M && !sentOkM) ? "late" : "ok";     // late＝いま開いている戸別を「保存済」にしなかった（版176）
   }catch(e){ console.warn("markDraftSavedFor failed", e); }
   return "";
@@ -7327,6 +7434,12 @@ function draftPickBetter(a, b){
   return (at(a) >= at(b)) ? a : b;                             // 最後に直した方
 }
 function draftNoKey(v){ return toHalfWidthAn(String(v == null ? "" : v)).trim(); }
+/* 下書きを、いま読み直す（読めなければ前に読んだもの）（版178） */
+async function draftRecNow(rec){
+  if(!rec || !rec.key) return rec;
+  try{ const r = await idbGet(rec.key); if(r && r.model) return r; }catch(_){}
+  return rec;
+}
 /* ★まとめて保存で書けなかった戸別を、1つの知らせでまとめて言い、📮 で渡せるようにする★（版176）
    groups … [{ label, fs:[まとめて保存の1件…], why }]。出したら true。
    ★待たない★ まとめて保存は、ここまでで終わっている（書けた分の印・一覧は付け終えている）。押したら預けを始める。 */
@@ -7427,7 +7540,9 @@ async function saveAllDrafts(mode){
            台帳を写しただけの戸別が書き替えの対象に戻り、PCの写真・図面・積算を潰す。 */
         if(receptionApplyToModel(M, row)){ applied++; saveDraftFromLedger(); render(); }
       } else {
-        const rec = byNo[no];
+        /* ★始めに読んだ写しではなく、いまの下書きに入れ直す★（版178）入れ直しているあいだに、ほかの戸別の
+           写真の取り込みが終わって下書きに届くことがある。写しに入れて書き戻すと、その写真が下書きから消える。 */
+        const rec = await draftRecNow(byNo[no]);
         if(rec && rec.model && receptionApplyToModel(rec.model, row)){
           // 回数の持ち主は中身（model._rev）。控えだけ進めると、開いたときに巻き戻る
           rec.model._rev = (rec.model._rev | 0) + 1;
@@ -7445,8 +7560,9 @@ async function saveAllDrafts(mode){
     if(applied){
       clearTimeout(_persistTimer);
       try{ await persistDraft(); }catch(_){}   // 開いている戸別の直しも下書きへ確定
-      const all2 = await idbGetAll();
-      (all2||[]).forEach(r => { const k = String((r && r.mgmt) || "").trim(); if(k) byNo[k] = r; });
+      /* ★書く下書きは、選んだ下書き（draftPickBetter）を読み直したもの★（版178）
+         管理番号の文字（全角・半角）で引き直すと、全角で入っている下書きが入れ直す前の写しのまま書かれる。 */
+      for(const k of Object.keys(byNo)) byNo[k] = await draftRecNow(byNo[k]);
     }
   }
   const files = [];
@@ -7879,7 +7995,7 @@ async function saveAllDrafts(mode){
   /* 共有・ダウンロードの道は控えを取り直していない＝写しで下書きを書き戻さない（版176） */
   const lateNos = [];                        // 渡しているあいだに写真が入って「保存済」にしなかった戸別（版176）
   for(const f of okNos){
-    if(await markDraftSavedFor(f.key, f.model, dir ? { wrote: f.state } : { keep: true, sig: f.sig }) === "late") lateNos.push(f.no);
+    if(await markDraftSavedFor(f.key, f.model, dir ? { wrote: f.state, was: f.sig } : { keep: true, sig: f.sig }) === "late") lateNos.push(f.no);
   }
   if(okNos.some(f => f.model === M)){ try{ render(); }catch(_){} }   // 取り込んだ分を画面にも出す
   await refreshDraftInfo();
@@ -9678,7 +9794,7 @@ async function flowShareRead(list, fromDir){
       if(!mine) otherCnt++;
     });
     if(!adds.length){
-      flowShareItemsApply(items, byNo, openNo);
+      await flowShareItemsApply(items, byNo, openNo);
       const kept0 = await flowShareSave();
       await flowShareAfter();
       await uiAlert(items.length + "件の戸別ファイルを読みました。\n\n新しく付く印はありませんでした。"
@@ -9720,7 +9836,9 @@ async function flowShareItemsApply(items, byNo, openNo){
   for(const it of items){
     _flowShare.rows[it.no] = flowShareMergeRec(_flowShare.rows[it.no], it.rec);
     const isOpen = (it.no === openNo);
-    const rec = byNo[it.no];
+    /* ★開いていない戸別は、確かめの窓より前に読んだ写しではなく、いまの下書きに入れる★（版178）
+       窓が出ているあいだに写真の取り込みが終わって下書きに届くことがある。写しに入れて書き戻すと、その写真が消える。 */
+    const rec = isOpen ? byNo[it.no] : await draftRecNow(byNo[it.no]);
     const model = isOpen ? M : ((rec && rec.model) || null);
     if(!model) continue;
     const changed = flowApplyShared(model, it.rec);
@@ -10033,6 +10151,8 @@ function esc(s){ return String(s==null?"":s).replace(/[&<>"']/g,c=>({"&":"&amp;"
 function toast(msg){ const t=document.getElementById("savedhint"); t.textContent=msg; t.classList.add("show"); clearTimeout(toast._t); toast._t=setTimeout(()=>t.classList.remove("show"),1900); }
 // アプリ内ダイアログ（iOSのホーム画面アプリでは native confirm/alert が無効化されるため自前で実装）
 function uiDialog(msg, isConfirm, okLabel){
+  /* ★取り込みの知らせが出ているあいだは、次の窓をそのあとに出す★（版178）窓は1つしか無く、上書きすると知らせが消える */
+  if(uiDialog._notice) return uiDialog._notice.then(() => uiDialog(msg, isConfirm, okLabel));
   return new Promise(resolve=>{
     const modal=document.getElementById("ui-dialog");
     const okBtn=document.getElementById("ui-dialog-ok");
@@ -10046,6 +10166,20 @@ function uiDialog(msg, isConfirm, okLabel){
     cancelBtn.onclick=()=>done(false);
     modal.onclick=(e)=>{ if(e.target===modal) done(false); }; // 背景タップ=キャンセル
   });
+}
+/* 取り込みの最後の知らせ（版178）。取り込みは裏で動くので、ほかの窓（保存の「このまま保存しますか？」・CSVの「上書きしますか？」など）が
+   出ているあいだ・保存しているあいだは待つ。窓は1つしか無く、上書きすると前の窓の答えが返らず、保存が「保存中…」のまま止まっていた。 */
+async function uiNoticeWhenIdle(msg){
+  for(;;){
+    const modal = document.getElementById("ui-dialog");
+    if(!(modal && modal.classList.contains("open")) && !_saving && !uiDialog._notice){
+      const p = uiDialog(msg, false);          // 確かめてすぐ出す（あいだに別の窓が入らない）
+      uiDialog._notice = p.then(() => {}, () => {});
+      try { await p; } finally { uiDialog._notice = null; }
+      return;
+    }
+    await new Promise(r => setTimeout(r, 300));
+  }
 }
 function uiConfirm(msg){ return uiDialog(msg, true); }
 function uiAlert(msg){ return uiDialog(msg, false); }
@@ -10799,11 +10933,14 @@ async function receptionApplyToDrafts(){
   }
   let all = [];
   try{ all = await idbGetAll(); }catch(_){ return applied; }
-  for(const rec of (all || [])){
-    if(!rec || !rec.model) continue;
-    const no = toHalfWidthAn(rec.mgmt || "").trim();
+  for(const rec0 of (all || [])){
+    if(!rec0 || !rec0.model) continue;
+    const no = toHalfWidthAn(rec0.mgmt || "").trim();
     if(!no || no === openNo || !byNo[no]) continue;
-    if(!receptionApplyToModel(rec.model, byNo[no])) continue;
+    /* ★始めに読んだ写しではなく、いまの下書きに入れる★（版178）入れているあいだに、ほかの戸別の写真の取り込みが
+       終わって下書きに届くことがある。写しに入れて書き戻すと、その写真が下書きから消える。 */
+    const rec = await draftRecNow(rec0);
+    if(!rec || !rec.model || !receptionApplyToModel(rec.model, byNo[no])) continue;
     /* ★「直した回数」は中身（model._rev）が持ち主★
        控えの rec.rev だけを進めると、その戸別を開いたときに
        model._rev（進めていない古い回数）で控えが書き直され、
@@ -11381,6 +11518,9 @@ async function renderSpecial(){
 }
 function renderSpecialEdit(host){
   const r = _spCur;
+  /* 写真を読み終える前に「戻る」を押していたら、もう描かない（写真は読み終えたときに控えてある）（版178）。
+     描こうとすると、閉じた記録を読もうとして止まっていた。 */
+  if(!r) return;
   const n = (r.photos || []).filter(p => p && p.dataUri).length;
   let h = '<div class="sp-ed">';
   h += '<div class="sp-f"><label>種類</label><div class="sp-seg" id="sp-kind">'
