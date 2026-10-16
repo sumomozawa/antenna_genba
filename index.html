@@ -7288,6 +7288,12 @@ async function markDraftSavedFor(key, model, opt){
        写しはまとめて保存の初めに読んだもの。渡しているあいだに入った写真を、下書きから消さないため。
        「渡した」にするのも、下書きの中身が渡したものと同じときだけ。 */
     const keep = !!(opt && opt.keep) && !!model && model !== M;
+    /* ★フォルダに書いた道でも、下書きの中身が写しを作ったときのままのときだけ、写しで書き直す・「保存済」にする★（版178）
+       写し（model）はまとめて保存の初めに読んだもの。保存しているあいだ（確かめの窓・フォルダを選ぶ画面・書き込み）に
+       ほかの戸別の写真の取り込みが終わると（persistModel）、新しい写真が下書きに入る。写しで書き直すと、その写真が
+       下書きから消え、「保存済」になってまとめて保存からも外れる（写真がどこにも残らない）。opt.was＝写しを作ったときの中身の指紋。
+       変わっていたら、下書きはそのまま残し（写真も残る）、「保存済」にしない（もう一度押せば渡る）。 */
+    const lateOther = !keep && !!model && model !== M && !!(opt && opt.wrote) && !draftRecSame(rec, (opt && opt.was) || "");
     /* ★いま開いている戸別（M）も、渡した中身と今の中身が同じときだけ「保存済」にする★（版176）
        共有の画面が出ているあいだに写真の取り込みが終わると、M にはその写真が入るが、渡したファイルには入っていない。
        保存済にすると、まとめて保存からも外れて、その写真が渡らない。opt.sig＝渡すファイルを作ったときの中身の指紋。 */
@@ -7296,15 +7302,16 @@ async function markDraftSavedFor(key, model, opt){
     const lateM = !!(opt && opt.wrote) && model === M && photosLateVs(opt.wrote, M);
     const sentOkM = (!sentSig || stateSig(M) === sentSig) && !lateM;
     /* 控えを取り直したモデルを、下書きへも入れ直す（控えとモデルがずれないように） */
-    if(rec && model && rec.model !== model && !keep){ rec.model = model; rec.sig = stateSig(model); }
-    if(rec){ if(keep ? draftRecSame(rec, sentSig || stateSig(model)) : (model !== M || sentOkM)){ rec.fileSavedAt = Date.now(); rec.fileRev = (rec.rev|0); }
+    if(rec && model && rec.model !== model && !keep && !lateOther){ rec.model = model; rec.sig = stateSig(model); }
+    if(rec){ if(keep ? draftRecSame(rec, sentSig || stateSig(model)) : (model !== M ? !lateOther : sentOkM)){ rec.fileSavedAt = Date.now(); rec.fileRev = (rec.rev|0); }
              rec.other = "";
              if(rec.model) delete rec.model._otherFile;      // 保存できた＝この端末の内容になった
              const wasStale = _draftInfoStale;
              await idbPut(rec);
              draftInfoNote(rec, true);     // 控えもその場で「保存済」にする（読み直しを待たない）
              _draftInfoStale = wasStale; }
-    if(M._lastDraftKey === key || draftKey() === key){ delete M._otherFile; if(sentOkM) saveStateFile(); }
+    if(M._lastDraftKey === key || draftKey() === key){ delete M._otherFile; if(sentOkM && !lateOther) saveStateFile(); }
+    if(lateOther) return "late";                          // 下書きの中身が変わっていた＝「保存済」にしなかった（版178）
     return (model === M && !sentOkM) ? "late" : "ok";     // late＝いま開いている戸別を「保存済」にしなかった（版176）
   }catch(e){ console.warn("markDraftSavedFor failed", e); }
   return "";
@@ -7327,6 +7334,12 @@ function draftPickBetter(a, b){
   return (at(a) >= at(b)) ? a : b;                             // 最後に直した方
 }
 function draftNoKey(v){ return toHalfWidthAn(String(v == null ? "" : v)).trim(); }
+/* 下書きを、いま読み直す（読めなければ前に読んだもの）（版178） */
+async function draftRecNow(rec){
+  if(!rec || !rec.key) return rec;
+  try{ const r = await idbGet(rec.key); if(r && r.model) return r; }catch(_){}
+  return rec;
+}
 /* ★まとめて保存で書けなかった戸別を、1つの知らせでまとめて言い、📮 で渡せるようにする★（版176）
    groups … [{ label, fs:[まとめて保存の1件…], why }]。出したら true。
    ★待たない★ まとめて保存は、ここまでで終わっている（書けた分の印・一覧は付け終えている）。押したら預けを始める。 */
@@ -7427,7 +7440,9 @@ async function saveAllDrafts(mode){
            台帳を写しただけの戸別が書き替えの対象に戻り、PCの写真・図面・積算を潰す。 */
         if(receptionApplyToModel(M, row)){ applied++; saveDraftFromLedger(); render(); }
       } else {
-        const rec = byNo[no];
+        /* ★始めに読んだ写しではなく、いまの下書きに入れ直す★（版178）入れ直しているあいだに、ほかの戸別の
+           写真の取り込みが終わって下書きに届くことがある。写しに入れて書き戻すと、その写真が下書きから消える。 */
+        const rec = await draftRecNow(byNo[no]);
         if(rec && rec.model && receptionApplyToModel(rec.model, row)){
           // 回数の持ち主は中身（model._rev）。控えだけ進めると、開いたときに巻き戻る
           rec.model._rev = (rec.model._rev | 0) + 1;
@@ -7879,7 +7894,7 @@ async function saveAllDrafts(mode){
   /* 共有・ダウンロードの道は控えを取り直していない＝写しで下書きを書き戻さない（版176） */
   const lateNos = [];                        // 渡しているあいだに写真が入って「保存済」にしなかった戸別（版176）
   for(const f of okNos){
-    if(await markDraftSavedFor(f.key, f.model, dir ? { wrote: f.state } : { keep: true, sig: f.sig }) === "late") lateNos.push(f.no);
+    if(await markDraftSavedFor(f.key, f.model, dir ? { wrote: f.state, was: f.sig } : { keep: true, sig: f.sig }) === "late") lateNos.push(f.no);
   }
   if(okNos.some(f => f.model === M)){ try{ render(); }catch(_){} }   // 取り込んだ分を画面にも出す
   await refreshDraftInfo();
