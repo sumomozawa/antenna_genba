@@ -6369,8 +6369,16 @@ async function askPersistentStorage(){
 async function persistModel(m){
   try{
     if(!m) return;
-    const key = m.chosho_mgmt_no ? ("no:"+m.chosho_mgmt_no) : (m._draftId || (m._draftId="tmp:"+Date.now()));
+    /* ★この下書きが置いてあるキーに書く★（版178）管理番号が別の下書きと重なって、一時のキー（tmp:）に置いてある下書きを、
+       管理番号のキーへ書くと、別の戸別の下書き（写真ごと）を置き換えてしまう。 */
+    const key = m._lastDraftKey || (m.chosho_mgmt_no ? ("no:"+m.chosho_mgmt_no) : (m._draftId || (m._draftId="tmp:"+Date.now())));
     const prev=await idbGet(key);
+    /* ★下書きにある写真は減らさない★（版178）取り込みの途中でその戸別を開き直すと、下書きは開き直した写し（別の物）になり、
+       そちらでカメラの写真を足していることがある。読込元（m）だけで書くと、その写真が消える。下書きにしか無い写真を m に足してから書く。 */
+    if(prev && prev.model && prev.model !== m && Array.isArray(prev.model.chosho_photos)){
+      if(!Array.isArray(m.chosho_photos)) m.chosho_photos = [];
+      mergePhotosInto(m.chosho_photos, prev.model.chosho_photos);
+    }
     m._touched=true; m._rev=(m._rev|0)+1;          // 写真やCSVが入った＝中身が変わった
     await idbPut({ key, model:m, savedAt:Date.now(), fileSavedAt:(prev&&prev.fileSavedAt)||0,
       mgmt:m.chosho_mgmt_no||"", cust:m.chosho_cust_name||"", photos:(m.chosho_photos||[]).length,
@@ -7460,8 +7468,9 @@ async function saveAllDrafts(mode){
     if(applied){
       clearTimeout(_persistTimer);
       try{ await persistDraft(); }catch(_){}   // 開いている戸別の直しも下書きへ確定
-      const all2 = await idbGetAll();
-      (all2||[]).forEach(r => { const k = String((r && r.mgmt) || "").trim(); if(k) byNo[k] = r; });
+      /* ★書く下書きは、選んだ下書き（draftPickBetter）を読み直したもの★（版178）
+         管理番号の文字（全角・半角）で引き直すと、全角で入っている下書きが入れ直す前の写しのまま書かれる。 */
+      for(const k of Object.keys(byNo)) byNo[k] = await draftRecNow(byNo[k]);
     }
   }
   const files = [];
@@ -9693,7 +9702,7 @@ async function flowShareRead(list, fromDir){
       if(!mine) otherCnt++;
     });
     if(!adds.length){
-      flowShareItemsApply(items, byNo, openNo);
+      await flowShareItemsApply(items, byNo, openNo);
       const kept0 = await flowShareSave();
       await flowShareAfter();
       await uiAlert(items.length + "件の戸別ファイルを読みました。\n\n新しく付く印はありませんでした。"
@@ -9735,7 +9744,9 @@ async function flowShareItemsApply(items, byNo, openNo){
   for(const it of items){
     _flowShare.rows[it.no] = flowShareMergeRec(_flowShare.rows[it.no], it.rec);
     const isOpen = (it.no === openNo);
-    const rec = byNo[it.no];
+    /* ★開いていない戸別は、確かめの窓より前に読んだ写しではなく、いまの下書きに入れる★（版178）
+       窓が出ているあいだに写真の取り込みが終わって下書きに届くことがある。写しに入れて書き戻すと、その写真が消える。 */
+    const rec = isOpen ? byNo[it.no] : await draftRecNow(byNo[it.no]);
     const model = isOpen ? M : ((rec && rec.model) || null);
     if(!model) continue;
     const changed = flowApplyShared(model, it.rec);
@@ -10814,11 +10825,14 @@ async function receptionApplyToDrafts(){
   }
   let all = [];
   try{ all = await idbGetAll(); }catch(_){ return applied; }
-  for(const rec of (all || [])){
-    if(!rec || !rec.model) continue;
-    const no = toHalfWidthAn(rec.mgmt || "").trim();
+  for(const rec0 of (all || [])){
+    if(!rec0 || !rec0.model) continue;
+    const no = toHalfWidthAn(rec0.mgmt || "").trim();
     if(!no || no === openNo || !byNo[no]) continue;
-    if(!receptionApplyToModel(rec.model, byNo[no])) continue;
+    /* ★始めに読んだ写しではなく、いまの下書きに入れる★（版178）入れているあいだに、ほかの戸別の写真の取り込みが
+       終わって下書きに届くことがある。写しに入れて書き戻すと、その写真が下書きから消える。 */
+    const rec = await draftRecNow(rec0);
+    if(!rec || !rec.model || !receptionApplyToModel(rec.model, byNo[no])) continue;
     /* ★「直した回数」は中身（model._rev）が持ち主★
        控えの rec.rev だけを進めると、その戸別を開いたときに
        model._rev（進めていない古い回数）で控えが書き直され、
