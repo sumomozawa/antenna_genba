@@ -3707,17 +3707,29 @@ function mergePhotosInto(dst, src){
   });
   return added;
 }
-async function photoKeepInto(model){
+async function photoKeepInto(model, added){
   if(M === model){ await saveDraft(); return true; }
+  /* ★どの下書きに入れるかは、下書きのキーで見る★（版178）
+     管理番号だけで見ると、番号を打ち直した写し（下書きのキーが移っている）や、番号が重なって一時のキーに置いた
+     別の下書きを見分けられない。開いている戸別に届けられず、誰にも見えない下書きを作ったり、別の戸別の下書きに入れたりしていた。
+     キーをまだ持たない（一度も控えていない）ときだけ、管理番号で見る。 */
+  const mk = model._lastDraftKey ? draftKeyNow(model._lastDraftKey) : "";
+  if(mk) model._lastDraftKey = mk;
   const a = photoMgmtKeyOf(M), b = photoMgmtKeyOf(model);
-  if(a && a === b){                       // 同じ戸別を開き直した
-    mergePhotosInto(M.chosho_photos, model.chosho_photos);
+  if(mk ? !!(M && M._lastDraftKey === mk) : !!(a && a === b)){   // 同じ戸別を開き直した
+    /* 新しく読んだ写真だけを足す（版178。開き直した画面で消した写真を戻さない） */
+    mergePhotosInto(M.chosho_photos, Array.isArray(added) ? added : model.chosho_photos);
     await saveDraft();
     try{ refreshPhotos(); }catch(_){}
     return true;
   }
-  await persistModel(model);              // 別の戸別へ移った＝読込元を直接確定保存
-  return false;
+  /* 別の戸別へ移った＝その戸別の下書きに足す。取り込みが2つ重なっても、読んで足して書くのを1つずつ行う（片方の写真を消さない） */
+  return await photoKeepQueue(() => persistModel(model, Array.isArray(added) ? added : undefined));
+}
+function photoKeepQueue(fn){
+  const p = (photoKeepQueue.q || Promise.resolve()).then(fn, fn);
+  photoKeepQueue.q = p.then(() => {}, () => {});
+  return p;
 }
 async function handlePhotoFiles(files){
   const model=M; // 読込開始時の戸別を固定（読込中に別戸別へ切替わっても混入/喪失させない）
@@ -3728,7 +3740,7 @@ async function handlePhotoFiles(files){
     if(all.length) toast("画像として認識できませんでした（別の写真でお試しください）");
     return;
   }
-  let fail=0, shrunk=0;
+  let fail=0, shrunk=0, pending=[];   // pending＝まだ下書きに入れていない写真（版178）
   for(let i=0;i<arr.length;i++){
     try{
       const raw=await readImageAsDataURI(arr[i]);
@@ -3739,15 +3751,16 @@ async function handlePhotoFiles(files){
       const dataUri=await photoFitForStorage(raw);
       if(photoBytesOf(dataUri) < photoBytesOf(raw)) shrunk++;
       // ラベルは実際の格納枚数で採番（失敗があっても連番がズレない）。push先は固定した model。
-      model.chosho_photos.push({label:suggestLabel(model.chosho_photos.length), dataUri, id});
+      const ph={label:suggestLabel(model.chosho_photos.length), dataUri, id};
+      model.chosho_photos.push(ph); pending.push(ph);
       /* 1枚ごとに控える。何枚も選ぶと時間がかかるので、途中で画面を閉じられても
          そこまでの写真が残るようにする（まとめて最後に控えると全部消える）。 */
-      try{ await photoKeepInto(model); }catch(_){}
+      try{ if(await photoKeepInto(model, pending)) pending=[]; }catch(_){}
       if(arr.length>1) toast("写真を読んでいます… "+(i+1)+" / "+arr.length);
       await new Promise(r=>setTimeout(r,0));   // 1枚ごとに画面へ息継ぎさせる（固まらせない）
     }catch(e){ console.error("photo read failed",e); fail++; }
   }
-  await photoKeepInto(model);   // 同じ戸別なら画面へ足して保存、別の戸別なら読込元を確定保存
+  await photoKeepInto(model, pending);   // 同じ戸別なら画面へ足して保存、別の戸別ならその戸別の下書きに足す
   try{ refreshPhotos(); }catch(_){}
   if(shrunk) toast(shrunk+"枚は大きかったので軽くして入れました");
   if(fail) toast(fail+"枚は読み込めませんでした（別の写真でお試しください）");   // 大事な知らせを最後に
@@ -6298,6 +6311,16 @@ function _recHasContent(rec){
   return !!(rec && rec.model && (rec.model.chosho_cust_name || rec.fileSavedAt
     || (rec.model.chosho_photos && rec.model.chosho_photos.length)));
 }
+/* ★下書きを別のキーへ移したときの行き先★（版178）
+   管理番号を打ち直した・番号が重なって一時のキーに置き直した、などで下書きのキーが変わると、前のキーは消える。
+   写真の取り込みは始めたときのキーを覚えているので、行き先を引けないと、消えたキーに新しい下書きを作っていた
+   （画面にも まとめて保存 にも出ない下書きに、写真が取り残される）。 */
+function draftMoves(){ return draftMoves.m || (draftMoves.m = new Map()); }
+function draftKeyNow(k){
+  const mv = draftMoves();
+  for(let i = 0; k && mv.has(k) && i < 50; i++) k = mv.get(k);
+  return k;
+}
 async function persistDraft(){
   /* 管理番号を変えたら、前の戸別の控えは使えない。捨てたら【見るだけ】の関門も掛け直す。 */
   try{ if(M && M._fileBase && !fileBaseGet(M)) M._fromCaseFile = false; }catch(_){}
@@ -6322,7 +6345,8 @@ async function persistDraft(){
       persistDraft._collisionKey = null;
     }
     // 前回このモデルを保存したキーから変わっていたら旧レコードを削除（tmp:/no:旧番号 の孤児化を防ぐ）
-    if(M._lastDraftKey && M._lastDraftKey !== key){ try{ await idbDel(M._lastDraftKey); }catch(_){} draftInfoForget(M._lastDraftKey); }
+    if(M._lastDraftKey && M._lastDraftKey !== key){ try{ await idbDel(M._lastDraftKey); }catch(_){} draftInfoForget(M._lastDraftKey);
+      draftMoves().set(M._lastDraftKey, key); draftMoves().delete(key); }   // 取り込み中の写真の行き先（版178）
     M._lastDraftKey = key;
     const cur = (key===wantKey) ? prev : await idbGet(key);
     /* 画面を通さずに中身が変わっていた場合（台帳から引き継いだ等）も「変更あり」に数える。
@@ -6366,20 +6390,38 @@ async function askPersistentStorage(){
     return !!(await st.persist());
   }catch(_){ return false; }
 }
-async function persistModel(m){
+async function persistModel(m, added){
   try{
-    if(!m) return;
+    if(!m) return false;
     /* ★この下書きが置いてあるキーに書く★（版178）管理番号が別の下書きと重なって、一時のキー（tmp:）に置いてある下書きを、
-       管理番号のキーへ書くと、別の戸別の下書き（写真ごと）を置き換えてしまう。 */
-    const key = m._lastDraftKey || (m.chosho_mgmt_no ? ("no:"+m.chosho_mgmt_no) : (m._draftId || (m._draftId="tmp:"+Date.now())));
+       管理番号のキーへ書くと、別の戸別の下書き（写真ごと）を置き換えてしまう。キーを移していれば、移った先に書く。 */
+    const key = m._lastDraftKey ? draftKeyNow(m._lastDraftKey)
+      : (m.chosho_mgmt_no ? ("no:"+m.chosho_mgmt_no) : (m._draftId || (m._draftId="tmp:"+Date.now())));
+    if(m._lastDraftKey) m._lastDraftKey = key;
     const prev=await idbGet(key);
+    /* ★写真の取り込み：いちばん新しい下書きに、新しく読んだ写真だけを足す★（版178）
+       取り込みが覚えている戸別（m）は、取り込みを始めたときのもの。そのあと開き直した写しで直した中身（備考・写真を消した・
+       ファイルへ保存した印）や、受付台帳から入った名前を、m で書くと元に戻していた。版も戻るので、ファイルに入っていない写真が
+       「保存済み」に見え、まとめて保存から漏れていた。 */
+    if(Array.isArray(added) && prev && prev.model){
+      const pm = prev.model;
+      if(!Array.isArray(pm.chosho_photos)) pm.chosho_photos = [];
+      if(!mergePhotosInto(pm.chosho_photos, added)) return true;     // もう入っている
+      pm._touched = true;
+      pm._rev = Math.max(pm._rev|0, prev.rev|0, m._rev|0) + 1;       // 版は戻さない（ファイルに入っていない＝まとめて保存の対象）
+      m._rev = pm._rev;
+      await idbPut(Object.assign({}, prev, { model:pm, savedAt:Date.now(), photos:pm.chosho_photos.length,
+        touched:true, sig:stateSig(pm), rev:pm._rev }));
+      persistModel._warned=false;
+      return true;
+    }
     /* ★下書きにある写真は減らさない★（版178）取り込みの途中でその戸別を開き直すと、下書きは開き直した写し（別の物）になり、
        そちらでカメラの写真を足していることがある。読込元（m）だけで書くと、その写真が消える。下書きにしか無い写真を m に足してから書く。 */
     if(prev && prev.model && prev.model !== m && Array.isArray(prev.model.chosho_photos)){
       if(!Array.isArray(m.chosho_photos)) m.chosho_photos = [];
       mergePhotosInto(m.chosho_photos, prev.model.chosho_photos);
     }
-    m._touched=true; m._rev=(m._rev|0)+1;          // 写真やCSVが入った＝中身が変わった
+    m._touched=true; m._rev=Math.max(m._rev|0, (prev&&prev.rev)|0)+1;   // 写真やCSVが入った＝中身が変わった（版は戻さない・版178）
     await idbPut({ key, model:m, savedAt:Date.now(), fileSavedAt:(prev&&prev.fileSavedAt)||0,
       mgmt:m.chosho_mgmt_no||"", cust:m.chosho_cust_name||"", photos:(m.chosho_photos||[]).length,
       surveyDone:!!m.survey_done, flow:flowOf(m), touched:true, sig:stateSig(m),
@@ -6396,7 +6438,9 @@ async function persistModel(m){
       toast(no && m !== M
         ? ("⚠ 管理番号 " + no + " の写真の控えに失敗（空き容量不足かも）。その戸別を開いて「保存」でファイルに残してください")
         : "⚠ 写真の控えに失敗（空き容量不足かも）。「保存」でファイルに残してください"); }
+    return false;
   }
+  return true;
 }
 async function markDraftSaved(){
   try{
@@ -11410,6 +11454,9 @@ async function renderSpecial(){
 }
 function renderSpecialEdit(host){
   const r = _spCur;
+  /* 写真を読み終える前に「戻る」を押していたら、もう描かない（写真は読み終えたときに控えてある）（版178）。
+     描こうとすると、閉じた記録を読もうとして止まっていた。 */
+  if(!r) return;
   const n = (r.photos || []).filter(p => p && p.dataUri).length;
   let h = '<div class="sp-ed">';
   h += '<div class="sp-f"><label>種類</label><div class="sp-seg" id="sp-kind">'
