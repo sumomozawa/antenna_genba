@@ -264,6 +264,9 @@
     max-height:calc(100vh - 48px); max-height:calc(100dvh - 48px); overflow:auto; box-sizing:border-box;}
   #save-ov .save-ov-esc{margin-top:10px; font-size:11.5px; color:#455a64; line-height:1.6; text-align:left;}
   #save-ov .save-ov-w button#save-ov-side{background:#0d47a1; color:#fff;}
+  /* 困ったとき（📮）。ふだんは閉じておく（版181） */
+  #save-ov details.save-ov-trouble{margin-top:8px; text-align:left;}
+  #save-ov details.save-ov-trouble > summary{cursor:pointer; font-size:12px; font-weight:700; color:#455a64; padding:3px 0;}
   #save-ov.stay .save-ov-check{background:#0d47a1;}
   @keyframes saveCardIn{ from{opacity:0; transform:translateY(14px) scale(.94);} to{opacity:1; transform:none;} }
   #save-ov .save-ov-ring{width:56px; height:56px; margin:0 auto 14px; border-radius:50%;
@@ -734,6 +737,12 @@
     background:#00695c; color:#fff; }
   #pcguard button.alt{ background:#fff; color:#6d4c41; border:1px solid #bcaaa4; font-weight:600; font-size:13px; padding:10px; }
   #pcguard button.side{ background:#fff; color:#0d47a1; border:1px solid #90caf9; font-weight:700; font-size:13.5px; padding:10px; }
+  /* ボタンのすぐ下の一行の説明（何が起きるか）。長くなっても折り返す（横にはみ出さない） */
+  #pcguard .pcg-sub{ margin:-3px 2px 2px; font-size:11.5px; line-height:1.55; color:#6d4c41; overflow-wrap:anywhere; }
+  /* 困ったとき（📮・このまま新しく入力する）。ふだんは閉じておく（版181） */
+  #pcguard details.pcg-trouble{ margin-top:10px; border-top:1px dashed #d7ccc8; padding-top:6px; }
+  #pcguard details.pcg-trouble > summary{ cursor:pointer; font-size:12.5px; font-weight:700; color:#6d4c41; padding:4px 0; }
+  #pcguard details.pcg-trouble > .pcg-sub{ margin:2px 2px 4px; }
   /* 📮 預けモード（入力はできる。保存はいつも別の名前で事務所に預ける）の細い帯（版176） */
   #pcguard.sidemode{ background:#f3f8fe; border-color:#64b5f6; color:#0d2b4e; }
   #pcguard.sidemode .pcg-ttl{ color:#0d47a1; }
@@ -748,10 +757,14 @@
   .rc-flt{margin:0 0 10px; padding:9px 11px; border-radius:10px; font-size:12.5px; line-height:1.7;
     background:#e8f0fe; border:1px solid #c3d6f5; color:#1a3a6b;}
   .rc-flt b{color:var(--accent);}
-  .rc-flt button{display:block; width:100%; margin-top:7px; min-height:40px; border:0; border-radius:9px;
-    background:var(--accent); color:#fff; font-weight:700; font-size:13.5px; font-family:inherit;
+  /* 「🔍 絞り込みを外して、すべて表示」は画面の並びを変えるだけ（ファイルには何も書かない）。
+     保存のボタンと同じ重さに見えると「押すと何か大きなことが起きる」と思われて押されない（利用者の指摘・版181）。
+     ★表示だけのボタンは小さく控えめに★ 白地に枠と字だけ色を付け、幅は字の長さぶん。 */
+  #rc-showall{display:inline-block; max-width:100%; margin-top:7px; min-height:36px; padding:6px 12px;
+    border:1px solid var(--accent); border-radius:9px; background:#fff; color:var(--accent);
+    font-weight:600; font-size:13px; line-height:1.4; white-space:normal; font-family:inherit;
     transition:transform var(--t-fast) var(--ease);}
-  .rc-flt button:active{transform:scale(.97);}
+  #rc-showall:active{transform:scale(.97);}
   .draft.rc-hold{background:#fff4e8; border-left:4px solid #e65100; padding-left:8px;}
   /* 下見が終わった戸別（この端末で「下見完了」を押したもの） */
   .rc-badge.surv{background:#1b7a3d;}
@@ -849,6 +862,10 @@
   /* PCで台帳を直したあとに、戸別ファイルを作り直してもらうための案内 */
   .rc-redo{margin:0 0 12px; padding:9px 12px; border-radius:11px; background:#fff8e1; color:#6b5327;
     border:1px solid #e8d9a8; font-size:12.5px; font-weight:600; line-height:1.75;}
+  /* 「全部保存し直す」はふだん閉じておく（版181）。見出しだけ小さく出す */
+  details.rc-redo{padding:6px 12px; background:#fffdf5;}
+  details.rc-redo > summary{cursor:pointer; font-size:12px; font-weight:700; color:#8a6d3b; padding:2px 0;}
+  details.rc-redo[open] > summary{margin-bottom:4px;}
   .rc-redo b{color:#8a6d3b;}
   .rc-redo button{display:block; width:100%; margin-top:8px; min-height:46px; border:0; border-radius:10px;
     background:#8a6d3b; color:#fff; font-weight:700; font-size:14.5px; font-family:inherit;
@@ -869,8 +886,12 @@
     padding:0 6px; border-radius:8px; line-height:17px; vertical-align:1px;}
   /* 複数選択削除のアクションバー */
   .draft-actions{display:flex; align-items:center; justify-content:space-between; gap:10px; padding:6px 2px 12px; position:sticky; top:0; background:#fff; z-index:2; flex-wrap:wrap;}
-  /* 📮 選んで事務所に預ける（保存済みも）。1行をまるごと使う（狭い画面で横にはみ出さない）（版176） */
-  .d-sidesel{flex:1 1 100%; order:3; background:#0d47a1; color:#fff; border:0; border-radius:9px; padding:10px 12px; font-weight:700; font-size:13.5px; font-family:inherit; white-space:normal;}
+  /* 📮 選んで事務所に預ける（保存済みも）。1行をまるごと使う（狭い画面で横にはみ出さない）（版176）
+     ふだんは使わないので「困ったとき」にしまう（版181・利用者の指定） */
+  .d-trouble{flex:1 1 100%; order:3; min-width:0;}
+  .d-trouble > summary{cursor:pointer; font-size:12.5px; font-weight:700; color:#5f6b7a; padding:2px 0;}
+  .d-trouble-sub{margin:4px 2px 6px; font-size:11.5px; line-height:1.55; color:#5f6b7a; overflow-wrap:anywhere;}
+  .d-sidesel{display:block; width:100%; box-sizing:border-box; background:#0d47a1; color:#fff; border:0; border-radius:9px; padding:10px 12px; font-weight:700; font-size:13.5px; font-family:inherit; white-space:normal;}
   .d-sidesel:disabled{background:#e0e4ea; color:#9aa3ad;}
   .d-selall{display:flex; align-items:center; gap:7px; font-size:14px; font-weight:600; color:var(--ink);}
   .d-selall input{width:22px; height:22px;}
@@ -1015,11 +1036,10 @@
 <div class="modal" id="draft-modal">
   <div class="sheet">
     <h3>📋 履歴・読込</h3>
-    <div class="info">入力した内容は、この端末に自動で控えます（<b>💾</b>＝保存済 ／ <b>📮</b>＝事務所に預けた ／ <b>✏️</b>＝保存後に変更あり ／ 無印＝未保存）。<br>
-    <b>📮 選んで事務所に預ける</b>＝選んだ戸別を、別の名前で事務所に渡し直せます（保存済みの戸別も。この端末の中のフォルダにしか入っていないかもしれないとき）。<br>
+    <div class="info">入力した内容は、この端末に下書きとして自動で残ります（<b>💾</b>＝保存済 ／ <b>📮</b>＝事務所に預けた ／ <b>✏️</b>＝保存後に変更あり ／ 無印＝未保存）。<br>
     下のボタンで、PCや他の端末の <b class="fname">管理番号.json</b> を読めます。<b>📂</b>＝その戸別の続きを編集／<b>📥</b>＝工程の印だけを引き継ぐ（写真や測定値は取り込みません）。<br>
-    開き方は2つあります。<b>📚 まとめて選ぶ</b>＝ファイルを選ぶ画面で <b>全部（または今日回るぶん）を選んでおく</b>と、ここで <b>管理番号・氏名・住所で絞り込んで</b>開けます。何百個を目で探さなくて済みます。<b>📂 1つだけ選ぶ</b>＝ファイルの場所が分かっているときに。</div>
-    <button id="btn-import" style="width:100%; padding:15px; border:0; border-radius:11px; background:#455a64; color:#fff; font-weight:700; font-size:15px; margin-bottom:8px;">📚 まとめて選んで、管理番号で絞り込む</button>
+    開き方は2つあります。<b>📚 まとめて読み込む</b>＝ファイルを選ぶ画面で <b>すべて選択（または今日回るぶん）</b>を選ぶと、ここで <b>管理番号・氏名・住所で探して</b>開けます。何百個を目で探さなくて済み、アプリを閉じるまでは、ほかの戸別も同じ一覧から探せます。<b>📂 1つだけ選ぶ</b>＝ファイルの場所が分かっているときに。</div>
+    <button id="btn-import" style="width:100%; padding:15px; border:0; border-radius:11px; background:#455a64; color:#fff; font-weight:700; font-size:15px; margin-bottom:8px;">📚 ファイルをまとめて読み込んで、管理番号で探す</button>
     <button id="btn-import-one" style="width:100%; padding:13px; border:1px solid #b0bec5; border-radius:11px; background:#fff; color:#37474f; font-weight:700; font-size:14px; margin-bottom:10px;">📂 1つだけ選んで開く</button>
     <input type="file" id="import-file" accept=".json,application/json,*/*" multiple style="display:none;">
     <input type="file" id="import-one" accept=".json,application/json,*/*" style="display:none;">
@@ -1253,7 +1273,7 @@ const GENBA_SCHEMA_VER = 1;
 const APP_NAME_SHORT = "現場入力";
 /* 版は「増えていくだけの通し番号」。メイン（積算・図面）と同じ番号体系で、
    番号が小さいほうが古い。 */
-const APP_VERSION = "180";
+const APP_VERSION = "181";
 function photoContentId(dataUri){
   if(!dataUri || typeof dataUri !== "string") return "";
   let a = 5381, b = 0;
@@ -3657,7 +3677,7 @@ async function handleMeasCsv(file, cat){
   for(const {i,r} of applyList){ const cur=target[i]||{};
     target[i]={ db:r.db, mer: parsed.hasMer?r.mer:(cur.mer??""), ber: parsed.hasBer?r.ber:(cur.ber??"") }; }
   if(M===model){ saveDraft(); refreshMeas(); } // まだ同じ戸別を編集中
-  else { await persistModel(model, undefined, tag); }   // 別戸別へ切替済み→読込元を直接確定保存（混入/喪失防止）
+  else { await photoKeepQueue(() => persistModel(model, undefined, tag)); }   // 別戸別へ切替済み→読込元を直接確定保存（混入/喪失防止）。写真の控えと同じ列で（版181）
   toast(labelMap[cat]+"に "+applyList.length+"CH取込（未対応CH: "
     +(unmatched.length?unmatched.join(","):"なし")+"）");
   await persistMovedNotice(tag);                // 別の下書きに入れたときは窓で知らせる（版178）
@@ -3710,7 +3730,15 @@ function mergePhotosInto(dst, src){
   return added;
 }
 async function photoKeepInto(model, added, tag){
-  if(M === model){ await saveDraft(); return true; }
+  const adds = Array.isArray(added) && added.length > 0;
+  if(M === model){
+    await saveDraft();
+    /* ★画面の控え（saveDraft）は400msあと★（版181）そのあいだに別の戸別へ移ると、控えるのは移った先の戸別になる。
+       版178 からは、別の戸別へは「新しく読んだ写真だけ」を足すので、ここで pending から外した1枚はもう誰も書かない（どの下書きにも残らない）。
+       新しく読んだ写真は、下書きにもすぐ足す（写真の控えと同じ列で）。まだ一度も控えていない戸別（キーが無い）は、次の控えでもう一度足す。 */
+    if(adds && model._lastDraftKey) return await photoKeepQueue(() => persistModel(model, added, tag));
+    return !adds;
+  }
   /* ★どの下書きに入れるかは、下書きのキーで見る★（版178）
      管理番号だけで見ると、番号を打ち直した写し（下書きのキーが移っている）や、番号が重なって一時のキーに置いた
      別の下書きを見分けられない。開いている戸別に届けられず、誰にも見えない下書きを作ったり、別の戸別の下書きに入れたりしていた。
@@ -3723,6 +3751,7 @@ async function photoKeepInto(model, added, tag){
     mergePhotosInto(M.chosho_photos, Array.isArray(added) ? added : model.chosho_photos);
     await saveDraft();
     try{ refreshPhotos(); }catch(_){}
+    if(adds) return await photoKeepQueue(() => persistModel(model, added, tag));   // 下書きにもすぐ足す（上と同じ・版181）
     return true;
   }
   /* 別の戸別へ移った＝その戸別の下書きに足す。取り込みが2つ重なっても、読んで足して書くのを1つずつ行う（片方の写真を消さない） */
@@ -3783,7 +3812,7 @@ async function persistMovedNotice(tag){
   try{
     await uiNoticeWhenIdle("⚠ 取り込んだ" + what + "を、別の下書きに入れました。\n\n"
       + "管理番号 " + (nos.join("・") || "（番号なし）") + " の下書きが、取り込んでいるあいだに別のもの（消して作り直した等）に替わっていたためです。\n\n"
-      + "「下書き一覧」に同じ管理番号の下書きが2つ出ています。" + what + "が入っているほうを開いて確かめ、保存してください。");
+      + "「履歴」に同じ管理番号の下書きが2つ出ています。" + what + "が入っているほうを開いて確かめ、保存してください。");
   }catch(_){}
 }
 function suggestLabel(n){
@@ -4437,6 +4466,9 @@ async function mapImportFile(file){
     if(p.ledger && Array.isArray(p.ledger.rows) && p.ledger.rows.length){
       try { addedLedger = receptionSaveRows(p.ledger); } catch(_){}
       if(addedLedger && !(await _rcLastKept)) await uiAlert(RC_KEEP_NG);
+      /* ★受付台帳の画面の取り込みと同じく、下書きへ入れ直す★（版181）入れ直さないと、台帳で直った保存済みの戸別が
+         「保存後に変更」に戻らず、まとめて保存の対象に入らない（PCのファイルは古いまま）。 */
+      if(addedLedger){ try{ await receptionApplyToDrafts(); }catch(e){ console.warn("下書きへの反映に失敗", e); } }
     }
     p = p.map || null;
     if(!p){
@@ -4482,8 +4514,17 @@ async function saveJson(){
     }
     // すでに保存してあって、そのあと何も変えていないときは一度確かめる。
     // 保存し直すたびにファイルが増えるので、要らない保存を減らす。
+    /* ★「ファイルがもう1つ増えます」は、フォルダへ書く道では本当でない★（版181）フォルダの道は 管理番号.json を読み合わせて書き直す（増えない）。
+       増えることがあるのは、共有・ダウンロードで渡す道（端末によって 管理番号(1).json などができる）。 */
+    const againByDir = !!(saveRoute() !== "share" && (_saveDir || saveDirName()));
+    /* 📮 預けモード・見るだけ・物件の違うフォルダ では、いつもの名前で書かずに別の名前の預けをもう1つ作る（版181） */
+    let againSide = !!(M && (M._sideOnly || M._viewOnly));
+    if(!againSide){ try{ const mm0 = savePlaceMismatch(); againSide = !!(mm0 && mm0.held && pcGuardRow()); }catch(_){} }
     if(wasSaved
-       && !(await uiConfirm("この内容は "+_hhmm(_save.fileAt)+" に保存済みです。\nそのあと変わったところはありません。\n\nもう一度保存しますか？\n（同じ戸別のファイルがもう1つ増えます）"))) return;
+       && !(await uiConfirm("この内容は "+_hhmm(_save.fileAt)+" に保存済みです。\nそのあと変わったところはありません。\n\nもう一度保存しますか？\n"
+            + (againSide ? "（PCのファイルは書き替えず、別の名前のファイル（📮 預け）をもう1つ作ります）"
+               : againByDir ? "（保存先の 管理番号.json を読み合わせてから書き直します。ファイルは増えません）"
+                            : "（共有やダウンロードで渡すと、同じ戸別のファイルがもう1つ増えることがあります）")))) return;
     /* ★📮 預けモード★（版176）保存はいつも別の名前で事務所に預ける（PCのファイルは書き替えない）。
        ただし、覚えているフォルダに PCのファイル（らしいもの）があれば、読み込んで いつもの保存に戻す。 */
     _lastSaveInfo = null;
@@ -4783,6 +4824,8 @@ async function sideToDir(items){
   if(!(await saveDirOk(dir, true))){ out.err = "書く許可が取れませんでした"; return out; }
   try{ dir = await saveDirSettle(dir); }catch(_){}
   out.place = saveDirPlace(dir) || dir.name || "";
+  /* 書いた先が、端末の中だけかもしれないフォルダか（Android は必ずそう）。知らせの題を変える（版181） */
+  try{ out.dev = saveDirMaybeDevice(dir); }catch(_){ out.dev = true; }
   for(const it of items){
     try{
       const r = await sideWriteDir(dir, it);
@@ -4852,6 +4895,10 @@ async function sideShareChunks(items){
    ★控え・写真IDの副本は取らない／_fromCaseFile を立てない／他の端末のファイルの印（_otherFile）を消さない★ */
 async function markDraftSidedFor(model, how, sentSig){
   if(!model) return;
+  /* 下書きを読んで印を付けて書くのは、写真の取り込みの控えと同じ列で1つずつ（版181。markDraftSavedFor と同じ） */
+  return await photoKeepQueue(() => markDraftSidedFor0(model, how, sentSig));
+}
+async function markDraftSidedFor0(model, how, sentSig){
   const t = Date.now();
   model._sideAt = t; model._sideHow = String(how || "");
   /* ★渡したあとに中身が変わっていたら（写真の取り込みが終わった等）、「渡した」扱いにしない★（版176）
@@ -4931,7 +4978,11 @@ function sideInfoShare(why, items, r){
 function sideInfoDir(why, items, r){
   const done = r.done || [];
   const place = r.place || "保存先のフォルダ";
-  return { title: "📮 事務所に預けました", icon: "📮", stay: true, side: true, warn: false,
+  /* ★端末の中だけかもしれないフォルダ（Android は必ずそう）に置いたときは、「事務所に預けました」と言い切らない★（版181）
+     そのフォルダが Dropbox と同期していなければ、事務所には届いていない。⚠ にして、「📤 共有でも渡す」を読んでもらう。 */
+  const dev = !!r.dev;
+  return { title: dev ? ("📮 「" + place + "」に置きました（事務所にはまだ届いていないかもしれません）") : "📮 事務所に預けました",
+    icon: "📮", stay: true, side: true, warn: dev,
     msg: "「" + place + "」の中に置きました（書いたあと読み返して確かめました）。\n"
        + sideNamesText(done) + "\n" + sideSizeLine(done) + "\n\n"
        + sidePcNote(done) + sideLacksNote(done)
@@ -4945,7 +4996,15 @@ function sideInfoDl(why, items, done){
        + "\n\nこの端末の「ダウンロード」に入りました。\n"
        + "あとで Dropbox のアプリ（＋ → アップロード）で「" + sideListPlace() + "」に入れてください。\n"
        + "分からなければ、ほかの物件のリストでもかまいません（事務所で振り分けます）。\n\n"
-       + sidePcNote(done) + sideLacksNote(done) + sideRestNote(items, done) };
+       + sidePcNote(done) + sideLacksNote(done) + sideRestNote(items, done) + sideDlManyNote(done) };
+}
+/* ★何件も続けてダウンロードしたとき★（版181）ブラウザが2件目から止めることがある（「複数のファイルをダウンロードしますか」）。
+   こちらでは入ったかを確かめられないので、黙らずに言い、もう一度渡す道を言う。 */
+function sideDlManyNote(done){
+  return ((done || []).length > 1)
+    ? ("\n\n※ 何件も続けてダウンロードすると、ブラウザが途中で止めることがあります。「許可しますか」と聞かれたら許可してください。\n"
+       + "入っていない戸別は、「履歴」の「困ったとき」の「📮 選んで事務所に預ける（保存済みも）」でもう一度渡せます。")
+    : "";
 }
 /* 渡し方を選んでもらって渡す。戻り値＝知らせ（_lastSaveInfo と同じ形）／null＝やめた */
 async function sideAskDeliver(why, items, skipped){
@@ -5024,9 +5083,16 @@ async function sideSaveFlow(why, models, opt){
     }
     const when = new Date();
     const items = [];
+    /* ★同じ管理番号の下書きが2つあるとき、名前も預けた時刻（_side.at）も同じにしない★（版181）
+       事務所の振り分けは「時刻|管理番号」の印で「もうまとめた」を決める。同じ印の預けが2つあると、2つ目を合わせずに片付けるので、
+       その写真が戸別ファイルに入らない（共有先によっては同じ名前で上書きもされる）。重なる分だけ1秒ずつずらす。 */
+    const usedNames = new Set();
     for(const m of list){
       const w = (opt.whyOf && opt.whyOf.get(m)) || why;
-      items.push(await sideBuild(m, w, when));
+      let t = when.getTime();
+      for(let i = 0; i < 600 && usedNames.has(sideFileName(m && m.chosho_mgmt_no, new Date(t))); i++) t += 1000;
+      usedNames.add(sideFileName(m && m.chosho_mgmt_no, new Date(t)));
+      items.push(await sideBuild(m, w, new Date(t)));
     }
     return await sideAskDeliver(why, items, models.length - list.length);
   } finally { _sideBusy = false; }
@@ -5053,7 +5119,7 @@ async function sideEscapeRun(info){
           msg: "フォルダには置いてあります（そのファイルは消えていません）。\n\n"
              + "もう一度押すか、保存バーの 📁 から「フォルダを覚えるのをやめる」を選ぶと、次からは共有で渡せます。",
           escape: "share-also", _sideItems: info._sideItems };
-      } else return;                                                          // やめた
+      } else { sideShowResult(info); return; }                               // やめた＝元の窓（⚠ と「📤 共有でも渡す」）を出し直す（版181。前は何も出なかった）
     } else {
       res = await sideSaveFlow((info && info.escape) || "", (info && info._sideModels && info._sideModels.length) ? info._sideModels : [M]);
     }
@@ -5075,7 +5141,7 @@ function saveKeepPcInfo(fname){
   return Object.assign(saveCancelInfo(fname), { escape: "merge",
     msg: (fname || "") + "\n\nPCのファイルの中身を残すため、保存をやめました（何も書いていません）。\n"
        + "（この端末の入力と写真は、そのまま残っています）\n\n"
-       + "先に「📂 戸別ファイルを読み込んで編集する」で読み込むと、PCの中身を残したまま続きを入力できます。\n"
+       + "先に「履歴」の「📂 1つだけ選んで開く」で読み込むと、PCの中身を残したまま続きを入力できます。\n"
        + "読み込めないときは、下の「📮 別の名前で事務所に預ける」で渡せます（PCのファイルは書き替えません）。" });
 }
 /* ★控え（読んだPCのファイル）を当てにしてよいか★ 共有で渡す道で、いつもの名前にしてよいかを決める
@@ -5178,7 +5244,8 @@ async function saveJsonRun(){
           it.wrote = r.name;
           await markDraftSidedFor(M, "dir", it.sig);
           const place = saveDirPlace(dir) || dir.name || "選んだフォルダ";
-          _lastSaveInfo = { title: "📮 別の名前で置きました", icon: "📮", stay: true, side: true, warn: false,
+          let devP = true; try{ devP = saveDirMaybeDevice(dir); }catch(_){ devP = true; }   // 端末の中だけかもしれないフォルダ＝⚠（版181）
+          _lastSaveInfo = { title: "📮 別の名前で置きました", icon: "📮", stay: true, side: true, warn: devP,
             msg: "「" + place + "」は受付台帳の物件と違うので、別の名前（" + r.name + "）で置きました。事務所で振り分けます。\n"
                + "（受付台帳の物件：" + mmP.proj + "）\n"
                + sideSizeLine([it]) + "（書いたあと読み返して確かめました）\n\n"
@@ -5240,11 +5307,12 @@ async function saveJsonRun(){
           if(!(await uiConfirm("PCのファイルに中身が入っています。\n\n" + what + "\n\n"
               + "このまま保存すると、上のものはこの端末の内容に置き換わります。\n"
               + "（📷 写真は消えません。両方まとめて残ります）\n\n"
-              + "先に「📂 戸別ファイルを読み込んで編集する」で読み込むと、\nPCの中身を残したまま続きを入力できます。\n\n"
+              + "先に「履歴」の「📂 1つだけ選んで開く」で読み込むと、\nPCの中身を残したまま続きを入力できます。\n\n"
               + "それでも、このまま保存しますか？"))){ _lastSaveInfo = saveKeepPcInfo(fname); return true; }   // ★黙らない★（版176）
         }
         mgKeys = mg.changed;
         if(mg.kept.length) mergedNote += "\n（ファイルに入っていた " + mg.kept.join("・") + " を残しました）";
+        if(mg.both.length) mergedNote += "\n（PCとこの端末の両方で直していた " + mg.both.join("・") + " は、この端末の内容にしました）";   // 版181
         if(mg.removed.length) mergedNote += "\n（PCで消された "
           + Array.from(new Set(mg.removed.map(mergeLabelOf))).join("・") + " を、こちらも消しました）";
         if(cf.names.length > 1) mergedNote += "\n（同じ戸別のファイルが " + cf.names.length + " つありました。写真はどれも残しました。要らない方はPCで片付けてください）";
@@ -5262,7 +5330,7 @@ async function saveJsonRun(){
             + (par ? ("そのファイルは「" + (par.name || "物件") + "」のすぐ下など、リストの外にあるのかもしれません（そのファイルは書き替えていません）。\n\n")
                    : "そのファイルは、ほかのフォルダにあるのかもしれません（そのファイルは書き替えていません）。\n\n")
             + "このまま書くと、その写真の入っていないファイルがリストにできるので、保存していません。\n\n"
-            + "上の帯の「📂 戸別ファイルを読み込んで編集する」から、その写真が入っているファイルを読み込んでから、\nもう一度「保存」を押してください。";
+            + "「履歴」の「📂 1つだけ選んで開く」から、その写真が入っているファイルを読み込んでから、\nもう一度「保存」を押してください。";
         }
         return true;
       }
@@ -5272,7 +5340,7 @@ async function saveJsonRun(){
         if(lost){
           _lastSaveInfo = { title: "⚠ 写真が減りそうなので、保存を止めました",
             msg: "ファイルに入っている写真 " + lost + "枚 が、書こうとした中身に入っていません。\n\n"
-               + "保存していません。もう一度「📂 戸別ファイルを読み込んで編集する」から読み込んでください。", warn: true, escape: "photo" };
+               + "保存していません。もう一度「履歴」の「📂 1つだけ選んで開く」から読み込んでください。", warn: true, escape: "photo" };
           toast("⚠ 写真が減りそうなので保存していません");
           return true;
         }
@@ -5357,6 +5425,17 @@ async function saveJsonRun(){
       /* ★写真の歯止めは、画面を開く前に★ この画面で選んだ既にあるファイルは、ブラウザがページへ渡す前に
          中身を空にする（Chrome の決まり）。選ばせてから止めると、PCのファイルが空のまま残る。 */
       if(await photoGateStop(M, state)) return true;
+      /* ★ほかの端末も保存している戸別（_otherFile）は、この画面を開かない★（版181）その画面で そのファイルを選ぶと、
+         ブラウザが中身を空にしてから渡す（Chrome の決まり）。読み合わせられず、ほかの端末の写真が消える。写真の歯止めは画面を開く前に。 */
+      if(M._otherFile){
+        _lastSaveInfo = { title: "⚠ ほかの端末も保存している戸別なので、保存していません", warn: true, escape: "merge",
+          msg: fname + "\n\nこの戸別には、ほかの端末が保存したファイル（" + M._otherFile + "）があります。\n"
+             + "保存先を選ぶ画面で そのファイルを選ぶと、ブラウザが中身を空にしてから渡すので、ほかの端末の写真が消えます。\n\n"
+             + "保存バーの 📁 のボタンで保存先のフォルダを選んでから、もう一度「保存」を押してください（そのファイルを読み合わせてから書きます）。\n"
+             + "（この端末の入力と写真は、そのまま残っています）" };
+        toast("⚠ ほかの端末も保存している戸別なので、保存していません");
+        return true;
+      }
       const handle=await window.showSaveFilePicker(Object.assign({
         id:"genba-save",                 // フォルダを選ぶ窓と同じ場所から開く（毎回たどり直さない）
         suggestedName:fname,
@@ -5403,11 +5482,12 @@ async function saveJsonRun(){
               if(what && !(await uiConfirm("PCのファイルに中身が入っています。\n\n" + what + "\n\n"
                   + "このまま保存すると、上のものはこの端末の内容に置き換わります。\n"
                   + "（📷 写真は消えません。両方まとめて残ります）\n\n"
-                  + "先に「📂 戸別ファイルを読み込んで編集する」で読み込むと、\nPCの中身を残したまま続きを入力できます。\n\n"
+                  + "先に「履歴」の「📂 1つだけ選んで開く」で読み込むと、\nPCの中身を残したまま続きを入力できます。\n\n"
                   + "それでも、このまま保存しますか？"))){ _lastSaveInfo = saveKeepPcInfo(handle.name || fname); return true; }   // ★黙らない★（版176）
             }
             pickedKeys = mgp.changed;
             if(mgp.kept.length) pickedNote += "\n（ファイルに入っていた " + mgp.kept.join("・") + " を残しました）";
+            if(mgp.both.length) pickedNote += "\n（PCとこの端末の両方で直していた " + mgp.both.join("・") + " は、この端末の内容にしました）";   // 版181
             const lost = photoLossVsFiles(state, [oj]);
             if(lost){
               _lastSaveInfo = { title: "⚠ 写真が減りそうなので、保存を止めました",
@@ -5429,7 +5509,7 @@ async function saveJsonRun(){
              + "そのファイルに入っている中身を読み合わせられませんでした。\n"
              + "このまま書くと、PCに入っている写真や工事日が消えるかもしれません。\n\n"
              + "保存していません。\n\n"
-             + "先に「📂 戸別ファイルを読み込んで編集する」で\n"
+             + "先に「履歴」の「📂 1つだけ選んで開く」で\n"
              + "そのファイルを読み込んでから、もう一度「保存」を押してください。", warn: true, escape: "merge" };
         toast("⚠ 読み合わせられないので保存していません");
         return true;                              // 💾は付けない＝「まとめて保存」に残す
@@ -5482,8 +5562,10 @@ async function saveJsonRun(){
       if(same0){ await markDraftSaved(); saveStateFile(); }
       /* 共有先がPCの読み込むフォルダなら、これで正しく入っている。
          どこへ渡したかはこちらでは分からないので、決めつけずに事実だけ書く。 */
+      /* 「中身はきちんと入っています（消えていません）」は言い過ぎだった（版181）。共有で渡す道は相手のファイルを読まないので、
+         この端末が知らない写真（読み込んだあとに PC・ほかの端末で足した写真）は入らない。入っているものだけを言う。 */
       _lastSaveInfo = { title: "共有で渡しました", msg: (sr.name[0] || fname) + "\n" + size2
-        + "\n\n中身はきちんと入っています（消えていません）。\n\n"
+        + "\n\nこの端末の入力と写真が入っています（この端末で読み込んだあとに、PCやほかの端末で足した写真は入っていません）。\n\n"
         + saveShareWhere() + "\nそのままPCで読めます。\n"
         + "ちがう場所へ渡したときは、そのフォルダへ移してください。"
         + saveHintLine()
@@ -5504,7 +5586,7 @@ async function saveJsonRun(){
   if(!lateD){ await markDraftSaved(); saveStateFile(); }
   // ダウンロードフォルダに落ちただけ。PCが読むフォルダとは別なので、はっきり言う。
   _lastSaveInfo = { title: "ダウンロードに入れました", msg: fname + "\n" + size3
-    + "\n\n中身はきちんと入っています（消えていません）。\n\n"
+    + "\n\nこの端末の入力と写真が入っています（この端末で読み込んだあとに、PCやほかの端末で足した写真は入っていません）。\n\n"
     + "この端末の「ダウンロード」に入りました。\n"
     + "PCで読み込むフォルダとちがう場合は、\nそのフォルダへ移してください。"
     + saveHintLine()
@@ -6058,12 +6140,15 @@ function saveOverlayDone(info){
   if(c){
     const icon = (info && info.icon) || (warn ? "⚠" : "✓");
     const also = (escWhy === "share-also");
-    const sideBtn = escWhy
-      ? ('<div class="save-ov-esc">' + ((info && info.escText) ? esc(info.escText) : (also
+    const sideIn = '<div class="save-ov-esc">' + ((info && info.escText) ? esc(info.escText) : (also
             ? "Dropbox などへも渡すときは、下の「📤 共有でも渡す」を押してください。"
             : "保存できないときは、下の「📮 事務所に預ける」で、別の名前のまま渡せます。PCのファイルは書き替えません。")) + '</div>'
-         + '<button type="button" id="save-ov-side">' + ((info && info.escLabel) ? esc(info.escLabel) : (also ? "📤 共有でも渡す" : "📮 別の名前で事務所に預ける")) + '</button>')
-      : "";
+         + '<button type="button" id="save-ov-side">' + ((info && info.escLabel) ? esc(info.escLabel) : (also ? "📤 共有でも渡す" : "📮 別の名前で事務所に預ける")) + '</button>';
+    /* ★📮 は「困ったとき」にしまう★（版181・利用者の指定）ふだんは使わない逃げ道なので、閉じた形で出す。
+       📮 で渡したあとの「📤 共有でも渡す」は、もう 📮 の続きなので、そのまま出す。 */
+    const sideBtn = !escWhy ? ""
+      : also ? sideIn
+      : ('<details class="save-ov-trouble"><summary>困ったとき（どうしても保存できない）</summary>' + sideIn + '</details>');
     c.innerHTML = '<div class="save-ov-check">' + esc(icon) + '</div>'
       + '<div class="save-ov-t">' + esc((info && info.title) || "保存しました") + '</div>'
       + '<div class="save-ov-s" style="white-space:pre-line;line-height:1.6;">'
@@ -6146,12 +6231,12 @@ function renderSaveBar(){
        + ' <span class="sb-dest-x">' + mmTag + '</span></button>')
     : (dest && destPP.outer && destPP.inner)
     ? '<button type="button" class="sb-dest' + mmCls + '" id="sb-dest" title="' + mmTip + '「保存」を押すと、「' + esc(destPP.outer)
-      + '」フォルダの中の「' + esc(destPP.inner) + '」の 管理番号.json を上書きします。'
+      + '」フォルダの中の「' + esc(destPP.inner) + '」の 管理番号.json に書きます（同じ名前のファイルがあれば、読み合わせてから書き直します。PCの写真は残ります）。'
       + '「' + esc(destPP.outer) + '」のすぐ下には入れません。押すと保存先を選び直せます">📁\u00a0<span class="sb-dest-n">'
       + esc(destPP.outer) + '</span><span class="sb-dest-in">＞ ' + esc(destPP.inner) + '</span> <span class="sb-dest-x">' + mmTag + '</span></button>'
     : dest
     ? '<button type="button" class="sb-dest' + mmCls + '" id="sb-dest" title="' + mmTip + '「保存」を押すと、「' + esc(dest)
-      + '」の中の 管理番号.json を上書きします。押すと保存先を選び直せます">📁\u00a0<span class="sb-dest-n">'
+      + '」の中の 管理番号.json に書きます（同じ名前のファイルがあれば、読み合わせてから書き直します。PCの写真は残ります）。押すと保存先を選び直せます">📁\u00a0<span class="sb-dest-n">'
       + esc(dest) + '</span> <span class="sb-dest-x">' + mmTag + '</span></button>'
     : hintPP.outer
     ? '<button type="button" class="sb-dest' + mmCls + '" id="sb-dest" title="' + mmTip + '入れる場所：「' + esc(hintPP.outer)
@@ -6445,15 +6530,26 @@ async function persistModel(m, added, tag){
        ファイルへ保存した印）や、受付台帳から入った名前を、m で書くと元に戻していた。版も戻るので、ファイルに入っていない写真が
        「保存済み」に見え、まとめて保存から漏れていた。 */
     if(Array.isArray(added) && prev && prev.model){
-      const pm = prev.model;
+      /* ★その下書きが画面に開いていれば（同じもの・開き直した写し）、画面の中身ごと書く★（版181）画面がいちばん新しい。
+         読んだ下書きは、切り替えの控え（persistDraft）より古いことがある。それに写真だけ足して書くと、
+         切り替える直前に打った備考・消した写真・まだ控えていない写真を、下書きから戻してしまう。 */
+      const open = (M && Array.isArray(M.chosho_photos)
+                    && (M === m || (M._lastDraftKey === key && draftSameUid(M, prev.model)))) ? M : null;
+      const pm = open || prev.model;
       if(!Array.isArray(pm.chosho_photos)) pm.chosho_photos = [];
-      if(!mergePhotosInto(pm.chosho_photos, added)) return true;     // もう入っている
+      /* 下書きにもう全部入っているなら書かない（版181。画面に開いている戸別でも、1枚ごとに下書き全体を書き直すと重い） */
+      const kOf = p => p.id || photoContentId(p.dataUri);
+      const inDraft = new Set((Array.isArray(prev.model.chosho_photos) ? prev.model.chosho_photos : []).filter(p => p && p.dataUri).map(kOf));
+      const draftLacks = added.some(p => p && p.dataUri && !inDraft.has(kOf(p)));
+      const addedHere = mergePhotosInto(pm.chosho_photos, added);
+      if(!addedHere && (!open || !draftLacks)) return true;     // もう入っている
       pm._touched = true;
       pm._rev = Math.max(pm._rev|0, prev.rev|0, m._rev|0) + 1;       // 版は戻さない（ファイルに入っていない＝まとめて保存の対象）
       m._rev = pm._rev;
       await idbPut(Object.assign({}, prev, { model:pm, savedAt:Date.now(), photos:pm.chosho_photos.length,
         touched:true, sig:stateSig(pm), rev:pm._rev }));
       persistModel._warned=false;
+      if(open && open !== m && addedHere){ try{ await saveDraft(); }catch(_){} try{ refreshPhotos(); }catch(_){} }   // 開き直した画面にも出す（版181）
       /* ★書いているあいだに、その戸別が開き直されていたら、画面の写しにも足す★（版178）
          写しは書く前の下書きを読んだもの。足さないと、写しを控えたときに、いま書いた写真が下書きから消える。 */
       if(M && M !== m && M._lastDraftKey === key && draftSameUid(M, pm) && Array.isArray(M.chosho_photos)
@@ -7336,13 +7432,13 @@ const GENBA_REDO_HOWTO =
   "PCにその戸別のファイルがまだ無いとき・PCで「中身が空（0KB）」と言われたときだけ、\n"
   + "その戸別を開いて、何か1つ入力してから「保存」を押してください。\n"
   + "（この端末で何も入力していない戸別は、押しても書き替えません）\n"
-  + "PCのファイルに写真が入っているときは、先に「📂 戸別ファイルを読み込んで編集する」で\n"
+  + "PCのファイルに写真が入っているときは、先に「履歴」の「📂 1つだけ選んで開く」で\n"
   + "読み込んでください。読み込めば写真も入力も残ります。";
 const GENBA_REDO_HOWTO_HTML =
   `PCにその戸別のファイルが<b>まだ無いとき</b>・PCで<b>「中身が空（0KB）」</b>と言われたときだけ、`
   + `その戸別を開いて<b>何か1つ入力してから</b>「保存」を押してください。`
   + `（この端末で何も入力していない戸別は、押しても書き替えません）`
-  + `PCのファイルに写真が入っているときは、先に「📂 戸別ファイルを読み込んで編集する」で`
+  + `PCのファイルに写真が入っているときは、先に「履歴」の「📂 1つだけ選んで開く」で`
   + `読み込んでください。読み込めば写真も入力も残ります。`;
 /* 管理番号のある下書きすべて（保存済みも含む）。「全部保存し直す」の対象。
    ただし、開いただけ（この端末でまだ何も入力していない・写真も無い）の下書きは入れない。
@@ -7381,7 +7477,11 @@ function unsavedTargets(){
   add(M.chosho_mgmt_no);                     // いま開いている戸別（下書きに書く前でも拾う）
   return out.sort();
 }
-async function markDraftSavedFor(key, model, opt){
+/* ★下書きを読んで直して書くのは、写真の取り込みの控え（persistModel）と同じ列で1つずつ★（版181）
+   列の外で読むと、写真の控えが読んで書いたあとに、こちらが古い読みのまま書き戻す。その写真が下書きから消え、「保存済」になる。
+   ★列の中から、列に入るもの（persistDraft・markDraftSavedFor・photoKeepInto）を待たないこと★（自分を待って止まる） */
+function markDraftSavedFor(key, model, opt){ return photoKeepQueue(() => markDraftSavedFor0(key, model, opt)); }
+async function markDraftSavedFor0(key, model, opt){
   try{
     const rec = await idbGet(key);
     /* ★控えを取り直していない道（共有・ダウンロード）では、写しで下書きを書き戻さない★（版176）
@@ -7542,6 +7642,8 @@ async function saveAllDrafts(mode){
       } else {
         /* ★始めに読んだ写しではなく、いまの下書きに入れ直す★（版178）入れ直しているあいだに、ほかの戸別の
            写真の取り込みが終わって下書きに届くことがある。写しに入れて書き戻すと、その写真が下書きから消える。 */
+        /* ★読んで直して書くのは、写真の控えと同じ列で★（版181。列の外だと、そのあいだに届いた写真を古い読みで消す） */
+        if(await photoKeepQueue(async () => {
         const rec = await draftRecNow(byNo[no]);
         if(rec && rec.model && receptionApplyToModel(rec.model, row)){
           // 回数の持ち主は中身（model._rev）。控えだけ進めると、開いたときに巻き戻る
@@ -7552,9 +7654,11 @@ async function saveAllDrafts(mode){
              受付台帳の値はもともとPCのものなので、この端末から書き戻す必要は無い。 */
           rec.rev = rec.model._rev;
           rec.sig = stateSig(rec.model);
-          applied++;
           try{ await idbPut(rec); }catch(e){ console.warn("下書きの更新に失敗", no, e); }
+          return true;
         }
+        return false;
+        })) applied++;
       }
     }
     if(applied){
@@ -7629,11 +7733,17 @@ async function saveAllDrafts(mode){
   const bulkOfferAll = o => { o = o || {}; return bulkSideOffer((o.pre || []).concat(offGroups(), o.post || []), o.title, o.lead, o.btn, o); };
   const listTxt = files.slice(0, 8).map(f => "・" + f.name).join("\n")
     + (files.length > 8 ? ("\n・ほか " + (files.length - 8) + " 件") : "");
+  /* ★確かめの窓は「変わること／変わらないこと／保存する戸別／気をつけること」に分けて言う★（版181・利用者の指摘）
+     どう変わってしまうのかが読み取れず、怖くて押せなかった。言うことは、本当にそうなっていることだけ
+     （フォルダに書く道は読み合わせて写真は和集合・足りなければ書かない。共有で渡す道は相手のファイルを読めない）。 */
+  const bulkByDir = !!(window.showDirectoryPicker && saveRoute() !== "share");
   const head = isAll
-    ? (files.length + "件を保存し直します。\n\n受付台帳の最新（名前・住所・電話・工事予定日・備考）を"
-       + "入れ直してから、管理番号.json を上書きします。\n"
-       + "現場で入力したもの（アンテナ・部材・測定・写真）はそのままです。"
-       + (applied ? ("\n\n台帳の内容を入れ直した戸別： " + applied + "件") : "")
+    ? (files.length + "件を保存し直します（保存済みの戸別も、写真ごと全部書き直すので時間がかかります）。\n\n"
+       + "【変わること】\n受付台帳の内容（名前・住所・電話・工事日・時刻・打合せ・備考・工程の印）を入れ直してから、"
+       + "PCのファイル（管理番号.json）を書き直します。"
+       + (applied ? ("\n台帳の内容を入れ直した戸別： " + applied + "件") : "")
+       + "\n\n【変わらないこと】\n現場で入力したもの（アンテナ・部材・測定・写真）はそのままです。"
+       + (bulkByDir ? "\n保存先にある PCのファイルと読み合わせてから書くので、PCの写真は消えません（足りなくなるときは書きません）。" : "")
        // 開いただけの戸別は対象に入れていない。黙って減らすと「件数が合わない」ので、ここで言う
        + (openedOnly.length
           ? ("\n\n※ 開いただけ（この端末で何も入力していない）の戸別 " + openedOnly.length + " 件は触りません。\n"
@@ -7644,15 +7754,31 @@ async function saveAllDrafts(mode){
           件数を添えて言い、そのときどうすればよいかまで書く（この端末では外せない）。 */
        + (markedOnly.length
           ? ("\n\n※ 台帳の印が付いているだけの戸別 " + markedOnly.length + " 件も、この端末で入力していれば書き替えます。")
-          : "") + "\n\n")
+          : "") + "\n\n【保存する戸別】\n")
     /* ★版156 から、台帳の印が付いているだけの戸別（この端末で何も入力していない）は
        書き替えない。下の nothingTxt で件数を言うので、ここでは脅さない。 */
-    : (files.length + "件をまとめて保存します。\n\n");
+    : (files.length + "件をまとめて保存します。\n\n"
+       + "【変わること】\nこの端末で入力した内容（アンテナ・部材・測定・写真・工程の印など）が、PCのファイル（管理番号.json）に入ります。\n\n"
+       + "【変わらないこと】\n"
+       + (bulkByDir
+          ? ("1件ずつ「保存」を押すのと同じように、保存先にある PCのファイルと読み合わせてから書きます。\n"
+             + "・PCの写真は消えません（足りなくなるときは書きません）。\n"
+             + "・PCで直した数量・機材の位置・諸経費などは、PCのファイルのまま残ります。\n"
+             + "・PCとこの端末の両方で工事日・時刻・打合せ・備考を直した戸別は、書かずに残します（1件ずつ「保存」を押すと、どちらにするか聞きます）。\n"
+             + "・この端末で PCのファイルを読み込んでいない戸別で、PCのファイルの お客様の欄・工事日・備考などが この端末と違うものも、書かずに残します（1件ずつ「保存」を押すと、置き換えてよいか聞きます）。")
+          : ("この端末から PCのファイルを直接は書き替えません（共有の画面で Dropbox などへ渡します）。\n"
+             + "この端末が知らない写真（PCやほかの端末で入れた写真）は、渡すファイルに入りません。"))
+       + "\n\n【保存する戸別】\n");
   // 他の端末が保存したファイルを上書きする分は、件数を添えて知らせる
   const otherCnt = files.filter(f => f.other).length;
+  /* ★前の文「上書きすると、その端末で撮った写真などはファイルから消えます」は本当でなかった★（版181）
+     フォルダに書く道は、そのファイルを読み合わせて写真を和集合にする（消さない）。
+     写真が入らないのは共有で渡す道（相手のファイルを読めない）だけ。1件の保存の窓（版176）と同じ言い方にそろえる。 */
   const otherTxt = otherCnt
-    ? ("\n\n※ このうち " + otherCnt + "件は、他の端末が保存したファイルです。\n"
-       + "上書きすると、その端末で撮った写真などはファイルから消えます。")
+    ? ("\n\n※ このうち " + otherCnt + "件は、ほかの端末も保存している戸別です。\n"
+       + (bulkByDir
+          ? "保存先にそのファイルがあれば読み合わせるので、ほかの端末の写真も消えません。"
+          : "共有で渡すファイルには、ほかの端末の写真が入りません。PCで、ほかの端末のファイルの上に置かないでください。"))
     : "";
   /* ★いまの受付台帳に無い戸別★（版175）前の物件の下書きが残っていると、新しい物件の保存先へ一緒に書き出される。
      書き出しは止めない（写真を守る）が、件数と番号を先に言う。 */
@@ -7684,8 +7810,10 @@ async function saveAllDrafts(mode){
   const nothingTxt = skippedNothing.length
     ? ("\n\n※ この端末で何も入力していない戸別 " + skippedNothing.length + " 件は、PCのファイルを書き替えません（写真も工事日も残ります）")
     : "";
-  if(!(await uiConfirm(head + listTxt + otherTxt + outsideTxt + missTxt + nothingTxt + guardTxt
-      + (noNum && !isAll ? ("\n\n※ 管理番号の無い下書き " + noNum + " 件は対象外です") : "")
+  const cautions = otherTxt + outsideTxt + missTxt + guardTxt
+      + (noNum && !isAll ? ("\n\n※ 管理番号の無い下書き " + noNum + " 件は対象外です") : "");
+  if(!(await uiConfirm(head + listTxt + nothingTxt
+      + (cautions ? ("\n\n【気をつけること】" + cautions) : "")
       + pickTxt))) return;
 
   setBusy(true);
@@ -7766,7 +7894,7 @@ async function saveAllDrafts(mode){
   let where = "", heldN = 0;
   let devDir = false, devPlace = "";        // 書いた先が、端末の中だけかもしれないフォルダ（版176）
   if(dir){
-    const keptAll = [], conflictNos = [], photoNg = [], buildNos = [], unsureNos = [], unreadNos = [];
+    const keptAll = [], conflictNos = [], photoNg = [], buildNos = [], unsureNos = [], unreadNos = [], noBaseNos = [];
     try{ await caseFileIndex(dir); }catch(_){}     // フォルダの名前一覧は1回だけ読む
     /* 保存先が受付台帳の物件と違う（「このフォルダでよい」と答えていない）。台帳にある戸別は、いつもの名前で書かない（版176） */
     let placeMm = null; try{ placeMm = savePlaceMismatch(); }catch(_){ placeMm = null; }
@@ -7804,6 +7932,26 @@ async function saveAllDrafts(mode){
              まとめて保存では聞けない。PCの材料で書くと、書いたあと控えを取り直すので
              この端末の材料は下書きからも消え、あとで1件ずつ保存しても戻せない。書かずに残す。 */
           if(mergeBuildDrops(f.state, mg0)){ buildNos.push(f.no); offHold.push(f); continue; }
+          /* ★控えが無い（この端末で PCのファイルを読み込んでいない）のに、書くと PCのファイルに入っている お客様の欄・日時・備考が変わる★（版181）
+             1件ずつの保存なら「PCのファイルに中身が入っています…この端末の内容に置き換わります。それでも保存しますか？」と1回聞くところ。
+             まとめて保存は聞けないので、黙って書くと、PCのファイルの値が この端末の値（台帳から入った値も）になっていた（電話 090-PC → 03-LEDGER）。
+             書かずに残す（下書きはそのまま＝写真も入力も減らない。渡した扱いにもしない）。1件ずつの保存で聞く。
+             ・ファイルの欄が空なら、何も消えないので書く（この端末で入れた値が入るだけ）
+             ・ファイルの値が受付台帳の値と同じなら、PCは台帳から直していない＝変えたのはこの端末だけなので書く（台帳の控えで見分ける。融合と同じ考え方）
+             ・状態はファイルの工程の印に合わせて決まるので見ない／材料は融合の決まり（mergeBuildDrops）で書かずに残す */
+          if(!b0){
+            const rcN = mergeRcBase(f.model);
+            const nz = v => toHalfWidthAn(String(v == null ? "" : v)).trim();
+            const lostK = ["chosho_cust_name","chosho_cust_addr","chosho_cust_tel","chosho_date","chosho_time","chosho_meet_at","chosho_note"].filter(k => {
+              if(!(k in cf0.primary) || !nz(cf0.primary[k])) return false;              // ファイルの欄が空＝何も消えない
+              if(nz(f.state[k]) === nz(cf0.primary[k])) return false;                    // 書いても変わらない
+              if(rcN && baseHas(rcN, k) && nz(rcN.state[k]) === nz(cf0.primary[k])) return false;   // ファイル＝台帳＝この端末だけが直した
+              return true;
+            });
+            if(lostK.length){
+              noBaseNos.push(f.no + "（" + Array.from(new Set(lostK.map(mergeLabelOf))).join("・") + "）"); offHold.push(f); continue;
+            }
+          }
           /* ★PCとこの端末の両方で直した欄（工事日・時刻・打合せ・備考）がある★ まとめて保存では聞けない。
              PCの値で書くと、書いたあと控えを取り直すので、この端末の値は下書きからも消える（材料と同じ）。書かずに残す。 */
           /* 受付台帳から入った値（この端末では打っていない）は「両方で直した」に数えない。PCの台帳とPCのファイルの
@@ -7816,7 +7964,8 @@ async function saveAllDrafts(mode){
           mg0.conflicts.forEach(c => { if(mg0.kept.indexOf(c.label) < 0) mg0.kept.push(c.label); });
           f.keys = mg0.changed;
           f.text = JSON.stringify(f.state);        // ★融合のあとは必ず作り直す★（PCが消した欄・写真の名前と印も入れる）
-          if(mg0.kept.length) keptAll.push((f.no || f.name) + "（" + mg0.kept.join("・") + "）");
+          /* 「読み合わせて書いた」と言うのは、本当に書けて読み返しが合った戸別だけ（下の okNos のところで足す。版181） */
+          f._kept = (mg0.kept.length || mg0.both.length) ? { no: (f.no || f.name), kept: mg0.kept.slice(), both: mg0.both.slice() } : null;
         }
         /* 写真が1枚でも減るなら書かない */
         {
@@ -7838,6 +7987,7 @@ async function saveAllDrafts(mode){
         try{ fileBaseAfterWrite(f.model, f.state, f.name, f.cf && f.cf.primary, f.keys, (dir === _saveDir) ? "list" : ""); }
         catch(e){ console.warn("控えの取り直しに失敗", f.no, e); }
         okNos.push(f);
+        if(f._kept) keptAll.push(f._kept);
       }catch(e){ console.warn("まとめて保存 失敗", f.name, e); ngNos.push(f.no); offErr.push(f); }
     }
     where = "「" + (saveDirPlace(dir) || "選んだフォルダ") + "」";
@@ -7845,12 +7995,19 @@ async function saveAllDrafts(mode){
        書けた戸別も、最後の知らせで「📮 事務所にも届ける」を選べるようにする（9/23 から端末の「その2」にしか入っていなかった） */
     devDir = saveDirMaybeDevice(dir);
     devPlace = saveDirPlace(dir) || (dir && dir.name) || "選んだフォルダ";
-    heldN = unsureNos.length + buildNos.length + conflictNos.length;
+    heldN = unsureNos.length + buildNos.length + conflictNos.length + noBaseNos.length;
+    /* ★本当のことだけを言う★（版181）前は「PCで入れた写真や工事日は、消えていません」とだけ言っていたが、
+       両方で直した欄（お客様の欄・材料・測定値など）は、知らせなしでこの端末の値になっていた。 */
     if(keptAll.length){
-      await uiAlert("ファイルに入っていた中身を残しました（" + keptAll.length + "件）。\n\n"
-        + keptAll.slice(0, 3).join("\n")
+      const anyKept = keptAll.some(x => x.kept.length), anyBoth = keptAll.some(x => x.both.length);
+      await uiAlert("PCのファイルと読み合わせて書いた戸別が " + keptAll.length + " 件あります。\n\n"
+        + keptAll.slice(0, 3).map(x => x.no
+            + (x.kept.length ? ("\n　PCのファイルの内容を残した：" + x.kept.join("・")) : "")
+            + (x.both.length ? ("\n　この端末の内容にした（PCでも直していた）：" + x.both.join("・")) : "")).join("\n")
         + (keptAll.length > 3 ? ("\nほか " + (keptAll.length - 3) + "件") : "")
-        + "\n\nPCで入れた写真や工事日は、消えていません。");
+        + "\n\n写真は、PCのファイルとこの端末の両方を残しました。"
+        + (anyKept ? "\nPCのファイルにだけ入っていたもの・PCだけが直した欄は、PCのファイルの内容のままです。" : "")
+        + (anyBoth ? "\nPCとこの端末の両方で直していた欄は、この端末の内容にしました（PCで直した内容は入っていません）。" : ""));
     }
     if(conflictNos.length){
       await uiAlert("PCと この端末の両方で直していた戸別が " + conflictNos.length + " 件あります。\n\n"
@@ -7865,6 +8022,14 @@ async function saveAllDrafts(mode){
         + (unsureNos.length > 5 ? ("\nほか " + (unsureNos.length - 5) + "件") : "")
         + "\n\nまとめて保存では、この戸別は書いていません（この端末の入力と写真は、そのまま残っています）。\n"
         + "その戸別を1件ずつ開き、中身を確かめてから「保存」を押してください。");
+    }
+    if(noBaseNos.length){
+      await uiAlert("この端末で PCのファイルを読み込んでいない戸別のうち、PCのファイルの お客様の欄・工事日・備考などが この端末と違う戸別が " + noBaseNos.length + " 件あります。\n\n"
+        + noBaseNos.slice(0, 3).join("\n")
+        + (noBaseNos.length > 3 ? ("\nほか " + (noBaseNos.length - 3) + "件") : "")
+        + "\n\nまとめて保存では、この戸別は書いていません（この端末の入力と写真は、そのまま残っています）。\n"
+        + "その戸別を1件ずつ開いて「保存」を押すと、PCのファイルの中身をこの端末の内容に置き換えてよいか聞かれます。\n"
+        + "先に「履歴」の「📂 1つだけ選んで開く」で読み込むと、PCの中身を残したまま続きを入力できます。");
     }
     if(unreadNos.length){
       await uiAlert("⚠ ファイルはあるのに、いま読めない戸別が " + unreadNos.length + " 件あります（ほかのアプリが使っている最中か、ファイルが壊れているのかもしれません）。\n\n"
@@ -7883,7 +8048,7 @@ async function saveAllDrafts(mode){
     if(photoNg.length){
       await uiAlert("⚠ 写真が減りそうなので、" + photoNg.length + " 件は保存していません。\n\n"
         + photoNg.slice(0, 5).join("・")
-        + "\n\nその戸別を開いて「📂 戸別ファイルを読み込んで編集する」から読み込んでから、もう一度お試しください。");
+        + "\n\nその戸別を開いて「履歴」の「📂 1つだけ選んで開く」から読み込んでから、もう一度お試しください。");
     }
   } else {
     /* ★フォルダを選べない端末（共有・ダウンロード）★
@@ -7913,7 +8078,7 @@ async function saveAllDrafts(mode){
       await uiAlert("⚠ 写真が減りそうなので、" + photoNg2.length + " 件は渡していません。\n\n"
         + photoNg2.slice(0, 5).join("・")
         + "\n\nこの端末ではフォルダを読めないため、PCのファイルにある写真を足せません。\n"
-        + "その戸別を開いて「📂 戸別ファイルを読み込んで編集する」から読み込んでから、もう一度お試しください。");
+        + "その戸別を開いて「履歴」の「📂 1つだけ選んで開く」から読み込んでから、もう一度お試しください。");
     }
     const sideIts = [];
     for(const f of sideFs){
@@ -7974,11 +8139,11 @@ async function saveAllDrafts(mode){
         + "PCのファイルを読んでいないので、別の名前で渡しました。\n"
         + (shared ? ("Dropbox の「" + sideListPlace() + "」に入れたなら、それで終わりです。別の場所に入れても、事務所で振り分けます。")
                   : ("あとで Dropbox のアプリで「" + sideListPlace() + "」に入れてください。"))
-        + "\n\n" + sidePcNote(sideDone) + restNote);
+        + "\n\n" + sidePcNote(sideDone) + restNote + (shared ? "" : sideDlManyNote(sideDone)));
     }
     if(okNos.length){
       await uiAlert((shared ? "共有で渡しました： " : "ダウンロードに入れました： ") + okNos.length + " 件\n\n"
-        + "中身はきちんと入っています（消えていません）。\n\n"
+        + "この端末の入力と写真が入っています（この端末で読み込んだあとに、PCやほかの端末で足した写真は入っていません）。\n\n"
         + (shared
             ? (saveShareWhere() + "\nそのままPCで読めます。\n"
                + "ちがう場所へ渡したときは、そのフォルダへ移してください。"
@@ -7987,7 +8152,7 @@ async function saveAllDrafts(mode){
                + "PCで読み込むフォルダとちがう場合は、\nそのフォルダへ移してください。\n\n"
                + "※ 何件も続けてダウンロードすると、ブラウザが途中で止めることがあります。\n"
                + "「許可しますか」と聞かれたら許可してください。\n"
-               + "入っていない戸別は、受付台帳の「全部保存し直す」でもう一度渡せます。"))
+               + "入っていない戸別は、受付台帳の一覧の上にある「全部保存し直す（…）」を開いて、もう一度渡せます。"))
         + restNote + sideTxt
         + saveHintLine());
     }
@@ -8136,7 +8301,10 @@ function flowApplyShared(m, rec){
     if(st.key === "work") m.chosho_status = "completed";
     changed = true;
   });
-  if(changed){ m._touched = true; m._rev = (m._rev | 0) + 1; }
+  /* ★引き継いだ印だけでは「この端末で入力した」（_touched）にしない★（版181）
+     立てると、開いただけの戸別が まとめて保存・全部保存し直す で書かれ・渡され、中身の入っているほかの端末のファイルを
+     空に近い内容で置き換える元になる（isUntouchedHere の「引き継いだ印だけの戸別は外す」が効かなかった）。回数だけ進める。 */
+  if(changed){ m._rev = (m._rev | 0) + 1; }
   return changed;
 }
 /* 管理番号 → 受付台帳の行（無ければ null） */
@@ -8401,7 +8569,14 @@ async function pcGuardDirLoad(opt){
     if(!window.showDirectoryPicker) return null;
     try{ dir = await window.showDirectoryPicker({ id:"genba-save", mode:"readwrite" }); }
     catch(e){
-      if(e && e.name === "AbortError") return null;      // 選ぶのをやめた
+      /* ★閉じたときも黙らない★（版181）保存の窓から来たとき・タブレットやスマホ（フォルダを選ぶ画面に Dropbox が出ない）は、
+         📮（預ける）と 📂（ファイルを選ぶ）を出す。PCで帯の 📁 を自分で閉じたときだけ、今までどおり何も出さない。 */
+      if(e && e.name === "AbortError"){
+        if(!fromSave && !isAndroidLike()) return null;     // 選ぶのをやめた
+        return fin(await pcGuardLoadMissAsk("フォルダを選びませんでした",
+          "フォルダを選ぶ画面を閉じました（何も読み込んでいません）。"
+          + (isAndroidLike() ? "\n\nタブレット・スマホの「フォルダを選ぶ画面」には Dropbox が出ません。" : "")));
+      }
       console.warn("フォルダを選ぶ窓を開けませんでした", e);
       return fin(await pcGuardLoadMissAsk("フォルダを選ぶ画面を開けませんでした",
         "フォルダを選ぶ画面を開けませんでした。\n\nもう一度お試しください。"));
@@ -8488,16 +8663,15 @@ function renderPcGuard(){
     /* ★「ここで保存すると、上の中身はPCのファイルから消えます」は、もう本当ではない★（版176）
        見るだけの戸別は「保存」を押しても いつもの名前では書かない（📮 で預けるか選ぶ窓が出る） */
     +   (h.done
-          ? "直すときは、PCでお願いします。ここで「保存」を押しても、PCのファイルは書き替えません（📮 で事務所に預けられます）。"
-          : "ここで「保存」を押しても、PCのファイルは書き替えません（📮 で事務所に預けられます）。")
+          ? "直すときは、PCでお願いします。ここで「保存」を押しても、PCのファイルは書き替えません。"
+          : "ここで「保存」を押しても、PCのファイルは書き替えません。")
     +   "<br>先に <b>戸別ファイル（" + esc((String((M && M.chosho_mgmt_no) || "").trim() || "管理番号")) + ".json）</b> を読み込むと、"
     +   "写真も工事日も残したまま続きを入力できます。"
-    +   "<br>読み込めないときは <b>📮 入力して事務所に預ける</b> で、PCのファイルを書き替えずに渡せます。"
-    +   (canDir ? ""
-         : "<br>📚 を押して、ファイルを選ぶ画面で <b>すべて選択</b>（または今日回るぶん）を選ぶと、"
-           + "この戸別のファイルだけを出します。何百個を目で探さなくて済みます。"
-           + "<br>1つずつ探すときは、📋 で番号をコピーして、ファイルを選ぶ画面の検索に貼り付けてください。")
     + '</div>'
+    /* ★ふだん使うボタンだけを並べ、📮 と「このまま新しく入力する」は「困ったとき」にしまう★（版181・利用者の指定）
+       📮 は Android でリストのフォルダがどうしても見つからないときの逃げ道。ふだんの人は触らないので目立たせない。
+       📚 の字は「まとめて選んで、この戸別を出す」では何が起きるか分からなかった（利用者の指摘）。
+       すぐ下に、何をするボタンかを一行で添える。 */
     + '<div class="pcg-btns">'
     +   (canDir
          ? ('<button type="button" id="pcg-dir">📁 PCのフォルダから読み込む'
@@ -8505,12 +8679,26 @@ function renderPcGuard(){
             + '</button>')
          : "")
     +   '<button type="button" id="pcg-load"' + (canDir ? ' class="alt"' : '') + '>'
-    +     (canDir ? "📂 ファイルを選んで読み込む" : "📚 まとめて選んで、この戸別を出す") + '</button>'
-    +   '<button type="button" id="pcg-side" class="side">📮 入力して事務所に預ける</button>'
+    +     (canDir ? "📂 ファイルを選んで読み込む" : "📚 ファイルをまとめて読み込んで、この戸別を探す") + '</button>'
+    +   (canDir ? ""
+         : ('<div class="pcg-sub">ファイルを選ぶ画面で <b>すべて選択</b>（または今日回るぶん）を選ぶと、'
+            + "その中からこの戸別のファイルを探して、一覧の上に出します（押すと開きます）。"
+            + "アプリを閉じるまでは、ほかの戸別も同じ一覧から探せます。</div>"))
     +   (canDir ? "" : '<button type="button" id="pcg-one" class="alt">📂 1つだけ選ぶ</button>')
     +   (canDir ? "" : '<button type="button" id="pcg-copy" class="alt">📋 管理番号をコピー（探す画面に貼り付け）</button>')
-    +   '<button type="button" id="pcg-force" class="alt">このまま新しく入力する</button>'
-    + '</div>';
+    +   (canDir ? ""
+         : '<div class="pcg-sub">1つずつ探すときは、📋 で番号をコピーして、ファイルを選ぶ画面の検索に貼り付けてください。</div>')
+    + '</div>'
+    + '<details class="pcg-trouble"><summary>困ったとき（PCのファイルがどうしても読み込めない）</summary>'
+    +   '<div class="pcg-sub">Android のタブレットなどで、リストのフォルダが出てこず読み込めないときに使います。</div>'
+    +   '<div class="pcg-btns">'
+    +     '<button type="button" id="pcg-side" class="side">📮 事務所に預ける（別のファイルで送る・PCのファイルはそのまま）</button>'
+    +     '<div class="pcg-sub">入力して「保存」を押すと、<b>' + esc(sideFileName((M && M.chosho_mgmt_no) || "").replace(/_\d{8}-\d{6}\.json$/, "_日時.json")) + '</b>'
+    +       ' という別の名前のファイルで事務所に渡します。PCのファイルは書き替えません。事務所のPCで1つにまとめます。</div>'
+    +     '<button type="button" id="pcg-force" class="alt">このまま新しく入力する</button>'
+    +     '<div class="pcg-sub">PCの中身を読み込まずに入力します。保存したファイルをPCのファイルの上に置くと、PCの中身が消えることがあります。</div>'
+    +   '</div>'
+    + '</details>';
   const c = document.getElementById("pcg-copy");
   if(c) c.addEventListener("click", copyMgmtNo);
   const d = document.getElementById("pcg-dir");
@@ -8542,7 +8730,7 @@ async function pcGuardForceAsk(){
       + "この端末には、PCの " + what + " がありません。\n\n"
       + "保存先に同じ名前のファイルがあれば読み合わせて写真は残しますが、\n"
       + "共有やダウンロードで渡して PCのファイルの上に置くと、上の中身が消えます。\n\n"
-      + "迷ったときは「いいえ」を選び、「📮 入力して事務所に預ける」にしてください。\n\n"
+      + "迷ったときは「いいえ」を選び、同じ「困ったとき」の中の「📮 事務所に預ける」にしてください。\n\n"
       + "続けますか？"))) return;
   M._viewOnly = false;
   M._pcGuardAck = pcGuardSig(pcGuardRow());   // この中身については了解をもらった
@@ -8553,7 +8741,7 @@ async function pcGuardForceAsk(){
   render();
   toast("入力できるようにしました");
 }
-/* 帯の「📮 入力して事務所に預ける」（版176）。
+/* 帯の「困ったとき」の「📮 事務所に預ける（別のファイルで送る）」（版176。版181 で「困ったとき」へしまった）。
    入力できるようにして、保存はいつも預け（別の名前・PCのファイルは書き替えない）にする。
    📂 で PCのファイルを読めたら（新しいモデルになる）、いつもの保存に戻る。 */
 async function pcGuardSideMode(){
@@ -9148,7 +9336,7 @@ const PHOTO_MISSING_MSG = "この戸別のファイルには、この端末に�
 function photoMissingText(n){
   return PHOTO_MISSING_MSG + n + "枚 入っています。\n\n"
     + "いま保存すると、その写真はファイルから消えます。写真を減らすことはできません。\n\n"
-    + "上の帯の「📂 戸別ファイルを読み込んで編集する」から、その戸別のファイルを読み込んでください。\n"
+    + "「履歴」の「📂 1つだけ選んで開く」から、その戸別のファイルを読み込んでください。\n"
     + "読み込むと写真が戻り、そのまま保存できます。";
 }
 
@@ -9254,7 +9442,8 @@ function measHasValue(ms){
    戻り = { stop, reason, photosAdded, kept[], mine[], changed[], conflicts[], removed[], altFiles[] } */
 function mergeIntoState(state, old, opt){
   const out = { stop:false, reason:"", photosAdded:0, kept:[], mine:[], changed:[], conflicts:[], removed:[], altFiles:[],
-                buildAsk:false, buildSwap:{} };
+                buildAsk:false, buildSwap:{},
+                both:[] };      // PCとこの端末の両方で直して、この端末の内容にした欄（知らせるため・版181）
   if(!state || !old || typeof old !== "object") return out;
   if(!opt || !opt.model) console.warn("[融合] model を渡していません（控えなしで進めます）");
   const model = (opt && opt.model) || M;
@@ -9363,6 +9552,8 @@ function mergeIntoState(state, old, opt){
   const tvMine = useB
     ? TV_GROUP.some(k => baseHas(base, k) ? !baseSame(base, k, state[k]) : true)
     : buildMine;                                         // 控えなし＝材料ひとかたまりに合わせる
+  if(tvMine && useB && TV_GROUP.some(k => (k in old) && baseHas(base, k) && !baseSame(base, k, old[k])
+                                    && JSON.stringify(state[k]) !== JSON.stringify(old[k]))) out.both.push("TVの台数・部屋");   // 両方で直した（版181）
   if(!tvMine && TV_GROUP.some(k => (k in old))){
     /* 値が同じ欄は取るものが無い（入れ替えも知らせもしない）。1つでも違えば、違う欄をファイルの値にし、
        知らせる（「ファイルに入っていた中身を残しました（TVの台数・部屋）」）。
@@ -9383,6 +9574,7 @@ function mergeIntoState(state, old, opt){
     const tSame = baseSame(base, "measurements", old.measurements);
     if(mSame && !tSame && old.measurements){ state.measurements = old.measurements; out.changed.push("measurements"); out.kept.push("測定値"); }
     else if(!mSame && tSame){ out.mine.push("測定値"); }
+    else if(!mSame && !tSame && JSON.stringify(state.measurements) !== JSON.stringify(old.measurements)){ out.both.push("測定値"); }   // 両方で直した＝この端末（版181）
   } else if(!measHasValue(state.measurements) && measHasValue(old.measurements)){
     state.measurements = old.measurements; out.changed.push("measurements"); out.kept.push("測定値");
   }
@@ -9434,6 +9626,27 @@ function mergeIntoState(state, old, opt){
     if(!th) return;
     const merged = Object.assign({}, mine0);
     let took = false;
+    /* ★控え（読んだときの中身）があれば、中のキーごとに3つ見比べる★（版181）
+       前は「この端末が持っているキーは、この端末のまま」だったので、PCがあとで直した・消した配線の指定が、
+       この端末は触っていないのに、この端末が前に読んだ値へ戻っていた。
+       ・この端末が控えのまま／PCが直した・消した → PC　・この端末が直した・消した → この端末　・両方で直した → この端末（知らせる） */
+    const bMap = (useB && baseHas(base, k) && base.state && (k in base.state) && base.state[k] && typeof base.state[k] === "object") ? base.state[k] : null;
+    if(bMap){
+      const js = v => JSON.stringify(v === undefined ? null : v);
+      const own = (o, s) => Object.prototype.hasOwnProperty.call(o, s);
+      let both = false;
+      new Set(Object.keys(mine0).concat(Object.keys(th), Object.keys(bMap))).forEach(sub => {
+        const hm = own(mine0, sub), ht = own(th, sub), hb = own(bMap, sub);
+        if(hm === ht && js(mine0[sub]) === js(th[sub])) return;                 // 同じ
+        const mSame = (hm === hb) && js(mine0[sub]) === js(bMap[sub]);
+        const tSame = (ht === hb) && js(th[sub]) === js(bMap[sub]);
+        if(mSame && !tSame){ if(ht) merged[sub] = th[sub]; else delete merged[sub]; took = true; }   // PCが直した・消した
+        else if(!mSame && !tSame) both = true;                                    // 両方で直した＝この端末
+      });
+      if(took){ state[k] = merged; out.changed.push(k); out.kept.push(label(k)); }
+      if(both) out.both.push(label(k));
+      return;
+    }
     Object.keys(th).forEach(sub => {
       if(sub in mine0) return;                            // 両方にある／現場が持っている
       if(useB && baseHas(base, k)){
@@ -9448,7 +9661,31 @@ function mergeIntoState(state, old, opt){
     const mineA = Array.isArray(state.text_annotations) ? state.text_annotations : [];
     const thA = Array.isArray(old.text_annotations) ? old.text_annotations : [];
     const noId = mineA.some(a => !a || !a.id) || thA.some(a => !a || !a.id);
-    if(thA.length && !noId){
+    /* ★控え（読んだときの注記）があれば、注記ごとに3つ見比べる★（版181）前は「この端末に無い注記を足す」だけだったので、
+       PCがあとで直した・消した注記が、この端末が前に読んだ注記に戻っていた（この端末は触っていないのに）。
+       ・この端末が控えのまま／PCが直した・消した → PC　・この端末が直した・消した → この端末　・両方で直した → この端末（知らせる） */
+    const bA = (useB && baseHas(base, "text_annotations") && base.state && Array.isArray(base.state.text_annotations)
+                && !base.state.text_annotations.some(a => !a || !a.id)) ? base.state.text_annotations : null;
+    if(bA && !noId){
+      const sig = a => a ? JSON.stringify({ x:+a.x || 0, y:+a.y || 0, text:String(a.text || ""), color:a.color || "#d32f2f", size:a.size || 18 }) : "";
+      const by = arr => { const mp = new Map(); arr.forEach(a => mp.set(String(a.id), a)); return mp; };
+      const mBy = by(mineA), tBy = by(thA), bBy = by(bA);
+      const res = mineA.slice();           // 並びはこの端末のまま（PCが足した注記は前に）
+      let took = false, both = false;
+      new Set(Array.from(mBy.keys()).concat(Array.from(tBy.keys()), Array.from(bBy.keys()))).forEach(id => {
+        const m0 = mBy.get(id), t0 = tBy.get(id), b0 = bBy.get(id);
+        if(sig(m0) === sig(t0)) return;
+        const mSame = sig(m0) === sig(b0), tSame = sig(t0) === sig(b0);
+        if(mSame && !tSame){
+          const i = res.findIndex(a => String(a.id) === id);
+          if(t0){ if(i >= 0) res[i] = Object.assign({}, t0); else res.unshift(Object.assign({}, t0)); }
+          else if(i >= 0) res.splice(i, 1);
+          took = true;
+        } else if(!mSame && !tSame) both = true;
+      });
+      if(took){ state.text_annotations = res; out.changed.push("text_annotations"); out.kept.push("図面の注記"); }
+      if(both) out.both.push("図面の注記");
+    } else if(thA.length && !noId){
       const have = new Set(mineA.map(a => String(a.id)));
       const bIds = (useB && baseHas(base, "text_annotations") && Array.isArray(base.state.text_annotations))
         ? new Set(base.state.text_annotations.map(a => String(a && a.id))) : null;
@@ -9529,6 +9766,7 @@ function mergeIntoState(state, old, opt){
         return;
       }
       out.mine.push(label(k));                                      // ほかは現場
+      out.both.push(label(k));                                      // 両方で直した＝この端末の内容にした（知らせる・版181）
       return;
     }
     /* (e) 控えが無い。ふたつ目の手がかりで「現場が直したか」を見る。
@@ -9568,6 +9806,7 @@ function mergeIntoState(state, old, opt){
   }
   out.kept = Array.from(new Set(out.kept));
   out.mine = Array.from(new Set(out.mine));
+  out.both = Array.from(new Set(out.both));
   out.changed = Array.from(new Set(out.changed));
   out.removed = Array.from(new Set(out.removed));
   return out;
@@ -9583,7 +9822,7 @@ async function mergeApplyBuild(state, mg){
       + "この端末でも " + names + " を入力しています。\n\n"
       + "材料をこの端末の内容に書き替えますか？\n\n"
       + "「いいえ」を選ぶと、PCの内容をそのまま残します。\n"
-      + "（迷ったら「いいえ」。あとで「📂 戸別ファイルを読み込んで編集する」から読み込めば、\n"
+      + "（迷ったら「いいえ」。あとで「履歴」の「📂 1つだけ選んで開く」から読み込めば、\n"
       + "　PCの内容を見ながら直せます）"))) return false;
   keys.forEach(k => { state[k] = mg.buildSwap[k]; });
   mergeTvSyncState(state);
@@ -9836,11 +10075,13 @@ async function flowShareItemsApply(items, byNo, openNo){
   for(const it of items){
     _flowShare.rows[it.no] = flowShareMergeRec(_flowShare.rows[it.no], it.rec);
     const isOpen = (it.no === openNo);
+    /* ★開いていない戸別は、読んで直して書くのを写真の控えと同じ列で★（版181。列の外だと、そのあいだに届いた写真を古い読みで消す） */
+    const apply = async () => {
     /* ★開いていない戸別は、確かめの窓より前に読んだ写しではなく、いまの下書きに入れる★（版178）
        窓が出ているあいだに写真の取り込みが終わって下書きに届くことがある。写しに入れて書き戻すと、その写真が消える。 */
     const rec = isOpen ? byNo[it.no] : await draftRecNow(byNo[it.no]);
     const model = isOpen ? M : ((rec && rec.model) || null);
-    if(!model) continue;
+    if(!model) return;
     const changed = flowApplyShared(model, it.rec);
     // このファイルはこの端末が保存したものか。保存していない／保存より後に書かれていれば
     // 他の端末のもの＝この端末から保存し直すと、その中身（写真など）が置き換わる。
@@ -9850,17 +10091,21 @@ async function flowShareItemsApply(items, byNo, openNo){
     let markChanged = false;
     if(notMine && !it.root && model._otherFile !== it.rec.from){ model._otherFile = it.rec.from; markChanged = true; marked++; }
     if(changed) drafts++;
-    if(isOpen) continue;                       // 開いている戸別は最後に persistDraft でまとめて控える
-    if(!changed && !markChanged) continue;
+    if(isOpen) return;                         // 開いている戸別は最後に persistDraft でまとめて控える
+    if(!changed && !markChanged) return;
     if(changed){
       /* flowApplyShared が中身の回数（model._rev）を進めている。
-         控えはそれに合わせる（別々に進めると、開いたときにズレる）。 */
-      rec.rev = rec.model._rev | 0; rec.touched = true;
+         控えはそれに合わせる（別々に進めると、開いたときにズレる）。
+         ★引き継いだ印だけでは「この端末で入力した」にしない★（版181）前は touched を立てていたので、開いただけの戸別が
+         まとめて保存・全部保存し直すで書かれ・渡されていた（中身の入っているほかの端末のファイルを、空に近い内容で置き換える）。 */
+      rec.rev = rec.model._rev | 0; rec.touched = (rec.model._touched !== false);
       rec.sig = stateSig(rec.model);
       rec.flow = flowOf(rec.model); rec.surveyDone = !!rec.model.survey_done;
     }
     rec.other = rec.model._otherFile || "";
     try{ await idbPut(rec); }catch(e){ console.warn("下書きへの反映に失敗", it.no, e); }
+    };
+    if(isOpen) await apply(); else await photoKeepQueue(apply);
   }
   return { drafts, marked };
 }
@@ -9884,12 +10129,68 @@ async function flowShareConfirmOverwrite(m){
   const sh = flowShareOf(m && m.chosho_mgmt_no);
   const ph = (sh && sh.photos) ? ("そのファイルの写真 " + sh.photos + "枚など、") : "";
   const fname = currentFileName();
+  /* ★どの道で書くかで、言うことを変える★（版181）「保存先にそのファイルがあれば読み合わせるので、写真は消えません」が本当なのは、
+     覚えているフォルダへ書く道だけ。フォルダを覚えていない PC は保存先を選ぶ画面の道になり、そこで選んだ既にあるファイルは
+     ブラウザが中身を空にしてから渡す（Chrome の決まり）＝読み合わせられず、ほかの端末の写真が消える。
+     その道では書かずに、保存先のフォルダを選んでもらう（読み合わせてから書く）か、📮 にする。 */
+  const route = saveRoute();
+  let dir0 = null;
+  if(route !== "share"){ try{ dir0 = await saveDirGet(); }catch(_){ dir0 = null; } }
+  if(!dir0 && route !== "share" && window.showSaveFilePicker){
+    const items = [];
+    if(window.showDirectoryPicker) items.push({ label: "📁 保存先のフォルダを選んで書く（読み合わせます）", value: "dir",
+      sub: "そのファイルを読み合わせてから書きます（写真は両方残ります）。次からはそのフォルダへ書きます" });
+    items.push({ label: "📮 事務所に預ける（何も書き替えません）", value: "side", kind: "side", sub: "別の名前で渡します。事務所で1つにまとめます" });
+    const v0 = await uiPickName("この戸別は、ほかの端末も保存しています",
+      "ほかの端末が保存したファイル「<b>" + esc(f) + "</b>」から、工程の印を引き継いでいます。<br><br>"
+      + "この端末は保存先のフォルダを覚えていないので、このまま保存すると「保存先を選ぶ画面」が出ます。<br>"
+      + "その画面で そのファイルを選ぶと、ブラウザが中身を空にしてから渡すので読み合わせられず、"
+      + esc(ph) + "この端末に無いものが消えます。<br>"
+      + "保存先のフォルダを選ぶと、そのファイルを読み合わせてから書きます。", items);
+    if(v0 === "side"){
+      const info = await sideSaveFlow("merge", [m]);
+      if(!info) return false;
+      _lastSaveInfo = info;
+      return { side: true };
+    }
+    if(v0 !== "dir") return false;                       // ✕＝やめる
+    let d = null;
+    try{ d = await window.showDirectoryPicker({ id:"genba-save", mode:"readwrite" }); }   // ★押した直後に開く★
+    catch(e){
+      _lastSaveInfo = (e && e.name === "AbortError") ? saveCancelInfo(fname)
+        : { title: "⚠ 保存先のフォルダを選べなかったので、保存していません", warn: true, escape: "merge",
+            msg: fname + "\n\nフォルダを選ぶ画面を開けませんでした。\n（この端末の入力と写真は、そのまま残っています）" };
+      return { side: true };
+    }
+    if(!d) return false;
+    if(!(await saveDirOk(d, true))){
+      _lastSaveInfo = { title: "⚠ フォルダへ書き込む許可が取れないので、保存していません", warn: true, escape: "perm",
+        msg: fname + "\n\nそのフォルダへ書き込む許可が取れませんでした。\n（この端末の入力と写真は、そのまま残っています）" };
+      return { side: true };
+    }
+    const keep = await saveDirKeep();
+    await saveDirAdopt(d, { ask:false });                // 物件のフォルダなら中の「リスト」へ
+    try{ renderSaveBar(); }catch(_){}
+    if(!(await savePlaceConfirmAfterPick("stop"))){
+      await saveDirRestore(keep);
+      _lastSaveInfo = { title: "保存していません", warn: true, escape: "place",
+        msg: fname + "\n\n選んだフォルダは受付台帳の物件と名前が違うので、書いていません（保存先は前のままです）。\n（この端末の入力と写真は、そのまま残っています）" };
+      return { side: true };
+    }
+    return true;                                         // 覚えたフォルダへ、読み合わせてから書く
+  }
+  const byDir = !!dir0 && route !== "share";
   const v = await uiPickName("この戸別は、ほかの端末も保存しています",
     "ほかの端末が保存したファイル「<b>" + esc(f) + "</b>」から、工程の印を引き継いでいます。<br><br>"
-    + "このまま保存すると、保存先のファイル（" + esc(fname) + "）は、この端末の内容になります。<br>"
-    + "保存先にそのファイルがあれば読み合わせるので、写真は消えません。<br>"
-    + "共有やダウンロードで渡したものを そのファイルの上に置くと、" + esc(ph) + "この端末に無いものは消えます。", [
-      { label: "保存先のファイルに書く（置き換える）", value: "over", sub: "保存先にファイルがあれば読み合わせます（写真は両方残ります）" },
+    + (byDir
+       ? ("このまま保存すると、保存先のファイル（" + esc(fname) + "）は、この端末の内容になります。<br>"
+          + "保存先にそのファイルがあれば読み合わせるので、写真は消えません。<br>"
+          + "共有やダウンロードで渡したものを そのファイルの上に置くと、" + esc(ph) + "この端末に無いものは消えます。")
+       : ("このまま保存すると、共有（またはダウンロード）で渡します。この道では そのファイルを読めないので、"
+          + esc(ph) + "この端末に無いものは渡すファイルに入りません。<br>"
+          + "渡したものを そのファイルの上に置くと、それが消えます。")), [
+      byDir ? { label: "保存先のファイルに書く（置き換える）", value: "over", sub: "保存先にファイルがあれば読み合わせます（写真は両方残ります）" }
+            : { label: "このまま渡す（共有・ダウンロード）", value: "over", sub: "ほかの端末のファイルの上には置かないでください" },
       { label: "📮 事務所に預ける（何も書き替えません）", value: "side", kind: "side", sub: "別の名前で渡します。事務所で1つにまとめます" }
     ]);
   if(v === "over") return true;
@@ -10040,7 +10341,10 @@ async function openDraftModal(){
     `<div class="draft-actions">
        <label class="d-selall"><input type="checkbox" id="d-selectall"> 全選択</label>
        <button class="d-delsel" id="d-delsel" disabled>🗑 選択を削除</button>
-       <button class="d-sidesel" id="d-sidesel" disabled>📮 選んで事務所に預ける（保存済みも）</button>
+       <details class="d-trouble"><summary>困ったとき（PCのファイルに入ったか分からない）</summary>
+         <div class="d-trouble-sub">保存したのに事務所のPCで見えないときなど。上で戸別を選んで押すと、別の名前のファイル（管理番号_現場預け_日時.json）で事務所に渡し直します。PCのファイルは書き替えません。事務所のPCで1つにまとめます。</div>
+         <button class="d-sidesel" id="d-sidesel" disabled>📮 選んで事務所に預ける（保存済みも）</button>
+       </details>
      </div>` +
     recs.map(d=>{
       const t=new Date(d.savedAt||0);
@@ -10048,7 +10352,10 @@ async function openDraftModal(){
       // 💾=JSON書出済で以後未編集 ／ ✏️=書出後に変更あり(再書出推奨) ／ 無印=未書出
       /* 📮＝事務所に預けた（PCのファイルは書き替えていない。事務所でまとめる前）（版176） */
       const sided = !!(d.model && d.model._sideAt && d.fileSavedAt && d.model._sideAt === d.fileSavedAt);
-      const badge = (d.fileSavedAt && d.fileSavedAt >= (d.savedAt||0)) ? (sided ? "📮 " : "💾 ") : (d.fileSavedAt ? "✏️ " : "");
+      /* ★✏️ は直した回数で決める★（版181）時刻で決めると、保存のあと何も直さずに別の戸別を開くだけで（下書きを控え直す）✏️ になった。
+         受付台帳の一覧・保存バーと同じく、保存したときの回数（fileRev）より今の回数（rev）が進んでいるときだけ。 */
+      const editedAfter = !!(d.fileSavedAt && (d.rev | 0) > (d.fileRev | 0));
+      const badge = d.fileSavedAt ? (editedAfter ? "✏️ " : (sided ? "📮 " : "💾 ")) : "";
       // どこまで進んだか（下・ビ・工・完）。控えの無い古い下書きは中身から作る。
       const f = (d.flow && typeof d.flow === "object") ? d.flow : flowOf(d.model||{});
       const top = flowTopPhase(f);
@@ -10424,7 +10731,11 @@ function handoverOf(info){
 function isUntouchedHere(info){
   if(!info || !info.has) return false;
   if(info.touched || info.photos || info.fileAt) return false;
-  return !flowAny(info.flow) || !!info.other;
+  /* ★受付台帳の印（下見済など）が付いているだけの戸別も「まだ何もしていない」に入れる★（版181）
+     まとめて保存は、この端末で何も入力していない戸別を必ず書かない（isNothingNewHere）。印があるだけで数えると、
+     「まだ保存していない N件」の N が押しても減らず、「書き替える戸別はありません」と出ていた（保存バーの右は空なのに、一覧は「まだ保存していません」）。
+     この端末で付けた印（🚩 工程）は「入力した」（touched）になるので、ここには来ない。 */
+  return true;
 }
 /* ---- 一覧を「いまの工程」で絞る ----
    下見の日／ビラ配りの日／工事の日…と、その日にやる戸別だけを出せるようにする。
@@ -10597,7 +10908,8 @@ function flowDotsHtml(f){
     return '<i class="'+(on?"on":"")+'"'+(on?(' style="background:'+ph.color+'"'):'')+' title="'+esc(ph.name)+'">'+ph.ch+"</i>";
   }).join("") + "</span>";
 }
-/* 「すべて出す」＝会社の絞り込みも工程の絞り込みも外して、全部出す。
+/* 「🔍 絞り込みを外して、すべて表示」＝会社の絞り込みも工程の絞り込みも外して、全部の戸別を並べる（ファイルには何も書かない）。
+   前の字は「すべて出す」。何を・どこへ出すのか分からず、押されていなかった（利用者の指摘・版181）。
    絞り込んだ結果が0件のときにも同じボタンを出すので、結び付けは1か所にまとめる。 */
 function rcBindShowAll(){
   const el = document.getElementById("rc-showall"); if(!el) return;
@@ -10649,7 +10961,7 @@ function renderReceptionList(q){
     /* 1件も無くなったときこそ、戻すボタンをその場に出す（上のチップを探させない）。 */
     host.innerHTML=`<div class="info" style="text-align:center">該当なし`
       + (names.length ? `<br><b>「${esc(names.join("」「"))}」で絞り込んでいます。</b><br>`
-          + `<button type="button" id="rc-showall">すべて出す（${rows.length}件）</button>` : "")
+          + `<button type="button" id="rc-showall">🔍 絞り込みを外して、すべて表示（${rows.length}件）</button>` : "")
       + `</div>`;
     rcBindShowAll();
     return;
@@ -10662,15 +10974,22 @@ function renderReceptionList(q){
   const warn0 = !_draftInfoReady
     ? '<div class="rc-warn">まだ保存していない戸別を確認しています…</div>'
     : null;
+  /* ★押すと何が起きるかを、ボタンのすぐ下に一行で言う★（版181・利用者の指摘）
+     「まとめて保存」だけでは、押すと何がどう変わるのか分からず、怖くて押せなかった。
+     フォルダに書く道では、1件ずつの保存と同じく PCのファイルと読み合わせてから書く（写真は和集合・足りなければ書かない）。
+     共有で渡す道（iPhone・共有で渡す設定）では、相手のファイルを読めないので、この端末が知らない写真は入らない。 */
+  const bulkByDir = !!(window.showDirectoryPicker && saveRoute() !== "share");
+  const bulkHow = bulkByDir
+    ? (`1件ずつ「保存」を押すのと同じように、保存先にある PCのファイルと読み合わせてから書きます（PCの写真は消しません）。`
+       + `押すと、保存先のフォルダを選ぶ画面が出ます`
+       + (dirName ? `（前回は「<b>${esc(dirName)}</b>」。選び直せます）` : ``) + `。`)
+    : (`押すと共有の画面が出ます。この端末の入力と写真を、Dropbox などへ渡します。`
+       + `PCやほかの端末にしか無い写真は、渡すファイルに入りません。`);
   const warn = warn0 !== null ? warn0 : notHanded
-    ? `<div class="rc-warn">まだ保存していない戸別が <b>${notHanded}件</b> あります。`
-      + `保存しないと、写真以外の入力はPCへ渡りません。`
-      + `<button id="rc-saveall" class="rc-saveall" data-label="まとめて保存（${notHanded}件）">まとめて保存（${notHanded}件）</button>`
-      + `<div class="rc-warn-sub">`
-      +   (dirName ? `前回のフォルダ「<b>${esc(dirName)}</b>」が出ます（保存のたびに選び直せます）`
-                   : `押すと保存先を選ぶ画面が出ます`)
-      +   `<br>※ PCで<b>0KB</b>と言われたファイルは、こちらでは直りません（下の「全部保存し直す」の案内をご覧ください）`
-      + `</div>`
+    ? `<div class="rc-warn">まだPCへ渡していない戸別が <b>${notHanded}件</b> あります。`
+      + `保存しないと、入力も写真もPCへ渡りません。`
+      + `<button id="rc-saveall" class="rc-saveall" data-label="💾 まだ保存していない ${notHanded}件 をまとめて保存">💾 まだ保存していない ${notHanded}件 をまとめて保存</button>`
+      + `<div class="rc-warn-sub">` + bulkHow + `</div>`
       + `</div>`
     : "";
   // PCで台帳を直したあとは、戸別ファイルも作り直さないと、メインでフォルダを読み直したときに
@@ -10683,24 +11002,32 @@ function renderReceptionList(q){
     ? `<br>ただし<b>開いただけ</b>（まだ何も入力していない）の戸別<b>${redoSkip.length}件</b>は入りません`
       + `（PCのファイルにある写真や入力を消さないためです）。<br>` + GENBA_REDO_HOWTO_HTML
     : ``;
+  /* ★「全部保存し直す」は、ふだんは閉じておく★（版181・利用者の指摘）
+     保存済みの戸別まで写真ごと全部書き直すので、時間がかかる重いボタン。毎回大きく出ていると、
+     押すと何が起きるのか分からず不安になる。受付台帳を取り込み直して変わった戸別は、取り込みのときに
+     「保存後に変更」に戻るので、ふだんは上の「まだ保存していない」だけで足りる（地図の画面から取り込んだときも同じ。版181）。
+     要るのは、PCで「ファイルが無い」「中身が空（0KB）」と言われたときの作り直し。 */
+  const redoSum = `<summary>全部保存し直す（PCで「ファイルが無い」「中身が空（0KB）」と言われたとき）</summary>`;
   const redoBar = redoCnt
-    ? `<div class="rc-redo">PCで台帳を直して<b>取り込み直したとき</b>は、<b>全部保存し直して</b>ください。`
-      + `<button id="rc-saveall2" data-label="全部保存し直す（${redoCnt}件）">全部保存し直す（${redoCnt}件）</button>`
-      + `<div class="rc-redo-sub">台帳の最新（名前・住所・電話・予定日・備考）を入れ直して上書きします。`
-      + `現場で入力したものはそのままです。<br>`
-      + `<b>PCで「中身が空（0KB）」と言われたファイルも、これで作り直せます。</b>`
-      + `上の「まとめて保存」は<b>まだ保存していない戸別だけ</b>が相手なので、`
-      + `この端末が「保存済み」と思っている戸別は入りません。`
+    ? `<details class="rc-redo">` + redoSum
+      + `<div class="rc-redo-sub">ふだんは上の「💾 まだ保存していない … をまとめて保存」だけで足ります`
+      + `（受付台帳を取り込み直して変わった戸別も、そちらに入ります）。<br>`
+      + `これは、保存済みの戸別も含めて <b>${redoCnt}件を写真ごと全部書き直す</b>ので、時間がかかります。`
+      + `PCで「ファイルが無い」「中身が空（0KB）」と言われたときに使ってください。<br>`
+      + `書く前に、受付台帳の内容（名前・住所・電話・工事日・時刻・打合せ・備考・工程の印）を入れ直します。`
+      + `現場で入力したもの（アンテナ・部材・測定・写真）はそのままです。`
       + redoSkipTxt + `</div>`
-      + `</div>`
+      + `<button id="rc-saveall2" data-label="💾 全部保存し直す（${redoCnt}件・時間がかかります）">💾 全部保存し直す（${redoCnt}件・時間がかかります）</button>`
+      + `</details>`
     /* 対象が1件も無くても、0KB の作り直しの案内は消さない。
        台帳を見るために開いただけの戸別しか無い端末では、ここが唯一の案内になる。 */
     : redoSkip.length
-    ? `<div class="rc-redo">いま<b>保存し直す戸別はありません</b>`
-      + `（開いただけ・まだ何も入力していない戸別が <b>${redoSkip.length}件</b>）。`
-      + `<div class="rc-redo-sub">この戸別は「全部保存し直す」では書きません`
+    ? `<details class="rc-redo">` + redoSum
+      + `<div class="rc-redo-sub">いま<b>保存し直す戸別はありません</b>`
+      + `（開いただけ・まだ何も入力していない戸別が <b>${redoSkip.length}件</b>）。<br>`
+      + `この戸別は「全部保存し直す」では書きません`
       + `（PCのファイルにある写真や入力を消さないためです）。<br>` + GENBA_REDO_HOWTO_HTML + `</div>`
-      + `</div>`
+      + `</details>`
     : "";
   // 開いただけ（何も入力していない）の戸別。たまると「入力中」だらけになるのでまとめて戻せる。
   const openedOnly = rows.filter(r => r && String(r.mgmt_no||"").trim() && isOpenedOnly(draftInfoOf(r.mgmt_no))).length;
@@ -10713,7 +11040,7 @@ function renderReceptionList(q){
   const fltBar = (fltNames.length && hiddenN>0)
     ? `<div class="rc-flt">「<b>${esc(fltNames.join("」「"))}</b>」で絞り込んでいます。`
       + `ほかの会社や済んだ戸別など <b>${hiddenN}件</b> は出していません。`
-      + `<button type="button" id="rc-showall">すべて出す（${rows.length}件）</button></div>`
+      + `<button type="button" id="rc-showall">🔍 絞り込みを外して、すべて表示（${rows.length}件）</button></div>`
     : "";
   // 他の端末で進めた分の引き継ぎは「📋 履歴」の中に置いてある（毎日使うものではないので、
   // 台帳の一覧の上には出さない）。引き継いだ戸別には行に「他端末」が付く。
@@ -10939,8 +11266,10 @@ async function receptionApplyToDrafts(){
     if(!no || no === openNo || !byNo[no]) continue;
     /* ★始めに読んだ写しではなく、いまの下書きに入れる★（版178）入れているあいだに、ほかの戸別の写真の取り込みが
        終わって下書きに届くことがある。写しに入れて書き戻すと、その写真が下書きから消える。 */
+    /* ★読んで直して書くのは、写真の控えと同じ列で★（版181。列の外だと、そのあいだに届いた写真を古い読みで消す） */
+    if(await photoKeepQueue(async () => {
     const rec = await draftRecNow(rec0);
-    if(!rec || !rec.model || !receptionApplyToModel(rec.model, byNo[no])) continue;
+    if(!rec || !rec.model || !receptionApplyToModel(rec.model, byNo[no])) return false;
     /* ★「直した回数」は中身（model._rev）が持ち主★
        控えの rec.rev だけを進めると、その戸別を開いたときに
        model._rev（進めていない古い回数）で控えが書き直され、
@@ -10955,7 +11284,8 @@ async function receptionApplyToDrafts(){
     rec.touched = (rec.touched !== false);
     rec.sig = stateSig(rec.model);        // 指紋も今の中身に合わせる（古いままだと二重に数える）
     rec.flow = flowOf(rec.model);         // 工程の控えも合わせる（一覧・地図の印がすぐ合う）
-    try{ await idbPut(rec); applied++; }catch(e){ console.warn("下書きへの反映に失敗", no, e); }
+    try{ await idbPut(rec); return true; }catch(e){ console.warn("下書きへの反映に失敗", no, e); return false; }
+    })) applied++;
   }
   if(applied){
     clearTimeout(_persistTimer);
