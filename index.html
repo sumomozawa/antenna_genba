@@ -4517,10 +4517,14 @@ async function saveJson(){
     /* ★「ファイルがもう1つ増えます」は、フォルダへ書く道では本当でない★（版181）フォルダの道は 管理番号.json を読み合わせて書き直す（増えない）。
        増えることがあるのは、共有・ダウンロードで渡す道（端末によって 管理番号(1).json などができる）。 */
     const againByDir = !!(saveRoute() !== "share" && (_saveDir || saveDirName()));
+    /* 📮 預けモード・見るだけ・物件の違うフォルダ では、いつもの名前で書かずに別の名前の預けをもう1つ作る（版181） */
+    let againSide = !!(M && (M._sideOnly || M._viewOnly));
+    if(!againSide){ try{ const mm0 = savePlaceMismatch(); againSide = !!(mm0 && mm0.held && pcGuardRow()); }catch(_){} }
     if(wasSaved
        && !(await uiConfirm("この内容は "+_hhmm(_save.fileAt)+" に保存済みです。\nそのあと変わったところはありません。\n\nもう一度保存しますか？\n"
-            + (againByDir ? "（保存先の 管理番号.json を読み合わせてから書き直します。ファイルは増えません）"
-                          : "（共有やダウンロードで渡すと、同じ戸別のファイルがもう1つ増えることがあります）")))) return;
+            + (againSide ? "（PCのファイルは書き替えず、別の名前のファイル（📮 預け）をもう1つ作ります）"
+               : againByDir ? "（保存先の 管理番号.json を読み合わせてから書き直します。ファイルは増えません）"
+                            : "（共有やダウンロードで渡すと、同じ戸別のファイルがもう1つ増えることがあります）")))) return;
     /* ★📮 預けモード★（版176）保存はいつも別の名前で事務所に預ける（PCのファイルは書き替えない）。
        ただし、覚えているフォルダに PCのファイル（らしいもの）があれば、読み込んで いつもの保存に戻す。 */
     _lastSaveInfo = null;
@@ -6533,8 +6537,12 @@ async function persistModel(m, added, tag){
                     && (M === m || (M._lastDraftKey === key && draftSameUid(M, prev.model)))) ? M : null;
       const pm = open || prev.model;
       if(!Array.isArray(pm.chosho_photos)) pm.chosho_photos = [];
+      /* 下書きにもう全部入っているなら書かない（版181。画面に開いている戸別でも、1枚ごとに下書き全体を書き直すと重い） */
+      const kOf = p => p.id || photoContentId(p.dataUri);
+      const inDraft = new Set((Array.isArray(prev.model.chosho_photos) ? prev.model.chosho_photos : []).filter(p => p && p.dataUri).map(kOf));
+      const draftLacks = added.some(p => p && p.dataUri && !inDraft.has(kOf(p)));
       const addedHere = mergePhotosInto(pm.chosho_photos, added);
-      if(!addedHere && !open) return true;     // もう入っている
+      if(!addedHere && (!open || !draftLacks)) return true;     // もう入っている
       pm._touched = true;
       pm._rev = Math.max(pm._rev|0, prev.rev|0, m._rev|0) + 1;       // 版は戻さない（ファイルに入っていない＝まとめて保存の対象）
       m._rev = pm._rev;
@@ -7956,7 +7964,8 @@ async function saveAllDrafts(mode){
           mg0.conflicts.forEach(c => { if(mg0.kept.indexOf(c.label) < 0) mg0.kept.push(c.label); });
           f.keys = mg0.changed;
           f.text = JSON.stringify(f.state);        // ★融合のあとは必ず作り直す★（PCが消した欄・写真の名前と印も入れる）
-          if(mg0.kept.length || mg0.both.length) keptAll.push({ no: (f.no || f.name), kept: mg0.kept.slice(), both: mg0.both.slice() });
+          /* 「読み合わせて書いた」と言うのは、本当に書けて読み返しが合った戸別だけ（下の okNos のところで足す。版181） */
+          f._kept = (mg0.kept.length || mg0.both.length) ? { no: (f.no || f.name), kept: mg0.kept.slice(), both: mg0.both.slice() } : null;
         }
         /* 写真が1枚でも減るなら書かない */
         {
@@ -7978,6 +7987,7 @@ async function saveAllDrafts(mode){
         try{ fileBaseAfterWrite(f.model, f.state, f.name, f.cf && f.cf.primary, f.keys, (dir === _saveDir) ? "list" : ""); }
         catch(e){ console.warn("控えの取り直しに失敗", f.no, e); }
         okNos.push(f);
+        if(f._kept) keptAll.push(f._kept);
       }catch(e){ console.warn("まとめて保存 失敗", f.name, e); ngNos.push(f.no); offErr.push(f); }
     }
     where = "「" + (saveDirPlace(dir) || "選んだフォルダ") + "」";
