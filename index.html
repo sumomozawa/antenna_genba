@@ -3677,7 +3677,7 @@ async function handleMeasCsv(file, cat){
   for(const {i,r} of applyList){ const cur=target[i]||{};
     target[i]={ db:r.db, mer: parsed.hasMer?r.mer:(cur.mer??""), ber: parsed.hasBer?r.ber:(cur.ber??"") }; }
   if(M===model){ saveDraft(); refreshMeas(); } // まだ同じ戸別を編集中
-  else { await persistModel(model, undefined, tag); }   // 別戸別へ切替済み→読込元を直接確定保存（混入/喪失防止）
+  else { await photoKeepQueue(() => persistModel(model, undefined, tag)); }   // 別戸別へ切替済み→読込元を直接確定保存（混入/喪失防止）。写真の控えと同じ列で（版181）
   toast(labelMap[cat]+"に "+applyList.length+"CH取込（未対応CH: "
     +(unmatched.length?unmatched.join(","):"なし")+"）");
   await persistMovedNotice(tag);                // 別の下書きに入れたときは窓で知らせる（版178）
@@ -3730,7 +3730,15 @@ function mergePhotosInto(dst, src){
   return added;
 }
 async function photoKeepInto(model, added, tag){
-  if(M === model){ await saveDraft(); return true; }
+  const adds = Array.isArray(added) && added.length > 0;
+  if(M === model){
+    await saveDraft();
+    /* ★画面の控え（saveDraft）は400msあと★（版181）そのあいだに別の戸別へ移ると、控えるのは移った先の戸別になる。
+       版178 からは、別の戸別へは「新しく読んだ写真だけ」を足すので、ここで pending から外した1枚はもう誰も書かない（どの下書きにも残らない）。
+       新しく読んだ写真は、下書きにもすぐ足す（写真の控えと同じ列で）。まだ一度も控えていない戸別（キーが無い）は、次の控えでもう一度足す。 */
+    if(adds && model._lastDraftKey) return await photoKeepQueue(() => persistModel(model, added, tag));
+    return !adds;
+  }
   /* ★どの下書きに入れるかは、下書きのキーで見る★（版178）
      管理番号だけで見ると、番号を打ち直した写し（下書きのキーが移っている）や、番号が重なって一時のキーに置いた
      別の下書きを見分けられない。開いている戸別に届けられず、誰にも見えない下書きを作ったり、別の戸別の下書きに入れたりしていた。
@@ -3743,6 +3751,7 @@ async function photoKeepInto(model, added, tag){
     mergePhotosInto(M.chosho_photos, Array.isArray(added) ? added : model.chosho_photos);
     await saveDraft();
     try{ refreshPhotos(); }catch(_){}
+    if(adds) return await photoKeepQueue(() => persistModel(model, added, tag));   // 下書きにもすぐ足す（上と同じ・版181）
     return true;
   }
   /* 別の戸別へ移った＝その戸別の下書きに足す。取り込みが2つ重なっても、読んで足して書くのを1つずつ行う（片方の写真を消さない） */
@@ -3803,7 +3812,7 @@ async function persistMovedNotice(tag){
   try{
     await uiNoticeWhenIdle("⚠ 取り込んだ" + what + "を、別の下書きに入れました。\n\n"
       + "管理番号 " + (nos.join("・") || "（番号なし）") + " の下書きが、取り込んでいるあいだに別のもの（消して作り直した等）に替わっていたためです。\n\n"
-      + "「下書き一覧」に同じ管理番号の下書きが2つ出ています。" + what + "が入っているほうを開いて確かめ、保存してください。");
+      + "「履歴」に同じ管理番号の下書きが2つ出ています。" + what + "が入っているほうを開いて確かめ、保存してください。");
   }catch(_){}
 }
 function suggestLabel(n){
@@ -4457,6 +4466,9 @@ async function mapImportFile(file){
     if(p.ledger && Array.isArray(p.ledger.rows) && p.ledger.rows.length){
       try { addedLedger = receptionSaveRows(p.ledger); } catch(_){}
       if(addedLedger && !(await _rcLastKept)) await uiAlert(RC_KEEP_NG);
+      /* ★受付台帳の画面の取り込みと同じく、下書きへ入れ直す★（版181）入れ直さないと、台帳で直った保存済みの戸別が
+         「保存後に変更」に戻らず、まとめて保存の対象に入らない（PCのファイルは古いまま）。 */
+      if(addedLedger){ try{ await receptionApplyToDrafts(); }catch(e){ console.warn("下書きへの反映に失敗", e); } }
     }
     p = p.map || null;
     if(!p){
@@ -4502,8 +4514,13 @@ async function saveJson(){
     }
     // すでに保存してあって、そのあと何も変えていないときは一度確かめる。
     // 保存し直すたびにファイルが増えるので、要らない保存を減らす。
+    /* ★「ファイルがもう1つ増えます」は、フォルダへ書く道では本当でない★（版181）フォルダの道は 管理番号.json を読み合わせて書き直す（増えない）。
+       増えることがあるのは、共有・ダウンロードで渡す道（端末によって 管理番号(1).json などができる）。 */
+    const againByDir = !!(saveRoute() !== "share" && (_saveDir || saveDirName()));
     if(wasSaved
-       && !(await uiConfirm("この内容は "+_hhmm(_save.fileAt)+" に保存済みです。\nそのあと変わったところはありません。\n\nもう一度保存しますか？\n（同じ戸別のファイルがもう1つ増えます）"))) return;
+       && !(await uiConfirm("この内容は "+_hhmm(_save.fileAt)+" に保存済みです。\nそのあと変わったところはありません。\n\nもう一度保存しますか？\n"
+            + (againByDir ? "（保存先の 管理番号.json を読み合わせてから書き直します。ファイルは増えません）"
+                          : "（共有やダウンロードで渡すと、同じ戸別のファイルがもう1つ増えることがあります）")))) return;
     /* ★📮 預けモード★（版176）保存はいつも別の名前で事務所に預ける（PCのファイルは書き替えない）。
        ただし、覚えているフォルダに PCのファイル（らしいもの）があれば、読み込んで いつもの保存に戻す。 */
     _lastSaveInfo = null;
@@ -4803,6 +4820,8 @@ async function sideToDir(items){
   if(!(await saveDirOk(dir, true))){ out.err = "書く許可が取れませんでした"; return out; }
   try{ dir = await saveDirSettle(dir); }catch(_){}
   out.place = saveDirPlace(dir) || dir.name || "";
+  /* 書いた先が、端末の中だけかもしれないフォルダか（Android は必ずそう）。知らせの題を変える（版181） */
+  try{ out.dev = saveDirMaybeDevice(dir); }catch(_){ out.dev = true; }
   for(const it of items){
     try{
       const r = await sideWriteDir(dir, it);
@@ -4872,6 +4891,10 @@ async function sideShareChunks(items){
    ★控え・写真IDの副本は取らない／_fromCaseFile を立てない／他の端末のファイルの印（_otherFile）を消さない★ */
 async function markDraftSidedFor(model, how, sentSig){
   if(!model) return;
+  /* 下書きを読んで印を付けて書くのは、写真の取り込みの控えと同じ列で1つずつ（版181。markDraftSavedFor と同じ） */
+  return await photoKeepQueue(() => markDraftSidedFor0(model, how, sentSig));
+}
+async function markDraftSidedFor0(model, how, sentSig){
   const t = Date.now();
   model._sideAt = t; model._sideHow = String(how || "");
   /* ★渡したあとに中身が変わっていたら（写真の取り込みが終わった等）、「渡した」扱いにしない★（版176）
@@ -4951,7 +4974,11 @@ function sideInfoShare(why, items, r){
 function sideInfoDir(why, items, r){
   const done = r.done || [];
   const place = r.place || "保存先のフォルダ";
-  return { title: "📮 事務所に預けました", icon: "📮", stay: true, side: true, warn: false,
+  /* ★端末の中だけかもしれないフォルダ（Android は必ずそう）に置いたときは、「事務所に預けました」と言い切らない★（版181）
+     そのフォルダが Dropbox と同期していなければ、事務所には届いていない。⚠ にして、「📤 共有でも渡す」を読んでもらう。 */
+  const dev = !!r.dev;
+  return { title: dev ? ("📮 「" + place + "」に置きました（事務所にはまだ届いていないかもしれません）") : "📮 事務所に預けました",
+    icon: "📮", stay: true, side: true, warn: dev,
     msg: "「" + place + "」の中に置きました（書いたあと読み返して確かめました）。\n"
        + sideNamesText(done) + "\n" + sideSizeLine(done) + "\n\n"
        + sidePcNote(done) + sideLacksNote(done)
@@ -4965,7 +4992,15 @@ function sideInfoDl(why, items, done){
        + "\n\nこの端末の「ダウンロード」に入りました。\n"
        + "あとで Dropbox のアプリ（＋ → アップロード）で「" + sideListPlace() + "」に入れてください。\n"
        + "分からなければ、ほかの物件のリストでもかまいません（事務所で振り分けます）。\n\n"
-       + sidePcNote(done) + sideLacksNote(done) + sideRestNote(items, done) };
+       + sidePcNote(done) + sideLacksNote(done) + sideRestNote(items, done) + sideDlManyNote(done) };
+}
+/* ★何件も続けてダウンロードしたとき★（版181）ブラウザが2件目から止めることがある（「複数のファイルをダウンロードしますか」）。
+   こちらでは入ったかを確かめられないので、黙らずに言い、もう一度渡す道を言う。 */
+function sideDlManyNote(done){
+  return ((done || []).length > 1)
+    ? ("\n\n※ 何件も続けてダウンロードすると、ブラウザが途中で止めることがあります。「許可しますか」と聞かれたら許可してください。\n"
+       + "入っていない戸別は、「履歴」の「困ったとき」の「📮 選んで事務所に預ける（保存済みも）」でもう一度渡せます。")
+    : "";
 }
 /* 渡し方を選んでもらって渡す。戻り値＝知らせ（_lastSaveInfo と同じ形）／null＝やめた */
 async function sideAskDeliver(why, items, skipped){
@@ -5044,9 +5079,16 @@ async function sideSaveFlow(why, models, opt){
     }
     const when = new Date();
     const items = [];
+    /* ★同じ管理番号の下書きが2つあるとき、名前も預けた時刻（_side.at）も同じにしない★（版181）
+       事務所の振り分けは「時刻|管理番号」の印で「もうまとめた」を決める。同じ印の預けが2つあると、2つ目を合わせずに片付けるので、
+       その写真が戸別ファイルに入らない（共有先によっては同じ名前で上書きもされる）。重なる分だけ1秒ずつずらす。 */
+    const usedNames = new Set();
     for(const m of list){
       const w = (opt.whyOf && opt.whyOf.get(m)) || why;
-      items.push(await sideBuild(m, w, when));
+      let t = when.getTime();
+      for(let i = 0; i < 600 && usedNames.has(sideFileName(m && m.chosho_mgmt_no, new Date(t))); i++) t += 1000;
+      usedNames.add(sideFileName(m && m.chosho_mgmt_no, new Date(t)));
+      items.push(await sideBuild(m, w, new Date(t)));
     }
     return await sideAskDeliver(why, items, models.length - list.length);
   } finally { _sideBusy = false; }
@@ -5073,7 +5115,7 @@ async function sideEscapeRun(info){
           msg: "フォルダには置いてあります（そのファイルは消えていません）。\n\n"
              + "もう一度押すか、保存バーの 📁 から「フォルダを覚えるのをやめる」を選ぶと、次からは共有で渡せます。",
           escape: "share-also", _sideItems: info._sideItems };
-      } else return;                                                          // やめた
+      } else { sideShowResult(info); return; }                               // やめた＝元の窓（⚠ と「📤 共有でも渡す」）を出し直す（版181。前は何も出なかった）
     } else {
       res = await sideSaveFlow((info && info.escape) || "", (info && info._sideModels && info._sideModels.length) ? info._sideModels : [M]);
     }
@@ -5198,7 +5240,8 @@ async function saveJsonRun(){
           it.wrote = r.name;
           await markDraftSidedFor(M, "dir", it.sig);
           const place = saveDirPlace(dir) || dir.name || "選んだフォルダ";
-          _lastSaveInfo = { title: "📮 別の名前で置きました", icon: "📮", stay: true, side: true, warn: false,
+          let devP = true; try{ devP = saveDirMaybeDevice(dir); }catch(_){ devP = true; }   // 端末の中だけかもしれないフォルダ＝⚠（版181）
+          _lastSaveInfo = { title: "📮 別の名前で置きました", icon: "📮", stay: true, side: true, warn: devP,
             msg: "「" + place + "」は受付台帳の物件と違うので、別の名前（" + r.name + "）で置きました。事務所で振り分けます。\n"
                + "（受付台帳の物件：" + mmP.proj + "）\n"
                + sideSizeLine([it]) + "（書いたあと読み返して確かめました）\n\n"
@@ -5265,6 +5308,7 @@ async function saveJsonRun(){
         }
         mgKeys = mg.changed;
         if(mg.kept.length) mergedNote += "\n（ファイルに入っていた " + mg.kept.join("・") + " を残しました）";
+        if(mg.both.length) mergedNote += "\n（PCとこの端末の両方で直していた " + mg.both.join("・") + " は、この端末の内容にしました）";   // 版181
         if(mg.removed.length) mergedNote += "\n（PCで消された "
           + Array.from(new Set(mg.removed.map(mergeLabelOf))).join("・") + " を、こちらも消しました）";
         if(cf.names.length > 1) mergedNote += "\n（同じ戸別のファイルが " + cf.names.length + " つありました。写真はどれも残しました。要らない方はPCで片付けてください）";
@@ -5377,6 +5421,17 @@ async function saveJsonRun(){
       /* ★写真の歯止めは、画面を開く前に★ この画面で選んだ既にあるファイルは、ブラウザがページへ渡す前に
          中身を空にする（Chrome の決まり）。選ばせてから止めると、PCのファイルが空のまま残る。 */
       if(await photoGateStop(M, state)) return true;
+      /* ★ほかの端末も保存している戸別（_otherFile）は、この画面を開かない★（版181）その画面で そのファイルを選ぶと、
+         ブラウザが中身を空にしてから渡す（Chrome の決まり）。読み合わせられず、ほかの端末の写真が消える。写真の歯止めは画面を開く前に。 */
+      if(M._otherFile){
+        _lastSaveInfo = { title: "⚠ ほかの端末も保存している戸別なので、保存していません", warn: true, escape: "merge",
+          msg: fname + "\n\nこの戸別には、ほかの端末が保存したファイル（" + M._otherFile + "）があります。\n"
+             + "保存先を選ぶ画面で そのファイルを選ぶと、ブラウザが中身を空にしてから渡すので、ほかの端末の写真が消えます。\n\n"
+             + "保存バーの 📁 のボタンで保存先のフォルダを選んでから、もう一度「保存」を押してください（そのファイルを読み合わせてから書きます）。\n"
+             + "（この端末の入力と写真は、そのまま残っています）" };
+        toast("⚠ ほかの端末も保存している戸別なので、保存していません");
+        return true;
+      }
       const handle=await window.showSaveFilePicker(Object.assign({
         id:"genba-save",                 // フォルダを選ぶ窓と同じ場所から開く（毎回たどり直さない）
         suggestedName:fname,
@@ -5428,6 +5483,7 @@ async function saveJsonRun(){
             }
             pickedKeys = mgp.changed;
             if(mgp.kept.length) pickedNote += "\n（ファイルに入っていた " + mgp.kept.join("・") + " を残しました）";
+            if(mgp.both.length) pickedNote += "\n（PCとこの端末の両方で直していた " + mgp.both.join("・") + " は、この端末の内容にしました）";   // 版181
             const lost = photoLossVsFiles(state, [oj]);
             if(lost){
               _lastSaveInfo = { title: "⚠ 写真が減りそうなので、保存を止めました",
@@ -6171,12 +6227,12 @@ function renderSaveBar(){
        + ' <span class="sb-dest-x">' + mmTag + '</span></button>')
     : (dest && destPP.outer && destPP.inner)
     ? '<button type="button" class="sb-dest' + mmCls + '" id="sb-dest" title="' + mmTip + '「保存」を押すと、「' + esc(destPP.outer)
-      + '」フォルダの中の「' + esc(destPP.inner) + '」の 管理番号.json を上書きします。'
+      + '」フォルダの中の「' + esc(destPP.inner) + '」の 管理番号.json に書きます（同じ名前のファイルがあれば、読み合わせてから書き直します。PCの写真は残ります）。'
       + '「' + esc(destPP.outer) + '」のすぐ下には入れません。押すと保存先を選び直せます">📁\u00a0<span class="sb-dest-n">'
       + esc(destPP.outer) + '</span><span class="sb-dest-in">＞ ' + esc(destPP.inner) + '</span> <span class="sb-dest-x">' + mmTag + '</span></button>'
     : dest
     ? '<button type="button" class="sb-dest' + mmCls + '" id="sb-dest" title="' + mmTip + '「保存」を押すと、「' + esc(dest)
-      + '」の中の 管理番号.json を上書きします。押すと保存先を選び直せます">📁\u00a0<span class="sb-dest-n">'
+      + '」の中の 管理番号.json に書きます（同じ名前のファイルがあれば、読み合わせてから書き直します。PCの写真は残ります）。押すと保存先を選び直せます">📁\u00a0<span class="sb-dest-n">'
       + esc(dest) + '</span> <span class="sb-dest-x">' + mmTag + '</span></button>'
     : hintPP.outer
     ? '<button type="button" class="sb-dest' + mmCls + '" id="sb-dest" title="' + mmTip + '入れる場所：「' + esc(hintPP.outer)
@@ -6470,15 +6526,22 @@ async function persistModel(m, added, tag){
        ファイルへ保存した印）や、受付台帳から入った名前を、m で書くと元に戻していた。版も戻るので、ファイルに入っていない写真が
        「保存済み」に見え、まとめて保存から漏れていた。 */
     if(Array.isArray(added) && prev && prev.model){
-      const pm = prev.model;
+      /* ★その下書きが画面に開いていれば（同じもの・開き直した写し）、画面の中身ごと書く★（版181）画面がいちばん新しい。
+         読んだ下書きは、切り替えの控え（persistDraft）より古いことがある。それに写真だけ足して書くと、
+         切り替える直前に打った備考・消した写真・まだ控えていない写真を、下書きから戻してしまう。 */
+      const open = (M && Array.isArray(M.chosho_photos)
+                    && (M === m || (M._lastDraftKey === key && draftSameUid(M, prev.model)))) ? M : null;
+      const pm = open || prev.model;
       if(!Array.isArray(pm.chosho_photos)) pm.chosho_photos = [];
-      if(!mergePhotosInto(pm.chosho_photos, added)) return true;     // もう入っている
+      const addedHere = mergePhotosInto(pm.chosho_photos, added);
+      if(!addedHere && !open) return true;     // もう入っている
       pm._touched = true;
       pm._rev = Math.max(pm._rev|0, prev.rev|0, m._rev|0) + 1;       // 版は戻さない（ファイルに入っていない＝まとめて保存の対象）
       m._rev = pm._rev;
       await idbPut(Object.assign({}, prev, { model:pm, savedAt:Date.now(), photos:pm.chosho_photos.length,
         touched:true, sig:stateSig(pm), rev:pm._rev }));
       persistModel._warned=false;
+      if(open && open !== m && addedHere){ try{ await saveDraft(); }catch(_){} try{ refreshPhotos(); }catch(_){} }   // 開き直した画面にも出す（版181）
       /* ★書いているあいだに、その戸別が開き直されていたら、画面の写しにも足す★（版178）
          写しは書く前の下書きを読んだもの。足さないと、写しを控えたときに、いま書いた写真が下書きから消える。 */
       if(M && M !== m && M._lastDraftKey === key && draftSameUid(M, pm) && Array.isArray(M.chosho_photos)
@@ -7406,7 +7469,11 @@ function unsavedTargets(){
   add(M.chosho_mgmt_no);                     // いま開いている戸別（下書きに書く前でも拾う）
   return out.sort();
 }
-async function markDraftSavedFor(key, model, opt){
+/* ★下書きを読んで直して書くのは、写真の取り込みの控え（persistModel）と同じ列で1つずつ★（版181）
+   列の外で読むと、写真の控えが読んで書いたあとに、こちらが古い読みのまま書き戻す。その写真が下書きから消え、「保存済」になる。
+   ★列の中から、列に入るもの（persistDraft・markDraftSavedFor・photoKeepInto）を待たないこと★（自分を待って止まる） */
+function markDraftSavedFor(key, model, opt){ return photoKeepQueue(() => markDraftSavedFor0(key, model, opt)); }
+async function markDraftSavedFor0(key, model, opt){
   try{
     const rec = await idbGet(key);
     /* ★控えを取り直していない道（共有・ダウンロード）では、写しで下書きを書き戻さない★（版176）
@@ -7567,6 +7634,8 @@ async function saveAllDrafts(mode){
       } else {
         /* ★始めに読んだ写しではなく、いまの下書きに入れ直す★（版178）入れ直しているあいだに、ほかの戸別の
            写真の取り込みが終わって下書きに届くことがある。写しに入れて書き戻すと、その写真が下書きから消える。 */
+        /* ★読んで直して書くのは、写真の控えと同じ列で★（版181。列の外だと、そのあいだに届いた写真を古い読みで消す） */
+        if(await photoKeepQueue(async () => {
         const rec = await draftRecNow(byNo[no]);
         if(rec && rec.model && receptionApplyToModel(rec.model, row)){
           // 回数の持ち主は中身（model._rev）。控えだけ進めると、開いたときに巻き戻る
@@ -7577,9 +7646,11 @@ async function saveAllDrafts(mode){
              受付台帳の値はもともとPCのものなので、この端末から書き戻す必要は無い。 */
           rec.rev = rec.model._rev;
           rec.sig = stateSig(rec.model);
-          applied++;
           try{ await idbPut(rec); }catch(e){ console.warn("下書きの更新に失敗", no, e); }
+          return true;
         }
+        return false;
+        })) applied++;
       }
     }
     if(applied){
@@ -7685,7 +7756,8 @@ async function saveAllDrafts(mode){
           ? ("1件ずつ「保存」を押すのと同じように、保存先にある PCのファイルと読み合わせてから書きます。\n"
              + "・PCの写真は消えません（足りなくなるときは書きません）。\n"
              + "・PCで直した数量・機材の位置・諸経費などは、PCのファイルのまま残ります。\n"
-             + "・PCとこの端末の両方で工事日・時刻・打合せ・備考を直した戸別は、書かずに残します（1件ずつ「保存」を押すと、どちらにするか聞きます）。")
+             + "・PCとこの端末の両方で工事日・時刻・打合せ・備考を直した戸別は、書かずに残します（1件ずつ「保存」を押すと、どちらにするか聞きます）。\n"
+             + "・この端末で PCのファイルを読み込んでいない戸別で、PCのファイルの お客様の欄・工事日・備考などが この端末と違うものも、書かずに残します（1件ずつ「保存」を押すと、置き換えてよいか聞きます）。")
           : ("この端末から PCのファイルを直接は書き替えません（共有の画面で Dropbox などへ渡します）。\n"
              + "この端末が知らない写真（PCやほかの端末で入れた写真）は、渡すファイルに入りません。"))
        + "\n\n【保存する戸別】\n");
@@ -7814,7 +7886,7 @@ async function saveAllDrafts(mode){
   let where = "", heldN = 0;
   let devDir = false, devPlace = "";        // 書いた先が、端末の中だけかもしれないフォルダ（版176）
   if(dir){
-    const keptAll = [], conflictNos = [], photoNg = [], buildNos = [], unsureNos = [], unreadNos = [];
+    const keptAll = [], conflictNos = [], photoNg = [], buildNos = [], unsureNos = [], unreadNos = [], noBaseNos = [];
     try{ await caseFileIndex(dir); }catch(_){}     // フォルダの名前一覧は1回だけ読む
     /* 保存先が受付台帳の物件と違う（「このフォルダでよい」と答えていない）。台帳にある戸別は、いつもの名前で書かない（版176） */
     let placeMm = null; try{ placeMm = savePlaceMismatch(); }catch(_){ placeMm = null; }
@@ -7852,6 +7924,26 @@ async function saveAllDrafts(mode){
              まとめて保存では聞けない。PCの材料で書くと、書いたあと控えを取り直すので
              この端末の材料は下書きからも消え、あとで1件ずつ保存しても戻せない。書かずに残す。 */
           if(mergeBuildDrops(f.state, mg0)){ buildNos.push(f.no); offHold.push(f); continue; }
+          /* ★控えが無い（この端末で PCのファイルを読み込んでいない）のに、書くと PCのファイルに入っている お客様の欄・日時・備考が変わる★（版181）
+             1件ずつの保存なら「PCのファイルに中身が入っています…この端末の内容に置き換わります。それでも保存しますか？」と1回聞くところ。
+             まとめて保存は聞けないので、黙って書くと、PCのファイルの値が この端末の値（台帳から入った値も）になっていた（電話 090-PC → 03-LEDGER）。
+             書かずに残す（下書きはそのまま＝写真も入力も減らない。渡した扱いにもしない）。1件ずつの保存で聞く。
+             ・ファイルの欄が空なら、何も消えないので書く（この端末で入れた値が入るだけ）
+             ・ファイルの値が受付台帳の値と同じなら、PCは台帳から直していない＝変えたのはこの端末だけなので書く（台帳の控えで見分ける。融合と同じ考え方）
+             ・状態はファイルの工程の印に合わせて決まるので見ない／材料は融合の決まり（mergeBuildDrops）で書かずに残す */
+          if(!b0){
+            const rcN = mergeRcBase(f.model);
+            const nz = v => toHalfWidthAn(String(v == null ? "" : v)).trim();
+            const lostK = ["chosho_cust_name","chosho_cust_addr","chosho_cust_tel","chosho_date","chosho_time","chosho_meet_at","chosho_note"].filter(k => {
+              if(!(k in cf0.primary) || !nz(cf0.primary[k])) return false;              // ファイルの欄が空＝何も消えない
+              if(nz(f.state[k]) === nz(cf0.primary[k])) return false;                    // 書いても変わらない
+              if(rcN && baseHas(rcN, k) && nz(rcN.state[k]) === nz(cf0.primary[k])) return false;   // ファイル＝台帳＝この端末だけが直した
+              return true;
+            });
+            if(lostK.length){
+              noBaseNos.push(f.no + "（" + Array.from(new Set(lostK.map(mergeLabelOf))).join("・") + "）"); offHold.push(f); continue;
+            }
+          }
           /* ★PCとこの端末の両方で直した欄（工事日・時刻・打合せ・備考）がある★ まとめて保存では聞けない。
              PCの値で書くと、書いたあと控えを取り直すので、この端末の値は下書きからも消える（材料と同じ）。書かずに残す。 */
           /* 受付台帳から入った値（この端末では打っていない）は「両方で直した」に数えない。PCの台帳とPCのファイルの
@@ -7864,7 +7956,7 @@ async function saveAllDrafts(mode){
           mg0.conflicts.forEach(c => { if(mg0.kept.indexOf(c.label) < 0) mg0.kept.push(c.label); });
           f.keys = mg0.changed;
           f.text = JSON.stringify(f.state);        // ★融合のあとは必ず作り直す★（PCが消した欄・写真の名前と印も入れる）
-          if(mg0.kept.length) keptAll.push((f.no || f.name) + "（" + mg0.kept.join("・") + "）");
+          if(mg0.kept.length || mg0.both.length) keptAll.push({ no: (f.no || f.name), kept: mg0.kept.slice(), both: mg0.both.slice() });
         }
         /* 写真が1枚でも減るなら書かない */
         {
@@ -7893,12 +7985,19 @@ async function saveAllDrafts(mode){
        書けた戸別も、最後の知らせで「📮 事務所にも届ける」を選べるようにする（9/23 から端末の「その2」にしか入っていなかった） */
     devDir = saveDirMaybeDevice(dir);
     devPlace = saveDirPlace(dir) || (dir && dir.name) || "選んだフォルダ";
-    heldN = unsureNos.length + buildNos.length + conflictNos.length;
+    heldN = unsureNos.length + buildNos.length + conflictNos.length + noBaseNos.length;
+    /* ★本当のことだけを言う★（版181）前は「PCで入れた写真や工事日は、消えていません」とだけ言っていたが、
+       両方で直した欄（お客様の欄・材料・測定値など）は、知らせなしでこの端末の値になっていた。 */
     if(keptAll.length){
-      await uiAlert("ファイルに入っていた中身を残しました（" + keptAll.length + "件）。\n\n"
-        + keptAll.slice(0, 3).join("\n")
+      const anyKept = keptAll.some(x => x.kept.length), anyBoth = keptAll.some(x => x.both.length);
+      await uiAlert("PCのファイルと読み合わせて書いた戸別が " + keptAll.length + " 件あります。\n\n"
+        + keptAll.slice(0, 3).map(x => x.no
+            + (x.kept.length ? ("\n　PCのファイルの内容を残した：" + x.kept.join("・")) : "")
+            + (x.both.length ? ("\n　この端末の内容にした（PCでも直していた）：" + x.both.join("・")) : "")).join("\n")
         + (keptAll.length > 3 ? ("\nほか " + (keptAll.length - 3) + "件") : "")
-        + "\n\nPCで入れた写真や工事日は、消えていません。");
+        + "\n\n写真は、PCのファイルとこの端末の両方を残しました。"
+        + (anyKept ? "\nPCのファイルにだけ入っていたもの・PCだけが直した欄は、PCのファイルの内容のままです。" : "")
+        + (anyBoth ? "\nPCとこの端末の両方で直していた欄は、この端末の内容にしました（PCで直した内容は入っていません）。" : ""));
     }
     if(conflictNos.length){
       await uiAlert("PCと この端末の両方で直していた戸別が " + conflictNos.length + " 件あります。\n\n"
@@ -7913,6 +8012,14 @@ async function saveAllDrafts(mode){
         + (unsureNos.length > 5 ? ("\nほか " + (unsureNos.length - 5) + "件") : "")
         + "\n\nまとめて保存では、この戸別は書いていません（この端末の入力と写真は、そのまま残っています）。\n"
         + "その戸別を1件ずつ開き、中身を確かめてから「保存」を押してください。");
+    }
+    if(noBaseNos.length){
+      await uiAlert("この端末で PCのファイルを読み込んでいない戸別のうち、PCのファイルの お客様の欄・工事日・備考などが この端末と違う戸別が " + noBaseNos.length + " 件あります。\n\n"
+        + noBaseNos.slice(0, 3).join("\n")
+        + (noBaseNos.length > 3 ? ("\nほか " + (noBaseNos.length - 3) + "件") : "")
+        + "\n\nまとめて保存では、この戸別は書いていません（この端末の入力と写真は、そのまま残っています）。\n"
+        + "その戸別を1件ずつ開いて「保存」を押すと、PCのファイルの中身をこの端末の内容に置き換えてよいか聞かれます。\n"
+        + "先に「履歴」の「📂 1つだけ選んで開く」で読み込むと、PCの中身を残したまま続きを入力できます。");
     }
     if(unreadNos.length){
       await uiAlert("⚠ ファイルはあるのに、いま読めない戸別が " + unreadNos.length + " 件あります（ほかのアプリが使っている最中か、ファイルが壊れているのかもしれません）。\n\n"
@@ -8022,7 +8129,7 @@ async function saveAllDrafts(mode){
         + "PCのファイルを読んでいないので、別の名前で渡しました。\n"
         + (shared ? ("Dropbox の「" + sideListPlace() + "」に入れたなら、それで終わりです。別の場所に入れても、事務所で振り分けます。")
                   : ("あとで Dropbox のアプリで「" + sideListPlace() + "」に入れてください。"))
-        + "\n\n" + sidePcNote(sideDone) + restNote);
+        + "\n\n" + sidePcNote(sideDone) + restNote + (shared ? "" : sideDlManyNote(sideDone)));
     }
     if(okNos.length){
       await uiAlert((shared ? "共有で渡しました： " : "ダウンロードに入れました： ") + okNos.length + " 件\n\n"
@@ -8184,7 +8291,10 @@ function flowApplyShared(m, rec){
     if(st.key === "work") m.chosho_status = "completed";
     changed = true;
   });
-  if(changed){ m._touched = true; m._rev = (m._rev | 0) + 1; }
+  /* ★引き継いだ印だけでは「この端末で入力した」（_touched）にしない★（版181）
+     立てると、開いただけの戸別が まとめて保存・全部保存し直す で書かれ・渡され、中身の入っているほかの端末のファイルを
+     空に近い内容で置き換える元になる（isUntouchedHere の「引き継いだ印だけの戸別は外す」が効かなかった）。回数だけ進める。 */
+  if(changed){ m._rev = (m._rev | 0) + 1; }
   return changed;
 }
 /* 管理番号 → 受付台帳の行（無ければ null） */
@@ -8449,7 +8559,14 @@ async function pcGuardDirLoad(opt){
     if(!window.showDirectoryPicker) return null;
     try{ dir = await window.showDirectoryPicker({ id:"genba-save", mode:"readwrite" }); }
     catch(e){
-      if(e && e.name === "AbortError") return null;      // 選ぶのをやめた
+      /* ★閉じたときも黙らない★（版181）保存の窓から来たとき・タブレットやスマホ（フォルダを選ぶ画面に Dropbox が出ない）は、
+         📮（預ける）と 📂（ファイルを選ぶ）を出す。PCで帯の 📁 を自分で閉じたときだけ、今までどおり何も出さない。 */
+      if(e && e.name === "AbortError"){
+        if(!fromSave && !isAndroidLike()) return null;     // 選ぶのをやめた
+        return fin(await pcGuardLoadMissAsk("フォルダを選びませんでした",
+          "フォルダを選ぶ画面を閉じました（何も読み込んでいません）。"
+          + (isAndroidLike() ? "\n\nタブレット・スマホの「フォルダを選ぶ画面」には Dropbox が出ません。" : "")));
+      }
       console.warn("フォルダを選ぶ窓を開けませんでした", e);
       return fin(await pcGuardLoadMissAsk("フォルダを選ぶ画面を開けませんでした",
         "フォルダを選ぶ画面を開けませんでした。\n\nもう一度お試しください。"));
@@ -9315,7 +9432,8 @@ function measHasValue(ms){
    戻り = { stop, reason, photosAdded, kept[], mine[], changed[], conflicts[], removed[], altFiles[] } */
 function mergeIntoState(state, old, opt){
   const out = { stop:false, reason:"", photosAdded:0, kept:[], mine:[], changed:[], conflicts:[], removed:[], altFiles:[],
-                buildAsk:false, buildSwap:{} };
+                buildAsk:false, buildSwap:{},
+                both:[] };      // PCとこの端末の両方で直して、この端末の内容にした欄（知らせるため・版181）
   if(!state || !old || typeof old !== "object") return out;
   if(!opt || !opt.model) console.warn("[融合] model を渡していません（控えなしで進めます）");
   const model = (opt && opt.model) || M;
@@ -9424,6 +9542,8 @@ function mergeIntoState(state, old, opt){
   const tvMine = useB
     ? TV_GROUP.some(k => baseHas(base, k) ? !baseSame(base, k, state[k]) : true)
     : buildMine;                                         // 控えなし＝材料ひとかたまりに合わせる
+  if(tvMine && useB && TV_GROUP.some(k => (k in old) && baseHas(base, k) && !baseSame(base, k, old[k])
+                                    && JSON.stringify(state[k]) !== JSON.stringify(old[k]))) out.both.push("TVの台数・部屋");   // 両方で直した（版181）
   if(!tvMine && TV_GROUP.some(k => (k in old))){
     /* 値が同じ欄は取るものが無い（入れ替えも知らせもしない）。1つでも違えば、違う欄をファイルの値にし、
        知らせる（「ファイルに入っていた中身を残しました（TVの台数・部屋）」）。
@@ -9444,6 +9564,7 @@ function mergeIntoState(state, old, opt){
     const tSame = baseSame(base, "measurements", old.measurements);
     if(mSame && !tSame && old.measurements){ state.measurements = old.measurements; out.changed.push("measurements"); out.kept.push("測定値"); }
     else if(!mSame && tSame){ out.mine.push("測定値"); }
+    else if(!mSame && !tSame && JSON.stringify(state.measurements) !== JSON.stringify(old.measurements)){ out.both.push("測定値"); }   // 両方で直した＝この端末（版181）
   } else if(!measHasValue(state.measurements) && measHasValue(old.measurements)){
     state.measurements = old.measurements; out.changed.push("measurements"); out.kept.push("測定値");
   }
@@ -9495,6 +9616,27 @@ function mergeIntoState(state, old, opt){
     if(!th) return;
     const merged = Object.assign({}, mine0);
     let took = false;
+    /* ★控え（読んだときの中身）があれば、中のキーごとに3つ見比べる★（版181）
+       前は「この端末が持っているキーは、この端末のまま」だったので、PCがあとで直した・消した配線の指定が、
+       この端末は触っていないのに、この端末が前に読んだ値へ戻っていた。
+       ・この端末が控えのまま／PCが直した・消した → PC　・この端末が直した・消した → この端末　・両方で直した → この端末（知らせる） */
+    const bMap = (useB && baseHas(base, k) && base.state && (k in base.state) && base.state[k] && typeof base.state[k] === "object") ? base.state[k] : null;
+    if(bMap){
+      const js = v => JSON.stringify(v === undefined ? null : v);
+      const own = (o, s) => Object.prototype.hasOwnProperty.call(o, s);
+      let both = false;
+      new Set(Object.keys(mine0).concat(Object.keys(th), Object.keys(bMap))).forEach(sub => {
+        const hm = own(mine0, sub), ht = own(th, sub), hb = own(bMap, sub);
+        if(hm === ht && js(mine0[sub]) === js(th[sub])) return;                 // 同じ
+        const mSame = (hm === hb) && js(mine0[sub]) === js(bMap[sub]);
+        const tSame = (ht === hb) && js(th[sub]) === js(bMap[sub]);
+        if(mSame && !tSame){ if(ht) merged[sub] = th[sub]; else delete merged[sub]; took = true; }   // PCが直した・消した
+        else if(!mSame && !tSame) both = true;                                    // 両方で直した＝この端末
+      });
+      if(took){ state[k] = merged; out.changed.push(k); out.kept.push(label(k)); }
+      if(both) out.both.push(label(k));
+      return;
+    }
     Object.keys(th).forEach(sub => {
       if(sub in mine0) return;                            // 両方にある／現場が持っている
       if(useB && baseHas(base, k)){
@@ -9509,7 +9651,31 @@ function mergeIntoState(state, old, opt){
     const mineA = Array.isArray(state.text_annotations) ? state.text_annotations : [];
     const thA = Array.isArray(old.text_annotations) ? old.text_annotations : [];
     const noId = mineA.some(a => !a || !a.id) || thA.some(a => !a || !a.id);
-    if(thA.length && !noId){
+    /* ★控え（読んだときの注記）があれば、注記ごとに3つ見比べる★（版181）前は「この端末に無い注記を足す」だけだったので、
+       PCがあとで直した・消した注記が、この端末が前に読んだ注記に戻っていた（この端末は触っていないのに）。
+       ・この端末が控えのまま／PCが直した・消した → PC　・この端末が直した・消した → この端末　・両方で直した → この端末（知らせる） */
+    const bA = (useB && baseHas(base, "text_annotations") && base.state && Array.isArray(base.state.text_annotations)
+                && !base.state.text_annotations.some(a => !a || !a.id)) ? base.state.text_annotations : null;
+    if(bA && !noId){
+      const sig = a => a ? JSON.stringify({ x:+a.x || 0, y:+a.y || 0, text:String(a.text || ""), color:a.color || "#d32f2f", size:a.size || 18 }) : "";
+      const by = arr => { const mp = new Map(); arr.forEach(a => mp.set(String(a.id), a)); return mp; };
+      const mBy = by(mineA), tBy = by(thA), bBy = by(bA);
+      const res = mineA.slice();           // 並びはこの端末のまま（PCが足した注記は前に）
+      let took = false, both = false;
+      new Set(Array.from(mBy.keys()).concat(Array.from(tBy.keys()), Array.from(bBy.keys()))).forEach(id => {
+        const m0 = mBy.get(id), t0 = tBy.get(id), b0 = bBy.get(id);
+        if(sig(m0) === sig(t0)) return;
+        const mSame = sig(m0) === sig(b0), tSame = sig(t0) === sig(b0);
+        if(mSame && !tSame){
+          const i = res.findIndex(a => String(a.id) === id);
+          if(t0){ if(i >= 0) res[i] = Object.assign({}, t0); else res.unshift(Object.assign({}, t0)); }
+          else if(i >= 0) res.splice(i, 1);
+          took = true;
+        } else if(!mSame && !tSame) both = true;
+      });
+      if(took){ state.text_annotations = res; out.changed.push("text_annotations"); out.kept.push("図面の注記"); }
+      if(both) out.both.push("図面の注記");
+    } else if(thA.length && !noId){
       const have = new Set(mineA.map(a => String(a.id)));
       const bIds = (useB && baseHas(base, "text_annotations") && Array.isArray(base.state.text_annotations))
         ? new Set(base.state.text_annotations.map(a => String(a && a.id))) : null;
@@ -9590,6 +9756,7 @@ function mergeIntoState(state, old, opt){
         return;
       }
       out.mine.push(label(k));                                      // ほかは現場
+      out.both.push(label(k));                                      // 両方で直した＝この端末の内容にした（知らせる・版181）
       return;
     }
     /* (e) 控えが無い。ふたつ目の手がかりで「現場が直したか」を見る。
@@ -9629,6 +9796,7 @@ function mergeIntoState(state, old, opt){
   }
   out.kept = Array.from(new Set(out.kept));
   out.mine = Array.from(new Set(out.mine));
+  out.both = Array.from(new Set(out.both));
   out.changed = Array.from(new Set(out.changed));
   out.removed = Array.from(new Set(out.removed));
   return out;
@@ -9897,11 +10065,13 @@ async function flowShareItemsApply(items, byNo, openNo){
   for(const it of items){
     _flowShare.rows[it.no] = flowShareMergeRec(_flowShare.rows[it.no], it.rec);
     const isOpen = (it.no === openNo);
+    /* ★開いていない戸別は、読んで直して書くのを写真の控えと同じ列で★（版181。列の外だと、そのあいだに届いた写真を古い読みで消す） */
+    const apply = async () => {
     /* ★開いていない戸別は、確かめの窓より前に読んだ写しではなく、いまの下書きに入れる★（版178）
        窓が出ているあいだに写真の取り込みが終わって下書きに届くことがある。写しに入れて書き戻すと、その写真が消える。 */
     const rec = isOpen ? byNo[it.no] : await draftRecNow(byNo[it.no]);
     const model = isOpen ? M : ((rec && rec.model) || null);
-    if(!model) continue;
+    if(!model) return;
     const changed = flowApplyShared(model, it.rec);
     // このファイルはこの端末が保存したものか。保存していない／保存より後に書かれていれば
     // 他の端末のもの＝この端末から保存し直すと、その中身（写真など）が置き換わる。
@@ -9911,17 +10081,21 @@ async function flowShareItemsApply(items, byNo, openNo){
     let markChanged = false;
     if(notMine && !it.root && model._otherFile !== it.rec.from){ model._otherFile = it.rec.from; markChanged = true; marked++; }
     if(changed) drafts++;
-    if(isOpen) continue;                       // 開いている戸別は最後に persistDraft でまとめて控える
-    if(!changed && !markChanged) continue;
+    if(isOpen) return;                         // 開いている戸別は最後に persistDraft でまとめて控える
+    if(!changed && !markChanged) return;
     if(changed){
       /* flowApplyShared が中身の回数（model._rev）を進めている。
-         控えはそれに合わせる（別々に進めると、開いたときにズレる）。 */
-      rec.rev = rec.model._rev | 0; rec.touched = true;
+         控えはそれに合わせる（別々に進めると、開いたときにズレる）。
+         ★引き継いだ印だけでは「この端末で入力した」にしない★（版181）前は touched を立てていたので、開いただけの戸別が
+         まとめて保存・全部保存し直すで書かれ・渡されていた（中身の入っているほかの端末のファイルを、空に近い内容で置き換える）。 */
+      rec.rev = rec.model._rev | 0; rec.touched = (rec.model._touched !== false);
       rec.sig = stateSig(rec.model);
       rec.flow = flowOf(rec.model); rec.surveyDone = !!rec.model.survey_done;
     }
     rec.other = rec.model._otherFile || "";
     try{ await idbPut(rec); }catch(e){ console.warn("下書きへの反映に失敗", it.no, e); }
+    };
+    if(isOpen) await apply(); else await photoKeepQueue(apply);
   }
   return { drafts, marked };
 }
@@ -9945,12 +10119,68 @@ async function flowShareConfirmOverwrite(m){
   const sh = flowShareOf(m && m.chosho_mgmt_no);
   const ph = (sh && sh.photos) ? ("そのファイルの写真 " + sh.photos + "枚など、") : "";
   const fname = currentFileName();
+  /* ★どの道で書くかで、言うことを変える★（版181）「保存先にそのファイルがあれば読み合わせるので、写真は消えません」が本当なのは、
+     覚えているフォルダへ書く道だけ。フォルダを覚えていない PC は保存先を選ぶ画面の道になり、そこで選んだ既にあるファイルは
+     ブラウザが中身を空にしてから渡す（Chrome の決まり）＝読み合わせられず、ほかの端末の写真が消える。
+     その道では書かずに、保存先のフォルダを選んでもらう（読み合わせてから書く）か、📮 にする。 */
+  const route = saveRoute();
+  let dir0 = null;
+  if(route !== "share"){ try{ dir0 = await saveDirGet(); }catch(_){ dir0 = null; } }
+  if(!dir0 && route !== "share" && window.showSaveFilePicker){
+    const items = [];
+    if(window.showDirectoryPicker) items.push({ label: "📁 保存先のフォルダを選んで書く（読み合わせます）", value: "dir",
+      sub: "そのファイルを読み合わせてから書きます（写真は両方残ります）。次からはそのフォルダへ書きます" });
+    items.push({ label: "📮 事務所に預ける（何も書き替えません）", value: "side", kind: "side", sub: "別の名前で渡します。事務所で1つにまとめます" });
+    const v0 = await uiPickName("この戸別は、ほかの端末も保存しています",
+      "ほかの端末が保存したファイル「<b>" + esc(f) + "</b>」から、工程の印を引き継いでいます。<br><br>"
+      + "この端末は保存先のフォルダを覚えていないので、このまま保存すると「保存先を選ぶ画面」が出ます。<br>"
+      + "その画面で そのファイルを選ぶと、ブラウザが中身を空にしてから渡すので読み合わせられず、"
+      + esc(ph) + "この端末に無いものが消えます。<br>"
+      + "保存先のフォルダを選ぶと、そのファイルを読み合わせてから書きます。", items);
+    if(v0 === "side"){
+      const info = await sideSaveFlow("merge", [m]);
+      if(!info) return false;
+      _lastSaveInfo = info;
+      return { side: true };
+    }
+    if(v0 !== "dir") return false;                       // ✕＝やめる
+    let d = null;
+    try{ d = await window.showDirectoryPicker({ id:"genba-save", mode:"readwrite" }); }   // ★押した直後に開く★
+    catch(e){
+      _lastSaveInfo = (e && e.name === "AbortError") ? saveCancelInfo(fname)
+        : { title: "⚠ 保存先のフォルダを選べなかったので、保存していません", warn: true, escape: "merge",
+            msg: fname + "\n\nフォルダを選ぶ画面を開けませんでした。\n（この端末の入力と写真は、そのまま残っています）" };
+      return { side: true };
+    }
+    if(!d) return false;
+    if(!(await saveDirOk(d, true))){
+      _lastSaveInfo = { title: "⚠ フォルダへ書き込む許可が取れないので、保存していません", warn: true, escape: "perm",
+        msg: fname + "\n\nそのフォルダへ書き込む許可が取れませんでした。\n（この端末の入力と写真は、そのまま残っています）" };
+      return { side: true };
+    }
+    const keep = await saveDirKeep();
+    await saveDirAdopt(d, { ask:false });                // 物件のフォルダなら中の「リスト」へ
+    try{ renderSaveBar(); }catch(_){}
+    if(!(await savePlaceConfirmAfterPick("stop"))){
+      await saveDirRestore(keep);
+      _lastSaveInfo = { title: "保存していません", warn: true, escape: "place",
+        msg: fname + "\n\n選んだフォルダは受付台帳の物件と名前が違うので、書いていません（保存先は前のままです）。\n（この端末の入力と写真は、そのまま残っています）" };
+      return { side: true };
+    }
+    return true;                                         // 覚えたフォルダへ、読み合わせてから書く
+  }
+  const byDir = !!dir0 && route !== "share";
   const v = await uiPickName("この戸別は、ほかの端末も保存しています",
     "ほかの端末が保存したファイル「<b>" + esc(f) + "</b>」から、工程の印を引き継いでいます。<br><br>"
-    + "このまま保存すると、保存先のファイル（" + esc(fname) + "）は、この端末の内容になります。<br>"
-    + "保存先にそのファイルがあれば読み合わせるので、写真は消えません。<br>"
-    + "共有やダウンロードで渡したものを そのファイルの上に置くと、" + esc(ph) + "この端末に無いものは消えます。", [
-      { label: "保存先のファイルに書く（置き換える）", value: "over", sub: "保存先にファイルがあれば読み合わせます（写真は両方残ります）" },
+    + (byDir
+       ? ("このまま保存すると、保存先のファイル（" + esc(fname) + "）は、この端末の内容になります。<br>"
+          + "保存先にそのファイルがあれば読み合わせるので、写真は消えません。<br>"
+          + "共有やダウンロードで渡したものを そのファイルの上に置くと、" + esc(ph) + "この端末に無いものは消えます。")
+       : ("このまま保存すると、共有（またはダウンロード）で渡します。この道では そのファイルを読めないので、"
+          + esc(ph) + "この端末に無いものは渡すファイルに入りません。<br>"
+          + "渡したものを そのファイルの上に置くと、それが消えます。")), [
+      byDir ? { label: "保存先のファイルに書く（置き換える）", value: "over", sub: "保存先にファイルがあれば読み合わせます（写真は両方残ります）" }
+            : { label: "このまま渡す（共有・ダウンロード）", value: "over", sub: "ほかの端末のファイルの上には置かないでください" },
       { label: "📮 事務所に預ける（何も書き替えません）", value: "side", kind: "side", sub: "別の名前で渡します。事務所で1つにまとめます" }
     ]);
   if(v === "over") return true;
@@ -10112,7 +10342,10 @@ async function openDraftModal(){
       // 💾=JSON書出済で以後未編集 ／ ✏️=書出後に変更あり(再書出推奨) ／ 無印=未書出
       /* 📮＝事務所に預けた（PCのファイルは書き替えていない。事務所でまとめる前）（版176） */
       const sided = !!(d.model && d.model._sideAt && d.fileSavedAt && d.model._sideAt === d.fileSavedAt);
-      const badge = (d.fileSavedAt && d.fileSavedAt >= (d.savedAt||0)) ? (sided ? "📮 " : "💾 ") : (d.fileSavedAt ? "✏️ " : "");
+      /* ★✏️ は直した回数で決める★（版181）時刻で決めると、保存のあと何も直さずに別の戸別を開くだけで（下書きを控え直す）✏️ になった。
+         受付台帳の一覧・保存バーと同じく、保存したときの回数（fileRev）より今の回数（rev）が進んでいるときだけ。 */
+      const editedAfter = !!(d.fileSavedAt && (d.rev | 0) > (d.fileRev | 0));
+      const badge = d.fileSavedAt ? (editedAfter ? "✏️ " : (sided ? "📮 " : "💾 ")) : "";
       // どこまで進んだか（下・ビ・工・完）。控えの無い古い下書きは中身から作る。
       const f = (d.flow && typeof d.flow === "object") ? d.flow : flowOf(d.model||{});
       const top = flowTopPhase(f);
@@ -10488,7 +10721,11 @@ function handoverOf(info){
 function isUntouchedHere(info){
   if(!info || !info.has) return false;
   if(info.touched || info.photos || info.fileAt) return false;
-  return !flowAny(info.flow) || !!info.other;
+  /* ★受付台帳の印（下見済など）が付いているだけの戸別も「まだ何もしていない」に入れる★（版181）
+     まとめて保存は、この端末で何も入力していない戸別を必ず書かない（isNothingNewHere）。印があるだけで数えると、
+     「まだ保存していない N件」の N が押しても減らず、「書き替える戸別はありません」と出ていた（保存バーの右は空なのに、一覧は「まだ保存していません」）。
+     この端末で付けた印（🚩 工程）は「入力した」（touched）になるので、ここには来ない。 */
+  return true;
 }
 /* ---- 一覧を「いまの工程」で絞る ----
    下見の日／ビラ配りの日／工事の日…と、その日にやる戸別だけを出せるようにする。
@@ -11019,8 +11256,10 @@ async function receptionApplyToDrafts(){
     if(!no || no === openNo || !byNo[no]) continue;
     /* ★始めに読んだ写しではなく、いまの下書きに入れる★（版178）入れているあいだに、ほかの戸別の写真の取り込みが
        終わって下書きに届くことがある。写しに入れて書き戻すと、その写真が下書きから消える。 */
+    /* ★読んで直して書くのは、写真の控えと同じ列で★（版181。列の外だと、そのあいだに届いた写真を古い読みで消す） */
+    if(await photoKeepQueue(async () => {
     const rec = await draftRecNow(rec0);
-    if(!rec || !rec.model || !receptionApplyToModel(rec.model, byNo[no])) continue;
+    if(!rec || !rec.model || !receptionApplyToModel(rec.model, byNo[no])) return false;
     /* ★「直した回数」は中身（model._rev）が持ち主★
        控えの rec.rev だけを進めると、その戸別を開いたときに
        model._rev（進めていない古い回数）で控えが書き直され、
@@ -11035,7 +11274,8 @@ async function receptionApplyToDrafts(){
     rec.touched = (rec.touched !== false);
     rec.sig = stateSig(rec.model);        // 指紋も今の中身に合わせる（古いままだと二重に数える）
     rec.flow = flowOf(rec.model);         // 工程の控えも合わせる（一覧・地図の印がすぐ合う）
-    try{ await idbPut(rec); applied++; }catch(e){ console.warn("下書きへの反映に失敗", no, e); }
+    try{ await idbPut(rec); return true; }catch(e){ console.warn("下書きへの反映に失敗", no, e); return false; }
+    })) applied++;
   }
   if(applied){
     clearTimeout(_persistTimer);
