@@ -1036,7 +1036,7 @@
 <div class="modal" id="draft-modal">
   <div class="sheet">
     <h3>📋 履歴・読込</h3>
-    <div class="info">入力した内容は、この端末に自動で控えます（<b>💾</b>＝保存済 ／ <b>📮</b>＝事務所に預けた ／ <b>✏️</b>＝保存後に変更あり ／ 無印＝未保存）。<br>
+    <div class="info">入力した内容は、この端末に下書きとして自動で残ります（<b>💾</b>＝保存済 ／ <b>📮</b>＝事務所に預けた ／ <b>✏️</b>＝保存後に変更あり ／ 無印＝未保存）。<br>
     下のボタンで、PCや他の端末の <b class="fname">管理番号.json</b> を読めます。<b>📂</b>＝その戸別の続きを編集／<b>📥</b>＝工程の印だけを引き継ぐ（写真や測定値は取り込みません）。<br>
     開き方は2つあります。<b>📚 まとめて読み込む</b>＝ファイルを選ぶ画面で <b>すべて選択（または今日回るぶん）</b>を選ぶと、ここで <b>管理番号・氏名・住所で探して</b>開けます。何百個を目で探さなくて済み、アプリを閉じるまでは、ほかの戸別も同じ一覧から探せます。<b>📂 1つだけ選ぶ</b>＝ファイルの場所が分かっているときに。</div>
     <button id="btn-import" style="width:100%; padding:15px; border:0; border-radius:11px; background:#455a64; color:#fff; font-weight:700; font-size:15px; margin-bottom:8px;">📚 ファイルをまとめて読み込んで、管理番号で探す</button>
@@ -1273,7 +1273,7 @@ const GENBA_SCHEMA_VER = 1;
 const APP_NAME_SHORT = "現場入力";
 /* 版は「増えていくだけの通し番号」。メイン（積算・図面）と同じ番号体系で、
    番号が小さいほうが古い。 */
-const APP_VERSION = "180";
+const APP_VERSION = "181";
 function photoContentId(dataUri){
   if(!dataUri || typeof dataUri !== "string") return "";
   let a = 5381, b = 0;
